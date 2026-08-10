@@ -57,5 +57,11 @@ func Sample() *Config {
 			"author":       {"usr_author"},
 			"controlplane": {"memory-bot"},
 		},
+		Agents: map[string]string{
+			"design":    "",
+			"dev":       "pipeline-agent-dev.yml",
+			"reconcile": "",
+			"boundary":  "",
+		},
 	}
 }

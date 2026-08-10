@@ -67,7 +67,18 @@ func (p *Plane) Execute(ctx context.Context, acts []core.Action, log io.Writer) 
 				return fmt.Errorf("execute: %s: %w", a, err)
 			}
 		case core.ActDispatch:
-			fmt.Fprintf(log, "    (dispatch skipped: agent workflows arrive in M3)\n")
+			workflow := p.Config.Agents[string(a.Agent)]
+			if p.Host == nil || workflow == "" {
+				fmt.Fprintf(log, "    (dispatch skipped: %s agent not wired — no host or no workflow in config.agents)\n", a.Agent)
+				continue
+			}
+			key, ok := p.keyByID[a.TicketID]
+			if !ok {
+				return fmt.Errorf("execute: %s: no key for ticket id %s — Execute must follow Build", a, a.TicketID)
+			}
+			if err := p.Host.DispatchWorkflow(ctx, workflow, map[string]string{"ticket": key}); err != nil {
+				return fmt.Errorf("execute: %s: %w", a, err)
+			}
 		case core.ActCreateBoundary:
 			if err := p.createBoundary(ctx, a); err != nil {
 				return fmt.Errorf("execute: %s: %w", a, err)

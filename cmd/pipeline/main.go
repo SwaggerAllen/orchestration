@@ -13,6 +13,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
 	"github.com/SwaggerAllen/orchestration/internal/sim"
@@ -38,6 +39,8 @@ func run(args []string) error {
 		return cmdSetup(args[1:])
 	case "sweep":
 		return cmdSweep(args[1:])
+	case "agent":
+		return cmdAgent(args[1:])
 	case "ids":
 		return cmdIDs(args[1:])
 	case "sim":
@@ -62,6 +65,8 @@ commands:
   sweep    one control-plane pass: build snapshot, plan, apply
            (requires LINEAR_API_KEY; --dry-run plans without applying;
            PIPELINE_KILL_SWITCH=true halts all planning)
+  agent    run-harness protocol steps: claim, finish, abort
+           (used by the agent workflows, not by hand)
   ids      print the Linear ids a config needs: viewer, teams, projects
            (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)
@@ -128,6 +133,15 @@ func cmdSweep(args []string) error {
 	killOn := kill == "1" || kill == "true"
 
 	p := plane.New(linear.New(apiKey), cfg)
+	// With GitHub credentials present (always true inside Actions), the
+	// snapshot gains run and CI facts and dispatches become real.
+	if repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN"); repo != "" && token != "" {
+		h, err := github.New(repo, token)
+		if err != nil {
+			return err
+		}
+		p.WithHost(h)
+	}
 	ctx := context.Background()
 	snap, err := p.Build(ctx, time.Now(), killOn)
 	if err != nil {

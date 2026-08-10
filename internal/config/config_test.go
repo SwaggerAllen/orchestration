@@ -97,6 +97,7 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 		{"actors", func(m map[string]any) { delete(m, "actors") }, "actors: missing"},
 		{"actors.author", func(m map[string]any) { delete(m["actors"].(map[string]any), "author") }, "actors.author: missing"},
 		{"actors.controlplane", func(m map[string]any) { delete(m["actors"].(map[string]any), "controlplane") }, "actors.controlplane: missing"},
+		{"agents", func(m map[string]any) { delete(m, "agents") }, "agents: missing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

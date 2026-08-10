@@ -56,9 +56,20 @@ type Config struct {
 	// becomes role — the core never sees a user id. author and
 	// controlplane are required; agent roles fill in as their identities
 	// exist (M3+). An id may hold only one role, or the matrix is
-	// ambiguous.
+	// ambiguous. While agents share the control plane's API key their
+	// writes resolve to controlplane, which the sweep trusts — the matrix
+	// gains teeth per-agent when each agent gets its own identity.
 	Actors map[string][]string `json:"actors"`
+
+	// Agents maps agent kinds to the project repo's stub workflow
+	// filenames the control plane dispatches (DESIGN §13). An empty value
+	// means the agent isn't wired yet: its dispatches are logged and
+	// skipped, which is safe because the sweep re-plans them every pass.
+	Agents map[string]string `json:"agents"`
 }
+
+// AgentKinds are the legal keys of Agents.
+var AgentKinds = []string{"design", "dev", "reconcile", "boundary"}
 
 // ActorRoles are the legal keys of Actors.
 var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile", "boundary"}
@@ -219,6 +230,20 @@ func (c *Config) Validate() error {
 					add("actors.%s: id %q already assigned to %s — one role per id, or the writer matrix is ambiguous", role, id, prev)
 				}
 				seen[id] = role
+			}
+		}
+	}
+
+	if c.Agents == nil {
+		add("agents: missing — map agent kinds to stub workflow filenames (empty string = not wired yet)")
+	} else {
+		legal := map[string]bool{}
+		for _, k := range AgentKinds {
+			legal[k] = true
+		}
+		for kind := range c.Agents {
+			if !legal[kind] {
+				add("agents.%s: not an agent kind", kind)
 			}
 		}
 	}

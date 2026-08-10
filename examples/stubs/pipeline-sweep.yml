@@ -1,0 +1,55 @@
+# Project stub: control-plane sweep. Copy into the project repo's
+# .github/workflows/.
+#
+# Two triggers, per DESIGN §13:
+#   - workflow_dispatch: the metronome (Cloudflare Worker cron, M7) and
+#     humans. GitHub's own `schedule:` is deliberately not used — its
+#     5-15 minute jitter compounds across every hop of a ticket's life.
+#   - workflow_run: the CI hops. When the project's CI completes, a sweep
+#     runs immediately, so Checks -> Reconciling and CI-red -> rework
+#     never wait for the poll.
+name: pipeline-sweep
+run-name: "pipeline: sweep"
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: write # dispatching agent workflows
+
+# One dispatcher at a time: the single-dev-agent invariant is only as
+# strong as single-dispatcher (DESIGN §13).
+concurrency:
+  group: pipeline-control-plane
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+      PIPELINE_KILL_SWITCH: ${{ vars.PIPELINE_KILL_SWITCH }}
+    steps:
+      - name: checkout project (for pipeline.config.json)
+        uses: actions/checkout@v4
+
+      - name: checkout pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: SwaggerAllen/orchestration
+          ref: main # pin to @v1 once released
+          path: .pipeline
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .pipeline/go.mod
+
+      - name: sweep
+        run: |
+          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline sweep \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json"

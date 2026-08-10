@@ -1,0 +1,26 @@
+# Project stub: dev agent. Copy into the project repo's
+# .github/workflows/ unchanged except the pin.
+#
+# run-name is load-bearing: "pipeline: dev <ticket>" is how the control
+# plane correlates this run to its ticket (stale claims, busy checks).
+name: pipeline-agent-dev
+run-name: "pipeline: dev ${{ inputs.ticket }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Ticket key, e.g. PIPE-12
+        required: true
+        type: string
+
+jobs:
+  dev:
+    # Pin to a pipeline release tag (@v1) once one exists; main while the
+    # pipeline itself is under construction (DESIGN §5: staged rollout).
+    uses: SwaggerAllen/orchestration/.github/workflows/agent-dev.yml@main
+    with:
+      ticket: ${{ inputs.ticket }}
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

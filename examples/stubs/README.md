@@ -1,0 +1,21 @@
+# Project repo stubs
+
+Each project carries these ten-line stubs (DESIGN §5): `on:` can't be
+inherited from a reusable workflow, and the stubs are where per-project
+bindings live.
+
+| File | Purpose |
+|---|---|
+| `pipeline-sweep.yml` | Control-plane pass: metronome dispatch + CI-hop trigger |
+| `pipeline-agent-dev.yml` | Dev agent run, dispatched by the sweep |
+
+A project also needs:
+
+- `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
+- Actions secrets: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`
+- A `ci` workflow (name matters — the sweep stub triggers on its
+  completion) running the quality gates from the config
+- The Actions repo setting "Allow GitHub Actions to create and approve
+  pull requests" enabled, so the harness can open PRs
+- Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch
+  (DESIGN §13)

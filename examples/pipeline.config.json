@@ -43,5 +43,11 @@
   "actors": {
     "author": ["usr_author"],
     "controlplane": ["memory-bot"]
+  },
+  "agents": {
+    "design": "",
+    "dev": "pipeline-agent-dev.yml",
+    "reconcile": "",
+    "boundary": ""
   }
 }

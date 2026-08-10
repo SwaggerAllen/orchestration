@@ -12,22 +12,34 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
-// Plane binds the ports and config for one project.
+// Plane binds the ports and config for one project. Host may be nil —
+// a Linear-only plane builds snapshots with no run or CI facts, which the
+// core reads as "awaiting dispatch" / "no verdict" and plans no harm.
 type Plane struct {
 	Tracker tracker.Tracker
+	Host    host.Host
 	Config  *config.Config
 
 	// resolved lazily, once per Plane: tracker state id <-> protocol state.
 	stateByID map[string]protocol.State
 	idByState map[protocol.State]string
+	// keyByID is filled by Build; Execute needs keys for dispatch inputs.
+	keyByID map[string]string
 }
 
 func New(t tracker.Tracker, cfg *config.Config) *Plane {
 	return &Plane{Tracker: t, Config: cfg}
+}
+
+// WithHost attaches the code host port.
+func (p *Plane) WithHost(h host.Host) *Plane {
+	p.Host = h
+	return p
 }
 
 // resolveStates maps tracker state ids to protocol states through the
@@ -91,6 +103,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 	}
 
 	tickets := make([]*core.Ticket, 0, len(issues))
+	p.keyByID = map[string]string{}
 	for _, i := range issues {
 		st, ok := p.stateByID[i.StateID]
 		if !ok {
@@ -99,8 +112,9 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 			// sweeping around it as if it weren't there.
 			return nil, fmt.Errorf("plane: issue %s is in a state the config doesn't map (state id %s)", i.Key, i.StateID)
 		}
+		p.keyByID[i.ID] = i.Key
 		t := &core.Ticket{
-			ID: i.ID, Key: i.Key, Title: i.Title,
+			ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description,
 			State: st, StateSince: i.StateSince, CreatedAt: i.CreatedAt,
 			Labels: i.Labels, Priority: i.Priority, Milestone: i.Milestone,
 			Blocks: i.Blocks, BlockedBy: i.BlockedBy,
@@ -120,6 +134,10 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 			t.Comments = append(t.Comments, core.Comment{Body: cm.Body, Actor: p.roleOf(cm.ActorID), At: cm.CreatedAt})
 		}
 		tickets = append(tickets, t)
+	}
+
+	if err := p.attachHostFacts(ctx, tickets); err != nil {
+		return nil, err
 	}
 
 	return &core.Snapshot{
