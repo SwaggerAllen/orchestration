@@ -22,8 +22,9 @@ follows from the handover: what passes between them, who is allowed to write wha
 two pieces of in-flight work avoid overwriting each other.
 
 **Assumed stack.** Phoenix / LiveView with daisyUI; `phoenix_storybook` for component
-variations; Linear as the tracker; GitHub for code and automation; DigitalOcean App Platform
-with auto-deploy on push to main. One environment — main is production.
+variations; Linear as the tracker; GitHub for code and automation; Cloudflare for the
+scheduler and branch previews (§13, §4); DigitalOcean App Platform with auto-deploy on push
+to main. One environment — main is production.
 
 **Assumed scale.** One human author, one project at a time per pipeline instance, one dev
 agent. Several assumptions here are load-bearing and are called out where they appear.
@@ -187,6 +188,14 @@ mechanical. The HTML is never committed.
 publishes HTML plus assets per branch. This works only because design artifacts are stateless
 — no socket required. The interactive playground is lost; the visual review is not.
 
+**The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
+machinery of ours — per-branch previews are the platform's own feature, and glue code we don't
+write is glue code that can't silently break. The alternatives all cost more than they look:
+GitHub Pages is one site per repo, so per-branch previews mean serialization and cleanup code
+we then own; Actions artifacts aren't browsable, which kills the one-click review; a bucket
+means constructing URLs and cleaning up by hand. Preview URLs are unauthenticated — at one
+author, obscure is acceptable, and Cloudflare Access is the upgrade path when it isn't.
+
 ### What an issue contains
 
 Every issue lives in the configured team and project; one outside it is invisible to the
@@ -267,8 +276,9 @@ Consequences:
   For something that routes tickets unattended, staged rollout is worth having.
 - **Everything project-specific is one config file:** tracker team and project ids, state name
   mapping, design-owned paths, quality gate commands, deploy detection endpoint, deploy
-  timeout and stale-claim grace period (§12), milestone naming convention. Anything not in
-  that file is the protocol and belongs here.
+  timeout and stale-claim grace period (§12), static preview target (the Cloudflare Pages
+  project, §4), milestone naming convention. Anything not in that file is the protocol and
+  belongs here.
 - **The pipeline repo needs its own tests** against a scratch tracker project. A bug here
   mis-routes tickets silently, which is the failure mode hardest to notice.
 
@@ -719,11 +729,16 @@ the boundary ticket that is exactly the resume path §10 already defines.
 checkout and a toolchain — and Actions already has the repo, the secrets and per-run logs. The
 control plane therefore holds no compute at all.
 
-**Control plane: a scheduled workflow, no hosted service.** It polls the tracker for tickets in
-trigger states, polls the host for deploys, and dispatches. The state machine already lives in
-the tracker, so there is nothing else to persist. Latency is the cron interval, and scheduled
-runs can be delayed under load — acceptable for a pipeline whose slowest step is a human at a
-milestone boundary.
+**Control plane: an Actions workflow, metronomed from outside.** The control-plane logic is a
+workflow that polls the tracker for tickets in trigger states, polls the host for deploys, and
+dispatches. The state machine already lives in the tracker, so there is nothing else to
+persist. It is deliberately *not* triggered by GitHub's own `schedule:` — under load those
+crons fire 5–15 minutes late, a ticket crosses six or more polled transitions on its way to
+`Done`, and the jitter compounds to an hour of dead time on a lifecycle that is otherwise
+minutes of compute. Instead a **Cloudflare Worker cron** — punctual to seconds, ~10 lines,
+holding one fine-scoped GitHub token that can fire `workflow_dispatch` and nothing else —
+pings the workflow on the interval. The Worker contains no pipeline logic at all: it is a
+metronome, and keeping it dumb is what keeps the control plane in one place.
 
 **The control-plane workflow declares a single `concurrency` group, `cancel-in-progress:
 false`.** A delayed cron run and the next one can otherwise overlap, and two dispatchers
@@ -752,6 +767,12 @@ invariant is only as strong as one-dispatcher.
 
 Dispatch order is the precedence rule (§7): urgent, then furthest along, then oldest.
 
+**The CI hops don't wait for the poll.** CI green and CI red are GitHub-native events, so the
+project stub also triggers on `workflow_run` completion and performs those two transitions —
+into `Reconciling`, or the failure comment and `Ready for rework` — immediately. Everything
+with no event to subscribe to stays on the polled loop: tracker state changes, deploy
+detection, stale claims, deploy timeouts.
+
 **Deploy detection:** poll the platform's deployments API for an active deployment and compare
 its commit against the merge commit. `≥` rather than `==` because several merges may land in one
 build; a ticket whose merge SHA is an ancestor of a successful active deployment is deployed.
@@ -760,13 +781,13 @@ The `≥` is shorthand for *is an ancestor of* — a compare-API call, not SHA a
 **Kill switch:** a single flag halting dispatch without revoking credentials or leaving a ticket
 mid-claim. In-flight runs finish; nothing new starts.
 
-**If polling latency becomes the bottleneck,** the control plane moves to Cloudflare Workers.
-The arithmetic that defines "bottleneck": a ticket crosses six or more polled transitions on
-its way to `Done`, so at real-world cron jitter of 5–15 minutes the dispatch overhead alone is
-an hour or more per ticket — tolerable until the queue is long enough that it compounds.
-Durable Objects are on the free plan with the SQLite backend, and one Durable Object per project
-*is* the single-dev-agent mutex, serialized by construction. Watch the free-plan cap of three
-cron triggers per Worker, and the absence of retries or failure alerting on them.
+**If the polled hops are still too slow,** the escalation is to teach the same Worker to
+receive Linear webhooks and dispatch on events instead of intervals — the metronome grows into
+a receiver without changing vendors or credentials. Durable Objects are on the free plan with
+the SQLite backend, and one Durable Object per project *is* the single-dev-agent mutex,
+serialized by construction. Watch the free-plan cap of three cron triggers per Worker, and the
+absence of retries or failure alerting on them. The polled sweep survives even then: deploy
+detection, stale claims and timeouts have no webhook to subscribe to.
 
 ---
 
