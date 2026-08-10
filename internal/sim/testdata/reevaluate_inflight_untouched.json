@@ -1,0 +1,15 @@
+{
+  "name": "re-evaluate on a working ticket does not restart it; dev finishes the step (DESIGN 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "in_progress", "labels": ["screen:home"], "run": {"kind": "dev", "live": true}},
+    {"kind": "label", "key": "T1", "add": ["re-evaluate"]},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "in_progress", "hasLabels": ["re-evaluate"], "runLive": true, "markers": {"revert": 0}},
+    {"kind": "label", "key": "T1", "remove": ["re-evaluate"]},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "reconciling", "runKind": "reconcile", "runLive": true}
+  ]
+}

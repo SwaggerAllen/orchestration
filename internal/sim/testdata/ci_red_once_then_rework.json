@@ -1,0 +1,9 @@
+{
+  "name": "first CI red: marker comment, Ready for rework, dev picks it back up (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks", "run": {"kind": "dev", "live": false}},
+    {"kind": "ci", "key": "T1", "status": "red", "run": "https://ci/run/1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "markers": {"ci-red": 1}, "runKind": "dev", "runLive": true}
+  ]
+}

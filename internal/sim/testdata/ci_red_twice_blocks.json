@@ -1,0 +1,17 @@
+{
+  "name": "second CI red on the same branch: Blocked, counted by markers (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks", "run": {"kind": "dev", "live": false}},
+    {"kind": "ci", "key": "T1", "status": "red", "run": "https://ci/run/1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "markers": {"ci-red": 1}},
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "red", "run": "https://ci/run/2"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"ci-red": 2}},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"ci-red": 2}}
+  ]
+}

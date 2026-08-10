@@ -1,0 +1,9 @@
+{
+  "name": "re-evaluate on Todo clears on entry to Designing (DESIGN 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "todo", "labels": ["re-evaluate"]},
+    {"kind": "transition", "key": "T1", "to": "designing", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "designing", "lacksLabels": ["re-evaluate"], "runKind": "design", "runLive": true}
+  ]
+}

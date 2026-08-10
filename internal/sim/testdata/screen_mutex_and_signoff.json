@@ -1,0 +1,24 @@
+{
+  "name": "screen mutex reverts a colliding promotion; sign-off rules hold (DESIGN 3, 6, 9)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "in_progress", "labels": ["screen:home"], "run": {"kind": "dev", "live": true}},
+    {"kind": "seed", "key": "T2", "state": "design_review", "labels": ["screen:home"]},
+    {"kind": "transition", "key": "T2", "to": "ready_for_dev", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "state": "design_review", "markers": {"revert": 1}},
+
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "transition", "key": "T1", "to": "canceled", "actor": "author"},
+
+    {"kind": "seed", "key": "T3", "state": "designing"},
+    {"kind": "transition", "key": "T3", "to": "ready_for_dev", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "designing", "markers": {"revert": 1}},
+
+    {"kind": "seed", "key": "T4", "state": "designing", "createdAgo": "4h"},
+    {"kind": "comment", "key": "T4", "marker": "screenless-pass", "fields": {}, "actor": "design"},
+    {"kind": "transition", "key": "T4", "to": "ready_for_dev", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T4", "state": "ready_for_dev", "markers": {"revert": 0}, "runKind": "dev", "runLive": true}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "a claim whose run died goes to Blocked after the grace period (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "in_progress", "run": {"kind": "dev", "live": true}},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "advance", "by": "10m"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "in_progress", "markers": {"stale-claim": 0}},
+    {"kind": "advance", "by": "15m"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"stale-claim": 1}}
+  ]
+}

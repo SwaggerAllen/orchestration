@@ -1,0 +1,11 @@
+{
+  "name": "a Backlog issue carrying the current milestone is corrected to Todo (DESIGN 10)",
+  "steps": [
+    {"kind": "milestone", "name": "M1"},
+    {"kind": "seed", "key": "T1", "state": "backlog", "milestone": "M1"},
+    {"kind": "seed", "key": "T2", "state": "backlog", "milestone": "M2"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "todo"},
+    {"kind": "expect", "key": "T2", "state": "backlog"}
+  ]
+}

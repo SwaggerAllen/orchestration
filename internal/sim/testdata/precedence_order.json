@@ -1,0 +1,23 @@
+{
+  "name": "urgent first, then furthest along, oldest breaks ties (DESIGN 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_dev", "createdAgo": "3h"},
+    {"kind": "seed", "key": "T2", "state": "ready_for_rework", "createdAgo": "1h"},
+    {"kind": "seed", "key": "T3", "state": "ready_for_dev", "priority": 1, "createdAgo": "5m"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "runKind": "dev", "runLive": true},
+    {"kind": "expect", "key": "T1", "runLive": false},
+    {"kind": "expect", "key": "T2", "runLive": false},
+
+    {"kind": "run-end", "key": "T3"},
+    {"kind": "transition", "key": "T3", "to": "canceled", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true},
+    {"kind": "expect", "key": "T1", "runLive": false},
+
+    {"kind": "run-end", "key": "T2"},
+    {"kind": "transition", "key": "T2", "to": "canceled", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "runKind": "dev", "runLive": true}
+  ]
+}
