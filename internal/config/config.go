@@ -83,13 +83,20 @@ type Tracker struct {
 
 // Deploy configures post-merge deploy detection (DESIGN §13).
 type Deploy struct {
-	// Endpoint is the deployments API the sweep polls. The dummy project
-	// points this at the GitHub-Deployments-backed fake (PLAN M4).
+	// Provider selects the adapter: "digitalocean" (App Platform) or
+	// "github" (GitHub Deployments — the dummy project's stand-in, which
+	// exercises the same ancestry logic; PLAN M4).
+	Provider string `json:"provider"`
+	// Endpoint is provider-specific: the full deployments API URL for
+	// digitalocean; the environment name (e.g. "production") for github.
 	Endpoint string `json:"endpoint"`
 	// Timeout is how long a ticket may sit in Merged before the sweep
 	// moves it to Blocked (DESIGN §12).
 	Timeout Duration `json:"timeout"`
 }
+
+// DeployProviders are the legal Deploy.Provider values.
+var DeployProviders = []string{"digitalocean", "github"}
 
 // Preview names the Cloudflare Pages project storybook exports publish to
 // (DESIGN §4).
@@ -189,6 +196,13 @@ func (c *Config) Validate() error {
 	}
 	if len(c.QualityGates) == 0 {
 		add("qualityGates: missing")
+	}
+	switch c.Deploy.Provider {
+	case "":
+		add("deploy.provider: missing (one of digitalocean, github)")
+	case "digitalocean", "github":
+	default:
+		add("deploy.provider: %q is not a provider (one of digitalocean, github)", c.Deploy.Provider)
 	}
 	if c.Deploy.Endpoint == "" {
 		add("deploy.endpoint: missing")

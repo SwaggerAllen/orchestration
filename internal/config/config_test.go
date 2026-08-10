@@ -89,6 +89,7 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 		{"one state", func(m map[string]any) { delete(m["states"].(map[string]any), "reconciling") }, "states.reconciling: missing"},
 		{"designOwnedPaths", func(m map[string]any) { delete(m, "designOwnedPaths") }, "designOwnedPaths: missing"},
 		{"qualityGates", func(m map[string]any) { delete(m, "qualityGates") }, "qualityGates: missing"},
+		{"deploy.provider", func(m map[string]any) { delete(m["deploy"].(map[string]any), "provider") }, "deploy.provider: missing"},
 		{"deploy.endpoint", func(m map[string]any) { m["deploy"].(map[string]any)["endpoint"] = "" }, "deploy.endpoint: missing"},
 		{"deploy.timeout", func(m map[string]any) { delete(m["deploy"].(map[string]any), "timeout") }, "deploy.timeout: missing"},
 		{"staleClaimGrace", func(m map[string]any) { delete(m, "staleClaimGrace") }, "staleClaimGrace: missing"},

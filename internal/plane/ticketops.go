@@ -22,6 +22,11 @@ func (p *Plane) CommentTicket(ctx context.Context, ticketID, body string) error 
 	return p.Tracker.CommentOnIssue(ctx, ticketID, body)
 }
 
+// AddTicketLabel attaches one label by name.
+func (p *Plane) AddTicketLabel(ctx context.Context, ticketID, label string) error {
+	return p.Tracker.AddIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
+}
+
 // PRForTicket finds the open PR carrying the ticket key in its branch
 // name, or nil — including when no host is attached.
 func (p *Plane) PRForTicket(ctx context.Context, ticketKey string) *host.PR {

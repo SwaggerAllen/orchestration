@@ -56,4 +56,10 @@ type Host interface {
 	ChecksFor(ctx context.Context, headSHA string) (Checks, error)
 	CreatePR(ctx context.Context, branch, title, body string, draft bool) (PR, error)
 	MarkPRReady(ctx context.Context, number int) error
+	// MergePR squash-merges and returns the merge commit SHA — the value
+	// the post-deploy check compares against the platform (DESIGN §13).
+	MergePR(ctx context.Context, number int) (string, error)
+	// IsAncestor reports whether ancestor is reachable from descendant:
+	// the real meaning of the design's `>=` (DESIGN §13).
+	IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error)
 }

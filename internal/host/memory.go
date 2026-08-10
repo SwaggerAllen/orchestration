@@ -13,7 +13,12 @@ type Memory struct {
 	Runs       []AgentRun
 	PRs        []PR
 	CheckState map[string]Checks // headSHA -> checks
-	nextPR     int
+	// Merged records merged PRs: number -> merge SHA.
+	Merged map[int]string
+	// Ancestry scripts IsAncestor: "ancestor..descendant" -> true.
+	// Identical SHAs are always ancestors, as in git.
+	Ancestry map[string]bool
+	nextPR   int
 }
 
 // Dispatch records one DispatchWorkflow call.
@@ -25,7 +30,11 @@ type Dispatch struct {
 var _ Host = (*Memory)(nil)
 
 func NewMemory() *Memory {
-	return &Memory{CheckState: map[string]Checks{}}
+	return &Memory{
+		CheckState: map[string]Checks{},
+		Merged:     map[int]string{},
+		Ancestry:   map[string]bool{},
+	}
 }
 
 func (m *Memory) DispatchWorkflow(_ context.Context, workflowFile string, inputs map[string]string) error {
@@ -81,4 +90,27 @@ func (m *Memory) MarkPRReady(_ context.Context, number int) error {
 		}
 	}
 	return fmt.Errorf("memory host: no PR #%d", number)
+}
+
+func (m *Memory) MergePR(_ context.Context, number int) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, p := range m.PRs {
+		if p.Number == number {
+			sha := fmt.Sprintf("merge_%d", number)
+			m.Merged[number] = sha
+			m.PRs = append(m.PRs[:i], m.PRs[i+1:]...)
+			return sha, nil
+		}
+	}
+	return "", fmt.Errorf("memory host: no open PR #%d to merge", number)
+}
+
+func (m *Memory) IsAncestor(_ context.Context, ancestor, descendant string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ancestor == descendant {
+		return true, nil
+	}
+	return m.Ancestry[ancestor+".."+descendant], nil
 }

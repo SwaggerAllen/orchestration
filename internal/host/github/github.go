@@ -209,6 +209,39 @@ func (c *Client) CreatePR(ctx context.Context, branch, title, body string, draft
 	return host.PR{Number: data.Number, Branch: branch, HeadSHA: data.Head.SHA, Draft: draft, URL: data.HTMLURL}, nil
 }
 
+// MergePR squash-merges: one ticket, one commit on main, and the ancestry
+// check works the same either way.
+func (c *Client) MergePR(ctx context.Context, number int) (string, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", c.owner, c.repo, number)
+	var data struct {
+		SHA    string `json:"sha"`
+		Merged bool   `json:"merged"`
+	}
+	if err := c.rest(ctx, http.MethodPut, path, map[string]any{"merge_method": "squash"}, &data); err != nil {
+		return "", err
+	}
+	if !data.Merged {
+		return "", fmt.Errorf("github: PR #%d not merged", number)
+	}
+	return data.SHA, nil
+}
+
+// IsAncestor uses the compare API: base...head with head "ahead of" or
+// "identical to" base means base is an ancestor.
+func (c *Client) IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error) {
+	if ancestor == descendant {
+		return true, nil
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", c.owner, c.repo, ancestor, descendant)
+	var data struct {
+		Status string `json:"status"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return false, err
+	}
+	return data.Status == "ahead" || data.Status == "identical", nil
+}
+
 // MarkPRReady flips the draft flag off. REST cannot do this; it is a
 // GraphQL-only mutation, keyed by the PR's node id.
 func (c *Client) MarkPRReady(ctx context.Context, number int) error {

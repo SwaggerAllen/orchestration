@@ -8,6 +8,8 @@ bindings live.
 |---|---|
 | `pipeline-sweep.yml` | Control-plane pass: metronome dispatch + CI-hop trigger |
 | `pipeline-agent-dev.yml` | Dev agent run, dispatched by the sweep |
+| `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
+| `pipeline-record-deploy.yml` | Dummy project only: records a GitHub Deployment per merge so deploy detection has real data (config `deploy.provider: "github"`) |
 
 A project also needs:
 
@@ -19,3 +21,8 @@ A project also needs:
   pull requests" enabled, so the harness can open PRs
 - Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch
   (DESIGN §13)
+- Branch protection on `main`: require the `ci` checks and pull
+  requests; within the pipeline only reconciliation merges (DESIGN §5),
+  and the branch protection is what turns that from convention into a
+  guarantee. The author's out-of-band fixes use admin bypass,
+  deliberately.

@@ -12,17 +12,20 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/deploy"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
-// Plane binds the ports and config for one project. Host may be nil —
-// a Linear-only plane builds snapshots with no run or CI facts, which the
-// core reads as "awaiting dispatch" / "no verdict" and plans no harm.
+// Plane binds the ports and config for one project. Host and Deploy may
+// be nil — a Linear-only plane builds snapshots with no run, CI or deploy
+// facts, which the core reads as "awaiting dispatch" / "no verdict" /
+// "pending" and plans no harm beyond the deploy timeout's honest backstop.
 type Plane struct {
 	Tracker tracker.Tracker
 	Host    host.Host
+	Deploy  deploy.Deploy
 	Config  *config.Config
 
 	// resolved lazily, once per Plane: tracker state id <-> protocol state.
@@ -39,6 +42,12 @@ func New(t tracker.Tracker, cfg *config.Config) *Plane {
 // WithHost attaches the code host port.
 func (p *Plane) WithHost(h host.Host) *Plane {
 	p.Host = h
+	return p
+}
+
+// WithDeploy attaches the deploy platform port.
+func (p *Plane) WithDeploy(d deploy.Deploy) *Plane {
+	p.Deploy = d
 	return p
 }
 
@@ -137,6 +146,9 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 	}
 
 	if err := p.attachHostFacts(ctx, tickets); err != nil {
+		return nil, err
+	}
+	if err := p.attachDeployFacts(ctx, tickets); err != nil {
 		return nil, err
 	}
 

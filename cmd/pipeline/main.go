@@ -13,6 +13,8 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/deploy/digitalocean"
+	"github.com/SwaggerAllen/orchestration/internal/deploy/ghdeploy"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
@@ -135,12 +137,30 @@ func cmdSweep(args []string) error {
 	p := plane.New(linear.New(apiKey), cfg)
 	// With GitHub credentials present (always true inside Actions), the
 	// snapshot gains run and CI facts and dispatches become real.
-	if repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN"); repo != "" && token != "" {
+	repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN")
+	if repo != "" && token != "" {
 		h, err := github.New(repo, token)
 		if err != nil {
 			return err
 		}
 		p.WithHost(h)
+		switch cfg.Deploy.Provider {
+		case "github":
+			d, err := ghdeploy.New(repo, token, cfg.Deploy.Endpoint)
+			if err != nil {
+				return err
+			}
+			p.WithDeploy(d)
+		case "digitalocean":
+			if doToken := os.Getenv("DIGITALOCEAN_TOKEN"); doToken != "" {
+				p.WithDeploy(digitalocean.New(cfg.Deploy.Endpoint, doToken))
+			} else {
+				// Without the token Merged tickets stay pending and the
+				// deploy timeout is the honest backstop; say so rather
+				// than silently narrowing the sweep.
+				fmt.Fprintln(os.Stderr, "pipeline: DIGITALOCEAN_TOKEN not set; deploy detection off, Merged tickets will hit the timeout")
+			}
+		}
 	}
 	ctx := context.Background()
 	snap, err := p.Build(ctx, time.Now(), killOn)

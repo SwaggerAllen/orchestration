@@ -1,27 +1,26 @@
 // Package deploy defines the port to the deploy platform. The sweep polls
-// it to run the post-deploy check and the deploy timeout (DESIGN §12, §13).
-// DigitalOcean's implementation arrives in M4 alongside a fake backed by
-// GitHub Deployments for the dummy project.
+// it for the post-deploy check and the deploy timeout (DESIGN §12, §13).
+// Two implementations: DigitalOcean App Platform for production, and a
+// GitHub-Deployments-backed one the dummy project uses so dry runs
+// exercise the real ancestry logic without a real DO app (PLAN M4).
 package deploy
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
-// Deployment is the active deployment as the platform reports it.
-type Deployment struct {
-	// SHA is the commit the deployment was built from. A ticket whose merge
-	// SHA is an ancestor of this is deployed (DESIGN §13).
-	SHA string
-	// OK is whether the deployment succeeded.
-	OK bool
-	// FinishedAt is when the platform finished the deployment.
-	FinishedAt time.Time
+// State is what the platform reports, reduced to what the post-deploy
+// check needs. The `>=` comparison itself lives in the plane, which has
+// the ancestry oracle (the code host).
+type State struct {
+	// ActiveSHA is the commit currently serving ("" if nothing is).
+	ActiveSHA string
+	// Failed reports that the most recent deployment attempt failed;
+	// FailedSHA is the commit it was building. A ticket whose merge is in
+	// a failed build is Blocked, not pending (DESIGN §11).
+	Failed    bool
+	FailedSHA string
 }
 
-// Deploy is the port. ActiveDeployment returns nil when the platform has no
-// active deployment at all.
+// Deploy is the port.
 type Deploy interface {
-	ActiveDeployment(ctx context.Context) (*Deployment, error)
+	State(ctx context.Context) (*State, error)
 }

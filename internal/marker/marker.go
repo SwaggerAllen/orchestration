@@ -53,6 +53,10 @@ const (
 	// TriageProposal carries the dedupe key that keeps a re-run boundary
 	// pass from filing a finding twice (DESIGN §10).
 	TriageProposal Kind = "triage-proposal"
+	// Merged records the merge commit on the ticket. The post-deploy
+	// check reads it to compare against the platform's deployment
+	// (DESIGN §13) — without it, "is this deployed" has no left-hand side.
+	Merged Kind = "merged"
 )
 
 // Marker is one parsed or to-be-formatted marker line.

@@ -45,6 +45,7 @@ func Sample() *Config {
 			"mix test",
 		},
 		Deploy: Deploy{
+			Provider: "digitalocean",
 			Endpoint: "https://api.digitalocean.com/v2/apps/sample-app-id/deployments",
 			Timeout:  Duration(30 * time.Minute),
 		},
@@ -60,7 +61,7 @@ func Sample() *Config {
 		Agents: map[string]string{
 			"design":    "",
 			"dev":       "pipeline-agent-dev.yml",
-			"reconcile": "",
+			"reconcile": "pipeline-agent-reconcile.yml",
 			"boundary":  "",
 		},
 	}

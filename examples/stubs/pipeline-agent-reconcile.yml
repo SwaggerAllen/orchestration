@@ -1,0 +1,20 @@
+# Project stub: reconcile agent. run-name is load-bearing (correlation).
+name: pipeline-agent-reconcile
+run-name: "pipeline: reconcile ${{ inputs.ticket }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Ticket key, e.g. PIPE-12
+        required: true
+        type: string
+
+jobs:
+  reconcile:
+    uses: SwaggerAllen/orchestration/.github/workflows/agent-reconcile.yml@main
+    with:
+      ticket: ${{ inputs.ticket }}
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

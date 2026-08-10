@@ -43,6 +43,9 @@ type ClaimResult struct {
 	// The base check flags rather than blocks (DESIGN §9): the harness
 	// surfaces it, the agent judges it.
 	BaseSHA string
+	// Comments is the ticket's comment history, reconcile mode only —
+	// comments carry the deltas the diff is measured against (DESIGN §2.3).
+	Comments []string `json:",omitempty"`
 }
 
 // Claim performs pickup: assertions, state-transition-as-claim, and the

@@ -59,11 +59,13 @@ func cmdAgentClaim(args []string) error {
 	fs := flag.NewFlagSet("agent claim", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	ticket := fs.String("ticket", "", "ticket key, e.g. PIPE-12")
+	kind := fs.String("kind", "dev", "agent kind: dev or reconcile")
 	dispatchID := fs.String("dispatch-id", "", "workflow run id (the claim's audit trail)")
 	dispatchURL := fs.String("dispatch-url", "", "workflow run URL")
 	outDir := fs.String("out", "", "directory for claim.json, scope.md and prompt.md")
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file to assemble prompt.md from")
-	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to")
+	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
+	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -75,7 +77,15 @@ func cmdAgentClaim(args []string) error {
 		return err
 	}
 
-	res, err := agent.Claim(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+	var res *agent.ClaimResult
+	switch *kind {
+	case "dev":
+		res, err = agent.Claim(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+	case "reconcile":
+		res, err = agent.ClaimReconcile(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+	default:
+		return fmt.Errorf("agent claim: --kind must be dev or reconcile")
+	}
 	if err != nil {
 		return err
 	}
@@ -97,7 +107,12 @@ func cmdAgentClaim(args []string) error {
 		if err != nil {
 			return err
 		}
-		prompt := assemblePrompt(string(tpl), res, *handbackPath)
+		var prompt string
+		if *kind == "reconcile" {
+			prompt = assembleReconcilePrompt(string(tpl), res, *verdictPath)
+		} else {
+			prompt = assemblePrompt(string(tpl), res, *handbackPath)
+		}
 		if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 			return err
 		}
@@ -145,6 +160,28 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string
 	return string(b)
 }
 
+// assembleReconcilePrompt is the reconcile counterpart: the argument, the
+// deltas (comments), the PR, and where the verdict goes.
+func assembleReconcilePrompt(template string, res *agent.ClaimResult, verdictPath string) string {
+	var b []byte
+	add := func(s string) { b = append(b, s...) }
+	add(template)
+	add("\n\n---\n\n")
+	add(fmt.Sprintf("# Ticket %s: %s\n", res.TicketKey, res.Title))
+	add(fmt.Sprintf("\nPR #%d on branch `%s` (fetched; diff it against origin/main).\n", res.PRNumber, res.Branch))
+	add("\n## The argument — what the issue asked for\n\n" + res.Description + "\n")
+	if len(res.Comments) > 0 {
+		add("\n## Comments, oldest first — these carry the accepted deltas (DESIGN 2.3)\n")
+		for _, c := range res.Comments {
+			add("\n---\n" + c + "\n")
+		}
+	}
+	if verdictPath != "" {
+		add(fmt.Sprintf("\n## Verdict\n\nWrite JSON to `%s`: {\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\"}.\nA fail's report is the rework scope — name exactly what is missing. A cannot-tell's report is what a human must look at. Ambiguity must never resolve itself as pass.\n", verdictPath))
+	}
+	return string(b)
+}
+
 func loadClaim(path string) (*agent.ClaimResult, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -161,12 +198,13 @@ func cmdAgentFinish(args []string) error {
 	fs := flag.NewFlagSet("agent finish", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	handback := fs.String("handback", "", "file containing the hand-back comment")
+	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
+	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *claimPath == "" || *handback == "" {
-		return fmt.Errorf("agent finish: --claim and --handback are required")
+	if *claimPath == "" {
+		return fmt.Errorf("agent finish: --claim is required")
 	}
 	p, h, err := agentDeps(*cfgPath)
 	if err != nil {
@@ -175,6 +213,25 @@ func cmdAgentFinish(args []string) error {
 	res, err := loadClaim(*claimPath)
 	if err != nil {
 		return err
+	}
+
+	if res.Mode == "reconcile" {
+		if *verdict == "" {
+			return fmt.Errorf("agent finish: reconcile needs --verdict")
+		}
+		v, err := agent.LoadVerdict(*verdict)
+		if err != nil {
+			return err
+		}
+		if err := agent.FinishReconcile(context.Background(), p, h, res, v); err != nil {
+			return err
+		}
+		fmt.Printf("reconciled %s: %s\n", res.TicketKey, v.Outcome)
+		return nil
+	}
+
+	if *handback == "" {
+		return fmt.Errorf("agent finish: --handback is required")
 	}
 	body, err := os.ReadFile(*handback)
 	if err != nil {
