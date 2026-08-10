@@ -18,10 +18,21 @@ checkout, install, run the CLI. Logic embedded in workflow YAML can only be test
 Actions; a CLI runs on a laptop against fakes, in CI against a scratch project, and in
 production against the real one — same code path in all three.
 
-**Language: TypeScript.** One language across the control-plane CLI, the Cloudflare Worker
-metronome, and the test harness; first-class SDKs for Linear and GitHub; instant startup in
-Actions. Elixir matches the product stack but can't run in the Worker and pays compile time on
-every control-plane tick, and the pipeline repo never touches product code directly.
+**Language: Go for the pipeline, TypeScript for the metronome.** The control-plane CLI, agent
+run harness, and test harness are one Go binary — a static executable that starts instantly on
+every sweep tick, with `go-github` and the official Anthropic Go SDK covering two of the three
+adapters. Linear has no Go SDK, so the Tracker adapter is hand-written GraphQL: bounded, one
+module, simple queries, and it gets the heaviest test coverage anyway. The Worker is
+TypeScript because that is what Workers support natively; a second language is acceptable only
+because of the standing rule below. (Elixir matches the product stack but can't run in the
+Worker and pays compile time on every tick; the pipeline repo never touches product code
+directly.)
+
+**The Worker stays dumb — permanently.** Cron fires → call `workflow_dispatch`. At the stage-2
+escalation (DESIGN §13) it grows to validating a Linear webhook signature and forwarding the
+payload into the same dispatch — still zero pipeline logic. This rule is what keeps the Go/TS
+split from ever becoming load-bearing: every protocol behavior lives in one binary, and the
+Worker never learns what a ticket is.
 
 **A pure core behind adapter ports.** The state machine — invariant checks, precedence
 ordering, escalation counting, stale-claim detection, queue pause, dispatch planning — is pure
@@ -94,7 +105,7 @@ only ring where the agents' actual judgment is exercised.
 Each milestone names its scope and its exit gate. Later milestones assume earlier gates held.
 
 ### M0 — Foundations and harness skeleton
-Repo layout, TypeScript toolchain, CI for the pipeline repo itself. Config schema + validator
+Repo layout, Go toolchain, CI for the pipeline repo itself. Config schema + validator
 (everything in DESIGN §5's config list, including scratch/production being the same shape).
 Marker grammar module. Adapter interfaces with in-memory fakes. `pipeline setup` working
 against the scratch Linear team. Dummy repo created and seeded. Ring-2 harness skeleton runs
