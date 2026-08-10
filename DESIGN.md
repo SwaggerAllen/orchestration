@@ -38,7 +38,7 @@ agent. Several assumptions here are load-bearing and are called out where they a
 | **Hand-back** | The comment a dev agent writes when it finishes: what landed, the commit, anything deliberately not done and why, and any open question it resolved. An issue that moves without one is a state change nobody can audit. |
 | **Triage** | Linear's intake state. Where an agent's findings go so the author can accept or decline them in one keystroke, rather than the finding evaporating in a chat log. |
 | **Gating debt** | Tech debt whose absence makes the *next* product milestone materially harder. Scheduled ahead of that milestone rather than remembered. |
-| **The sketch** | The implementation sketch a design pass posts on the ticket (§4): which systems the change touches, each new structure named as a decision, the shape of the change, the open questions. The part of architecture a human sees before implementation exists. |
+| **The sketch** | A design pass's structural output (§4): the diff against `systems/*.md` on the ticket branch, plus the declared touch list that becomes mutex labels. The part of architecture a human reviews before implementation exists. |
 | **In flight** | Any state from `Ready for dev` through `Merged` inclusive. |
 
 ---
@@ -143,10 +143,10 @@ waiting on the author* as distinct from *design is still working*. Sign-off is t
 back, for the same reason: a rejection without its argument is one the next pass repeats.
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
-and a sketch introducing no new structure — no new system, table, dependency, component or
-token — advances straight to `Ready for dev` (§6), carrying its sketch in the marker comment.
-Sign-off exists to approve decisions; with none to approve it is a rubber stamp, and rubber
-stamps train the author to skim the reviews that matter.
+and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
+advances straight to `Ready for dev` (§6), recording its reasoning and touch list in the
+marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
+stamp, and rubber stamps train the author to skim the reviews that matter.
 
 **Why the queue and the agent get separate states on both sides.** `Ready for dev` /
 `In progress` and `Ready for rework` / `Reworking` are the same split for the same reason:
@@ -173,7 +173,9 @@ Per screen, in the project repo:
 - **A stateless function component** — presentational, hardcoded assigns, daisyUI classes.
 - **A `.story.exs`** with one variation per state, each carrying its description.
 - **A narrative doc** (`screens/<name>.md`) for rules, standing decisions and the argument,
-  with **no state sections at all.**
+  with **no state sections at all**, and a front-matter **file map** naming the screen's
+  component module and story file — the map is what lets CI audit per screen rather than per
+  "some design path" (§9).
 
 The state list lives in exactly one place. Splitting it across a prose spec and a set of
 rendered states creates a gap nothing can test, and that gap is where undesigned work hides —
@@ -192,33 +194,48 @@ mechanical. The HTML is never committed.
 publishes HTML plus assets per branch. This works only because design artifacts are stateless
 — no socket required. The interactive playground is lost; the visual review is not.
 
-### The implementation sketch
+### Architecture in the repo, and the sketch
 
-Every design pass also posts a **sketch** on the ticket — per ticket, not per screen: which
-systems the change touches (`system:<name>`, §6), what new structure it introduces — each new
-context, table or dependency named as a decision in as many words — the shape of the change,
-and what remains unsure. Two reasons it exists. First, structure was the least-reviewed,
-highest-blast-radius decision class in the pipeline: reconciliation checks the diff against
-the argument, never the architecture, so a wrong schema previously reached production with no
-human eyes on it — and a schema is expensive precisely when it is wrong. Second, the sketch's
-touch list is what makes system labels trustworthy (§6); a mutex fed by guesses is not a
-mutex.
+Architecture lives in `systems/<name>.md` — one doc per system, the structural mirror of
+`screens/<name>.md`: standing decisions (which system owns a concept, why a boundary sits
+where it does), their rationale, and a front-matter **file map** declaring the paths the
+system owns. One doc per system for the same reason as one doc per screen: a monolithic
+architecture document goes stale as a whole, and nobody can tell which ticket last verified
+which paragraph. No inventory of what the code contains — the code is that inventory.
 
-The sketch lives on the ticket because it is scope, and scope lives in the tracker. A standing
-structural decision the sketch creates — which system owns a concept, why a boundary sits
-where it does — goes to `systems/<name>.md`, the structural mirror of `screens/<name>.md`:
-rules that outlive the ticket, and no inventory of what the code contains, because the code is
-that inventory.
+A design pass's structural output — **the sketch** — is a *diff against these docs*, committed
+on the ticket branch like every other design artifact. A new system is a new doc; a moved
+boundary is a changed doc; a new table or dependency is named in the owning doc's diff. §1
+already made this argument: git supplies ordering, diffs, provenance and review for free, and
+a sketch living in a ticket comment would be the one design artifact outside it. Two reasons
+the sketch exists at all. First, structure was the least-reviewed, highest-blast-radius
+decision class in the pipeline: reconciliation checks the diff against the argument, never the
+architecture, so a wrong schema previously reached production with no human eyes on it — and a
+schema is expensive precisely when it is wrong. Second, the declared touch list is what makes
+system labels trustworthy (§6); a mutex fed by guesses is not a mutex.
 
-The dev agent implements against the sketch as part of scope. Deviating is legal exactly as
-renaming a state is (§9): fine if the hand-back argues why, a finding if nothing does. A
-sketch that cannot survive contact with the code is a push-back (§2.7), never a silent
-improvisation.
+**Touching is not deciding.** A ticket that works inside a system without changing its
+structure declares the touch — `system:<name>` labels from the pass's outcome — and diffs no
+doc. The decisionless exception (§3) is exactly this shape with no screens either: labels
+declared, docs untouched, no artifacts, reasoning in the marker comment.
 
-Sign-off approves the artifacts and the sketch in one review — deliberately not two states:
-consecutive reviews both answer *who has the ball* with "the author," which fails the state
-admission test, and a second per-ticket touchpoint is a cost the three-touchpoint budget
+The dev agent implements against the doc diff as part of scope, and may amend file maps when
+implementation discovers something — the same rule as amending any design-owned file (§5).
+Deviating from the sketched structure is legal exactly as renaming a state is (§9): fine if
+the hand-back argues why, a finding if nothing does. A sketch that cannot survive contact with
+the code is a push-back (§2.7), never a silent improvisation.
+
+Sign-off approves the storybook export and the doc diff in one review — deliberately not two
+states: consecutive reviews both answer *who has the ball* with "the author," which fails the
+state admission test, and a second per-ticket touchpoint is a cost the three-touchpoint budget
 doesn't have.
+
+**Adopting an existing repo is a bootstrap pass**, run once by the author, attended, with the
+bootstrap prompt (`prompts/bootstrap.md` in the pipeline repo): split the existing
+architecture document into `systems/<name>.md` with file maps, stub `screens/<name>.md` for
+existing surfaces, and surface what maps to no system. Its output is a PR the author reviews
+like any design — the bootstrap proposes, the author decides. A prompt rather than pipeline
+machinery because it runs once per project, with a human watching.
 
 **The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
 machinery of ours — per-branch previews are the platform's own feature, and glue code we don't
@@ -262,6 +279,7 @@ but do it knowing you are arguing against a recorded decision, and say so in the
 | `storybook/**` | Design |
 | Presentational component modules | Design |
 | `screens/*.md` | Design |
+| `systems/*.md` | Design (the sketch writes them; dev amends with a note, §4) |
 | Theme tokens | Design (by proposal; see §9) |
 | LiveViews, contexts, schemas, tests, everything else | Dev |
 
@@ -307,10 +325,12 @@ Consequences:
 - **Projects pin a version** (`@v1`), so a pipeline change doesn't hit every project at once.
   For something that routes tickets unattended, staged rollout is worth having.
 - **Everything project-specific is one config file:** tracker team and project ids, state name
-  mapping, design-owned paths, the system label → path map (§6), quality gate commands, deploy
-  detection endpoint, deploy timeout and stale-claim grace period (§12), static preview target
-  (the Cloudflare Pages project, §4), milestone naming convention. Anything not in that file
-  is the protocol and belongs here.
+  mapping, design-owned paths, quality gate commands, deploy detection endpoint, deploy
+  timeout and stale-claim grace period (§12), static preview target (the Cloudflare Pages
+  project, §4), milestone naming convention. Anything not in that file is the protocol and
+  belongs here. The system and screen **file maps are deliberately not config**: they live in
+  the docs they govern (§4), so renaming a boundary is one reviewed file, not a file plus a
+  config edit that can drift from it.
 - **The pipeline repo needs its own tests** against a scratch tracker project. A bug here
   mis-routes tickets silently, which is the failure mode hardest to notice.
 
@@ -323,12 +343,12 @@ Three mechanisms, each covering what the others can't.
 **Mutex labels are a file-level mutex.** Two kinds, one rule: *no two in-flight tickets may
 share a `screen:<name>` or `system:<name>` label.* Screen labels cover design artifacts, which
 are per-screen files; system labels cover the structural units the sketch declares — for a
-Phoenix app, contexts — each mapped to its paths in the project config. Enforced at promotion
-into `Ready for dev`: a ticket whose mutex label is already in flight does not promote. This
-prevents most collisions rather than detecting them. The declaration is trustworthy for the
-same reason in both cases: design *creates* the screen files, and the sketch *is* the system
-touch list — with CI auditing the latter (§9), because a diff that wanders outside its
-declared systems is a mutex nobody took.
+Phoenix app, contexts — each mapped to its paths by its own doc's file map (§4). Enforced at
+promotion into `Ready for dev`: a ticket whose mutex label is already in flight does not
+promote. This prevents most collisions rather than detecting them. The declaration is
+trustworthy for the same reason in both cases: design *creates* the screen files, and the
+sketch *is* the system touch list — with CI auditing both against the file maps (§9), because
+a diff that wanders outside its declared labels is a mutex nobody took.
 
 **Files owned by no system** — the router, the mix manifest — are named in the sketch when
 touched and left to git's textual conflict detection. Giving them labels would serialize
@@ -456,10 +476,13 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
 - **a new component module or theme token not named in the issue fails the build** — the class
   audit, promoted from convention to enforcement, so a proposed component cannot arrive
   unannounced inside an artifact
-- a PR touching design-owned paths carries at least one `screen:` label
-- a PR touching a configured system's paths carries that `system:` label — the sketch audit,
+- a PR touching files in a screen doc's file map carries **that screen's** label, and a PR
+  touching paths in a system doc's file map carries **that system's** label — the mutex audit,
   the same promotion from convention to enforcement as the class audit: a mutex nobody took is
-  a collision nobody could prevent
+  a collision nobody could prevent. File maps make it per-name; "some design path, some screen
+  label" would let the wrong label satisfy the check.
+- no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
+  and an ambiguous mutex is two tickets in the same files with a green build
 - `screens/*.md` and `systems/*.md` contain no state sections and no code inventory
 
 **Reconciliation (blocking, and the last gate before production):**

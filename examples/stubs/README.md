@@ -16,6 +16,10 @@ bindings live.
 
 A project also needs:
 
+- A **bootstrap pass** if the repo predates the pipeline: run
+  `prompts/bootstrap.md` with Claude Code, attended, to split the
+  architecture doc into `systems/*.md` with file maps and stub the
+  `screens/*.md` docs (DESIGN §4)
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
 - Actions secrets: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`
 - A `ci` workflow (name matters — the sweep stub triggers on its
