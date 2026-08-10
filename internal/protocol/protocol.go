@@ -101,5 +101,10 @@ var Labels = []string{
 	"milestone-boundary",
 }
 
-// ScreenLabelPrefix marks the per-screen mutex labels (DESIGN §6).
-const ScreenLabelPrefix = "screen:"
+// ScreenLabelPrefix and SystemLabelPrefix mark the two kinds of mutex
+// label (DESIGN §6): screens cover design artifacts, systems cover the
+// structural units the sketch declares. One mutex rule spans both.
+const (
+	ScreenLabelPrefix = "screen:"
+	SystemLabelPrefix = "system:"
+)

@@ -24,6 +24,7 @@
   "designOwnedPaths": [
     "storybook/**",
     "screens/*.md",
+    "systems/*.md",
     "lib/sample_web/components/**"
   ],
   "qualityGates": [

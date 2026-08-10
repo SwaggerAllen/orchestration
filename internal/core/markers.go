@@ -32,8 +32,9 @@ func hasMarkerField(t *Ticket, kind marker.Kind, field, value string) bool {
 	return false
 }
 
-// hasScreenlessPass reports whether the design agent declared a screenless
-// pass, which licenses Designing -> Ready for dev directly (DESIGN §6, §9).
-func hasScreenlessPass(t *Ticket) bool {
-	return len(markersOf(t, marker.ScreenlessPass)) > 0
+// hasDecisionlessPass reports whether the design agent declared a
+// decisionless pass — no screens, no artifacts, no systems/*.md diff —
+// which licenses Designing -> Ready for dev directly (DESIGN §3, §6, §9).
+func hasDecisionlessPass(t *Ticket) bool {
+	return len(markersOf(t, marker.DecisionlessPass)) > 0
 }

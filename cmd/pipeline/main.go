@@ -43,6 +43,8 @@ func run(args []string) error {
 		return cmdSweep(args[1:])
 	case "agent":
 		return cmdAgent(args[1:])
+	case "audit":
+		return cmdAudit(args[1:])
 	case "ids":
 		return cmdIDs(args[1:])
 	case "sim":
@@ -69,6 +71,8 @@ commands:
            PIPELINE_KILL_SWITCH=true halts all planning)
   agent    run-harness protocol steps: claim, finish, abort
            (used by the agent workflows, not by hand)
+  audit    mutex audit for CI: changed paths vs the screen and system
+           file maps and the ticket's labels (DESIGN 9)
   ids      print the Linear ids a config needs: viewer, teams, projects
            (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)

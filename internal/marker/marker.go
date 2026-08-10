@@ -41,9 +41,10 @@ const (
 	// BoundaryStep records a completed boundary-agent step; resume starts at
 	// the first step without one (DESIGN §10).
 	BoundaryStep Kind = "boundary-step"
-	// ScreenlessPass records a design pass that found no screens, which
-	// advances the ticket directly to Ready for dev (DESIGN §6, §9).
-	ScreenlessPass Kind = "screenless-pass"
+	// DecisionlessPass records a design pass that found nothing to
+	// approve — no screens, no artifacts, no systems/*.md diff — which
+	// advances the ticket directly to Ready for dev (DESIGN §3, §6, §9).
+	DecisionlessPass Kind = "decisionless-pass"
 	// Revert records the control plane undoing an invariant-violating
 	// transition (DESIGN §9).
 	Revert Kind = "revert"

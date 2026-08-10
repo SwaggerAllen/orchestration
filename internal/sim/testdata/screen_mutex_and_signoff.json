@@ -16,7 +16,7 @@
     {"kind": "expect", "key": "T3", "state": "designing", "markers": {"revert": 1}},
 
     {"kind": "seed", "key": "T4", "state": "designing", "createdAgo": "4h"},
-    {"kind": "comment", "key": "T4", "marker": "screenless-pass", "fields": {}, "actor": "design"},
+    {"kind": "comment", "key": "T4", "marker": "decisionless-pass", "fields": {}, "actor": "design"},
     {"kind": "transition", "key": "T4", "to": "ready_for_dev", "actor": "design"},
     {"kind": "sweep"},
     {"kind": "expect", "key": "T4", "state": "ready_for_dev", "markers": {"revert": 0}, "runKind": "dev", "runLive": true}

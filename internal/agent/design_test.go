@@ -24,7 +24,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 
-	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Summary: "Two states added; cap_reached carries the copy decision."}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
 	if err := FinishDesign(ctx, p, h, res, o); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 		t.Errorf("want one draft PR, got %+v", h.PRs)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
-	for _, want := range []string{"screen:home", "screen:cap"} {
+	for _, want := range []string{"screen:home", "screen:cap", "system:caps"} {
 		found := false
 		for _, l := range issues[0].Labels {
 			if l == want {
@@ -48,7 +48,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 }
 
-func TestDesignScreenlessAutoPass(t *testing.T) {
+func TestDesignDecisionlessAutoPass(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
 	i := seed(t, tr, cfg, "Backend index", "No surfaces.", protocol.Designing)
@@ -57,7 +57,7 @@ func TestDesignScreenlessAutoPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := &DesignOutcome{Outcome: "screenless", Summary: "No screens touched; index work only."}
+	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
 	if err := FinishDesign(ctx, p, h, res, o); err != nil {
 		t.Fatal(err)
 	}
@@ -65,19 +65,28 @@ func TestDesignScreenlessAutoPass(t *testing.T) {
 		t.Errorf("state = %q, want ready_for_dev", got)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	hasSystem := false
+	for _, l := range issues[0].Labels {
+		if l == "system:search" {
+			hasSystem = true
+		}
+	}
+	if !hasSystem {
+		t.Error("decisionless pass must still attach system labels — touching is not deciding (DESIGN 4)")
+	}
 	// The marker must precede the transition in comment order — the sweep
 	// judges the arrival by it (DESIGN §9).
 	found := false
 	for _, c := range issues[0].Comments {
-		if strings.Contains(c.Body, "[pipeline:v1:screenless-pass]") {
+		if strings.Contains(c.Body, "[pipeline:v1:decisionless-pass]") {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("screenless-pass marker missing")
+		t.Error("decisionless-pass marker missing")
 	}
 	if len(h.PRs) != 0 {
-		t.Errorf("screenless pass must not open a PR: %+v", h.PRs)
+		t.Errorf("decisionless pass must not open a PR: %+v", h.PRs)
 	}
 }
 
@@ -139,8 +148,8 @@ func TestLoadDesignOutcomeValidation(t *testing.T) {
 	if _, err := LoadDesignOutcome(write(`{"outcome":"clear","summary":"x"}`), "design"); err == nil {
 		t.Error("re-read outcomes must be illegal in design mode")
 	}
-	if _, err := LoadDesignOutcome(write(`{"outcome":"screenless","screens":["home"],"summary":"x"}`), "design"); err == nil {
-		t.Error("screenless with screens is a contradiction")
+	if _, err := LoadDesignOutcome(write(`{"outcome":"decisionless","screens":["home"],"summary":"x"}`), "design"); err == nil {
+		t.Error("decisionless with screens is a contradiction")
 	}
 	if _, err := LoadDesignOutcome(write(`{"outcome":"demote","summary":""}`), "design-reread"); err == nil {
 		t.Error("demote without its argument must be rejected")

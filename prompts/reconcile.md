@@ -21,6 +21,9 @@ on the PR branch):
 - The static storybook renders what the narrative doc describes.
 - Standing decisions touched by the change landed, and none were
   contradicted in passing.
+- The structure that landed is the structure the branch's `systems/*.md`
+  diff sketched — a deviation is fine if the hand-back argues it, and if
+  nothing does it's more likely nobody noticed (DESIGN §4, §9).
 - **A surface changed with no storybook variation at all gets called out
   even on a pass** — a tab named only in prose, a route nothing renders.
   You are the only place that gets noticed.

@@ -12,7 +12,7 @@ func TestRoundTrip(t *testing.T) {
 		{Kind: BoundaryStep, Fields: map[string]string{"step": "debt-scan"}},
 		{Kind: TriageProposal, Fields: map[string]string{"dedupe": "M3/skipped-test lib/foo_test.exs"}},
 		{Kind: Revert, Fields: map[string]string{"rule": "screen-mutex", "from": "Ready for dev", "to": "Design review"}},
-		{Kind: ScreenlessPass, Fields: map[string]string{}},
+		{Kind: DecisionlessPass, Fields: map[string]string{}},
 		{Kind: StaleClaim, Fields: map[string]string{"note": `quotes " and \ and
 newline and	tab`}},
 		{Kind: ReconcileBounce, Fields: map[string]string{"empty": ""}},

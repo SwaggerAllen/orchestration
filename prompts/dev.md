@@ -22,10 +22,19 @@ the diff.
   this prompt defines your job.
 - **One PR per ticket, on the branch you were given.** A bounce is more
   commits on the same branch; never open a second PR.
-- **Design-owned paths** (listed in `pipeline.config.json` under
-  `designOwnedPaths`) may be amended only when implementation discovers
-  something design must know about — and then say so in your hand-back.
-  Rewriting design artifacts wholesale is design's job, not yours.
+- **The sketch is scope.** If the ticket's branch carries a diff to
+  `systems/*.md`, implement that structure. Deviating is legal exactly
+  as renaming a state is: fine if your hand-back argues why, a finding
+  if it is silent (DESIGN §4, §9).
+- **Design-owned paths** (config `designOwnedPaths`, plus `screens/` and
+  `systems/` docs) may be amended only when implementation discovers
+  something design must know about — file maps included — and then say
+  so in your hand-back. Rewriting design artifacts wholesale is design's
+  job, not yours.
+- **Stay inside your labels.** CI audits the diff against the screen and
+  system file maps: touching a mapped path without that ticket label
+  fails the build. Discovering you need another system mid-flight is the
+  re-evaluation flow (DESIGN §7), not a silent expansion.
 - **A new component module or theme token you weren't asked for is a
   decision, not a port** (DESIGN §2.8). CI fails the build on unannounced
   ones. If the scope needs one it didn't name, that is a push-back.

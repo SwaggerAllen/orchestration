@@ -37,6 +37,7 @@ func Sample() *Config {
 		DesignOwnedPaths: []string{
 			"storybook/**",
 			"screens/*.md",
+			"systems/*.md",
 			"lib/sample_web/components/**",
 		},
 		QualityGates: []string{

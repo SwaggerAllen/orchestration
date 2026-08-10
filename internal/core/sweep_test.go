@@ -82,12 +82,12 @@ func TestSignOffSkippingDesignReviewReverts(t *testing.T) {
 	}
 }
 
-func TestScreenlessPassMayAdvanceDirectly(t *testing.T) {
+func TestDecisionlessPassMayAdvanceDirectly(t *testing.T) {
 	s := snap(tk("T1", protocol.ReadyForDev,
 		arrived(protocol.Designing, RoleDesign),
-		withComment(marker.ScreenlessPass, nil)))
+		withComment(marker.DecisionlessPass, nil)))
 	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
-		t.Errorf("screenless pass reverted: %v", *a)
+		t.Errorf("decisionless pass reverted: %v", *a)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestScreenMutexRevertsCollidingPromotion(t *testing.T) {
 		arrived(protocol.DesignReview, RoleAuthor),
 		func(t *Ticket) { t.Labels = []string{"screen:home"} })
 	a := find(Sweep(snap(inFlight, promoted)), ActTransition, "T2")
-	if a == nil || a.To != protocol.DesignReview || a.Marker.Fields["rule"] != "screen-mutex" {
+	if a == nil || a.To != protocol.DesignReview || a.Marker.Fields["rule"] != "mutex" {
 		t.Errorf("want screen-mutex revert, got %v", a)
 	}
 }

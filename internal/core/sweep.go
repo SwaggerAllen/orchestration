@@ -128,16 +128,17 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 			"This ticket carries re-evaluate: an unresolved collision. It cannot move forward until the owning thread clears the label."), true
 	}
 
-	// Screen mutex, enforced at promotion into Ready for dev (DESIGN §6).
+	// The mutex — screen and system labels under one rule — enforced at
+	// promotion into Ready for dev (DESIGN §6).
 	if t.State == protocol.ReadyForDev {
 		for _, other := range s.Tickets {
 			if other.ID == t.ID || !other.InFlight() {
 				continue
 			}
-			for _, mine := range t.ScreenLabels() {
+			for _, mine := range t.MutexLabels() {
 				if other.HasLabel(mine) {
-					return revert("screen-mutex",
-						fmt.Sprintf("Screen label %q is already in flight on %s. Two in-flight tickets may not share a screen (DESIGN §6).", mine, other.Key)), true
+					return revert("mutex",
+						fmt.Sprintf("Mutex label %q is already in flight on %s. Two in-flight tickets may not share a screen or a system (DESIGN §6).", mine, other.Key)), true
 				}
 			}
 		}
@@ -157,14 +158,14 @@ func writerViolation(t *Ticket, last *Transition) (rule, prose string, bad bool)
 	switch last.To {
 	case protocol.ReadyForDev:
 		// Sign-off is the author's, from Design review, always — except a
-		// screenless design pass, declared by marker, which advances
+		// decisionless design pass, declared by marker, which advances
 		// straight from Designing (DESIGN §3, §6).
 		switch {
 		case last.Actor == RoleAuthor && last.From == protocol.DesignReview:
-		case last.Actor == RoleDesign && last.From == protocol.Designing && hasScreenlessPass(t):
+		case last.Actor == RoleDesign && last.From == protocol.Designing && hasDecisionlessPass(t):
 		default:
 			return deny("sign-off",
-				"Ready for dev is entered by the author's sign-off from Design review, or by a design pass that declared itself screenless. Neither happened here.")
+				"Ready for dev is entered by the author's sign-off from Design review, or by a design pass that declared itself decisionless. Neither happened here.")
 		}
 	case protocol.InProgress, protocol.Reworking:
 		if last.Actor != RoleDev {

@@ -35,11 +35,11 @@ func (p *Plane) RemoveTicketLabel(ctx context.Context, ticketID, label string) e
 	return p.Tracker.RemoveIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
 }
 
-// EnsureScreenLabel creates the screen:<name> label if the team lacks it,
-// then attaches it. Screen labels are born per-screen as design discovers
-// them (DESIGN §6, §8), so unlike the fixed set they are created on
-// demand.
-func (p *Plane) EnsureScreenLabel(ctx context.Context, ticketID, label string) error {
+// EnsureMutexLabel creates a screen:<name> or system:<name> label if the
+// team lacks it, then attaches it. Mutex labels are born per-name as
+// design discovers them (DESIGN §6, §8), so unlike the fixed set they are
+// created on demand.
+func (p *Plane) EnsureMutexLabel(ctx context.Context, ticketID, label string) error {
 	teamID := p.Config.Tracker.TeamID
 	labels, err := p.Tracker.ListLabels(ctx, teamID)
 	if err != nil {

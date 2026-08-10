@@ -23,7 +23,10 @@ A project also needs:
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
 - Actions secrets: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`
 - A `ci` workflow (name matters — the sweep stub triggers on its
-  completion) running the quality gates from the config
+  completion) running the quality gates from the config, plus the mutex
+  audit: `git diff --name-only origin/main...HEAD > /tmp/changed &&
+  pipeline audit --changed-files /tmp/changed --ticket <key>` (the
+  ticket key parses out of the branch name)
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
 - Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch

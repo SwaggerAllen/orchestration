@@ -72,12 +72,15 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 // DesignOutcome is the design model's structured output.
 type DesignOutcome struct {
 	// Outcome by mode:
-	//   design:        "artifacts" | "screenless"
+	//   design:        "artifacts" | "decisionless"
 	//   design-reread: "clear" | "demote"
 	Outcome string `json:"outcome"`
-	// Screens are the screen names this ticket touches; the harness turns
-	// them into screen:<name> labels — the mutex is fed here (DESIGN §6).
+	// Screens and Systems are the touch lists; the harness turns them
+	// into screen:<name> and system:<name> labels — the mutex is fed
+	// here, and touching is not deciding: a decisionless pass still
+	// declares systems (DESIGN §4, §6).
 	Screens []string `json:"screens"`
+	Systems []string `json:"systems"`
 	// Summary is the argument for what was done or decided. Required for
 	// everything but a plain artifacts pass, where it is still posted
 	// when present.
@@ -95,7 +98,7 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 		return nil, fmt.Errorf("design outcome %s: %w", path, err)
 	}
 	legal := map[string][]string{
-		"design":        {"artifacts", "screenless"},
+		"design":        {"artifacts", "decisionless"},
 		"design-reread": {"clear", "demote"},
 	}
 	ok := false
@@ -107,8 +110,8 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 	if !ok {
 		return nil, fmt.Errorf("design outcome: %q is not legal in mode %s (want one of %v)", o.Outcome, mode, legal[mode])
 	}
-	if o.Outcome == "screenless" && len(o.Screens) > 0 {
-		return nil, fmt.Errorf("design outcome: screenless with screens %v is a contradiction", o.Screens)
+	if o.Outcome == "decisionless" && len(o.Screens) > 0 {
+		return nil, fmt.Errorf("design outcome: decisionless with screens %v is a contradiction — a screen touched is an artifact owed", o.Screens)
 	}
 	if o.Outcome != "artifacts" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("design outcome: %q without its argument is one the next pass repeats (DESIGN §3)", o.Outcome)
@@ -118,8 +121,9 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 
 // FinishDesign lands the outcome:
 //
-//   - artifacts  -> screen labels ensured, draft PR opened, Design review
-//   - screenless -> screenless-pass marker, straight to Ready for dev
+//   - artifacts     -> mutex labels ensured, draft PR opened, Design review
+//   - decisionless  -> system labels still ensured (touching is not
+//     deciding), decisionless-pass marker, straight to Ready for dev
 //     (the §9 sign-off exception; the marker must exist before the
 //     transition or the sweep reverts it)
 //   - clear      -> re-evaluate removed with the reasoning
@@ -128,10 +132,8 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome) error {
 	switch o.Outcome {
 	case "artifacts":
-		for _, s := range o.Screens {
-			if err := p.EnsureScreenLabel(ctx, res.TicketID, protocol.ScreenLabelPrefix+s); err != nil {
-				return err
-			}
+		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
+			return err
 		}
 		if res.PRNumber == 0 {
 			pr, err := h.CreatePR(ctx, res.Branch,
@@ -150,8 +152,11 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		}
 		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview)
 
-	case "screenless":
-		m := marker.Marker{Kind: marker.ScreenlessPass, Fields: map[string]string{}}
+	case "decisionless":
+		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
+			return err
+		}
+		m := marker.Marker{Kind: marker.DecisionlessPass, Fields: map[string]string{}}
 		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(o.Summary)); err != nil {
 			return err
 		}
@@ -170,4 +175,20 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		return p.TransitionTicket(ctx, res.TicketID, protocol.Designing)
 	}
 	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
+}
+
+// ensureMutexLabels attaches the declared touch lists as mutex labels,
+// creating per-name labels on demand (DESIGN §6).
+func ensureMutexLabels(ctx context.Context, p *plane.Plane, ticketID string, o *DesignOutcome) error {
+	for _, s := range o.Screens {
+		if err := p.EnsureMutexLabel(ctx, ticketID, protocol.ScreenLabelPrefix+s); err != nil {
+			return err
+		}
+	}
+	for _, s := range o.Systems {
+		if err := p.EnsureMutexLabel(ctx, ticketID, protocol.SystemLabelPrefix+s); err != nil {
+			return err
+		}
+	}
+	return nil
 }

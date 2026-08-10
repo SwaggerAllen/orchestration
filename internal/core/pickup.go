@@ -36,9 +36,9 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 			if other.ID == t.ID || !other.InFlight() {
 				continue
 			}
-			for _, mine := range t.ScreenLabels() {
+			for _, mine := range t.MutexLabels() {
 				if other.HasLabel(mine) {
-					return fmt.Errorf("pickup %s: screen label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
+					return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
 				}
 			}
 		}

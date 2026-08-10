@@ -148,15 +148,20 @@ func (t *Ticket) HasLabel(name string) bool {
 // special-cased in eight places (DESIGN §10).
 func (t *Ticket) IsBoundary() bool { return t.HasLabel(LabelBoundary) }
 
-// ScreenLabels returns the ticket's screen mutex labels (DESIGN §6).
-func (t *Ticket) ScreenLabels() []string {
+// MutexLabels returns the ticket's mutex labels — screen: and system:
+// alike, one rule for both kinds (DESIGN §6).
+func (t *Ticket) MutexLabels() []string {
 	var out []string
 	for _, l := range t.Labels {
-		if len(l) > len(protocol.ScreenLabelPrefix) && l[:len(protocol.ScreenLabelPrefix)] == protocol.ScreenLabelPrefix {
+		if hasPrefix(l, protocol.ScreenLabelPrefix) || hasPrefix(l, protocol.SystemLabelPrefix) {
 			out = append(out, l)
 		}
 	}
 	return out
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) > len(prefix) && s[:len(prefix)] == prefix
 }
 
 // Resolved reports a ticket that no longer holds or awaits work.
