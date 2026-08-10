@@ -1,0 +1,22 @@
+{
+  "name": "post-deploy: clean closes, needs-review and failure block, timeout surfaces merged-but-never-deployed (DESIGN 11, 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "merged"},
+    {"kind": "seed", "key": "T2", "state": "merged", "labels": ["needs-review"]},
+    {"kind": "seed", "key": "T3", "state": "merged"},
+    {"kind": "deploy", "key": "T1", "status": "deployed"},
+    {"kind": "deploy", "key": "T2", "status": "deployed"},
+    {"kind": "deploy", "key": "T3", "status": "pending"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "done"},
+    {"kind": "expect", "key": "T2", "state": "blocked", "hasLabels": ["needs-review"]},
+    {"kind": "expect", "key": "T3", "state": "merged"},
+    {"kind": "advance", "by": "31m"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "blocked"},
+    {"kind": "seed", "key": "T4", "state": "merged"},
+    {"kind": "deploy", "key": "T4", "status": "failed"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T4", "state": "blocked"}
+  ]
+}

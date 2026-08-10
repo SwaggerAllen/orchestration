@@ -1,0 +1,20 @@
+# Project stub: boundary agent. run-name is load-bearing (correlation).
+name: pipeline-agent-boundary
+run-name: "pipeline: boundary ${{ inputs.ticket }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Boundary ticket key
+        required: true
+        type: string
+
+jobs:
+  boundary:
+    uses: SwaggerAllen/orchestration/.github/workflows/agent-boundary.yml@main
+    with:
+      ticket: ${{ inputs.ticket }}
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

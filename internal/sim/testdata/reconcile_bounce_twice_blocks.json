@@ -1,0 +1,22 @@
+{
+  "name": "second reconcile bounce: Blocked, not rework again (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "reconciling", "run": {"kind": "reconcile", "live": true}},
+    {"kind": "comment", "key": "T1", "marker": "reconcile-bounce", "fields": {"missing": "cap_reached copy"}, "actor": "reconcile"},
+    {"kind": "transition", "key": "T1", "to": "ready_for_rework", "actor": "reconcile"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "runKind": "dev", "runLive": true, "markers": {"reconcile-bounce": 1}},
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/run/2"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "reconciling", "runKind": "reconcile", "runLive": true},
+    {"kind": "comment", "key": "T1", "marker": "reconcile-bounce", "fields": {"missing": "still the cap_reached copy"}, "actor": "reconcile"},
+    {"kind": "transition", "key": "T1", "to": "ready_for_rework", "actor": "reconcile"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"reconcile-bounce": 2}}
+  ]
+}

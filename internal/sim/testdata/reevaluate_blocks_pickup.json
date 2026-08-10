@@ -1,0 +1,15 @@
+{
+  "name": "re-evaluate blocks queue pickup; design re-reads; clean neighbor proceeds (DESIGN 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_dev", "labels": ["re-evaluate"], "createdAgo": "2h"},
+    {"kind": "seed", "key": "T2", "state": "ready_for_dev", "createdAgo": "1h"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_dev", "runKind": "design", "runLive": true},
+    {"kind": "expect", "key": "T2", "state": "ready_for_dev", "runKind": "dev", "runLive": true},
+    {"kind": "label", "key": "T1", "remove": ["re-evaluate"]},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_dev", "runLive": false},
+    {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true}
+  ]
+}

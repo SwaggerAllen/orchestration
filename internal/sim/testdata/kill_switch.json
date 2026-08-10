@@ -1,0 +1,13 @@
+{
+  "name": "kill switch: nothing new starts, resumes when lifted (DESIGN 13)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks"},
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/1"},
+    {"kind": "kill", "on": true},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "checks", "runLive": false},
+    {"kind": "kill", "on": false},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "reconciling", "runKind": "reconcile", "runLive": true}
+  ]
+}

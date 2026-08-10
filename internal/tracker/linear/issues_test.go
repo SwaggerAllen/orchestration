@@ -1,0 +1,224 @@
+package linear
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
+)
+
+func issueNode(id, key string, overrides map[string]any) map[string]any {
+	empty := map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}
+	n := map[string]any{
+		"id": id, "identifier": key, "title": "t", "description": "",
+		"priority": 3, "createdAt": "2026-01-01T00:00:00Z",
+		"state":            map[string]any{"id": "st_1"},
+		"projectMilestone": nil,
+		"labels":           empty, "comments": empty, "history": empty,
+		"relations": empty, "inverseRelations": empty,
+	}
+	for k, v := range overrides {
+		n[k] = v
+	}
+	return n
+}
+
+func issuesPage(nodes []map[string]any, hasNext bool, cursor string) map[string]any {
+	return map[string]any{"issues": map[string]any{
+		"nodes":    nodes,
+		"pageInfo": map[string]any{"hasNextPage": hasNext, "endCursor": cursor},
+	}}
+}
+
+func TestListIssuesHydratesAndPaginates(t *testing.T) {
+	calls := 0
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		if !strings.Contains(query, "issues(") {
+			t.Errorf("unexpected query: %s", query)
+		}
+		calls++
+		if calls == 1 {
+			if vars["after"] != nil {
+				t.Errorf("first page should have nil cursor, got %v", vars["after"])
+			}
+			rich := issueNode("i1", "PIPE-1", map[string]any{
+				"projectMilestone": map[string]any{"name": "M: alpha"},
+				"labels": map[string]any{
+					"nodes":    []any{map[string]any{"name": "screen:home"}, map[string]any{"name": "re-evaluate"}},
+					"pageInfo": map[string]any{"hasNextPage": false},
+				},
+				"comments": map[string]any{
+					"nodes": []any{map[string]any{
+						"body": "[pipeline:v1:ci-red] attempt=1", "createdAt": "2026-01-02T00:00:00Z",
+						"user": nil, "botActor": map[string]any{"id": "bot_1"},
+					}},
+					"pageInfo": map[string]any{"hasNextPage": false},
+				},
+				"history": map[string]any{
+					"nodes": []any{
+						map[string]any{ // not a state change: skipped
+							"createdAt": "2026-01-03T00:00:00Z", "fromState": nil, "toState": nil,
+							"actor": map[string]any{"id": "usr_a"}, "botActor": nil,
+						},
+						map[string]any{
+							"createdAt": "2026-01-02T00:00:00Z", "fromState": map[string]any{"id": "st_0"},
+							"toState": map[string]any{"id": "st_1"}, "actor": map[string]any{"id": "usr_a"}, "botActor": nil,
+						},
+					},
+					"pageInfo": map[string]any{"hasNextPage": false},
+				},
+				"relations": map[string]any{
+					"nodes":    []any{map[string]any{"type": "blocks", "relatedIssue": map[string]any{"id": "i9"}}},
+					"pageInfo": map[string]any{"hasNextPage": false},
+				},
+				"inverseRelations": map[string]any{
+					"nodes":    []any{map[string]any{"type": "blocks", "issue": map[string]any{"id": "i7"}}},
+					"pageInfo": map[string]any{"hasNextPage": false},
+				},
+			})
+			return issuesPage([]map[string]any{rich}, true, "cur_1"), nil
+		}
+		if vars["after"] != "cur_1" {
+			t.Errorf("second page cursor = %v", vars["after"])
+		}
+		return issuesPage([]map[string]any{issueNode("i2", "PIPE-2", nil)}, false, ""), nil
+	})
+	defer srv.Close()
+
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	issues, err := c.ListIssues(context.Background(), "team_1", "proj_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 || calls != 2 {
+		t.Fatalf("issues = %d over %d calls", len(issues), calls)
+	}
+	i := issues[0]
+	if i.Key != "PIPE-1" || i.Milestone != "M: alpha" || len(i.Labels) != 2 {
+		t.Errorf("hydration: %+v", i)
+	}
+	if len(i.Comments) != 1 || i.Comments[0].ActorID != "bot_1" {
+		t.Errorf("comments: %+v", i.Comments)
+	}
+	if i.LastChange == nil || i.LastChange.FromStateID != "st_0" || i.LastChange.ActorID != "usr_a" {
+		t.Errorf("last change: %+v", i.LastChange)
+	}
+	if !i.StateSince.Equal(i.LastChange.At) {
+		t.Errorf("stateSince = %v, want the last change time", i.StateSince)
+	}
+	if len(i.Blocks) != 1 || i.Blocks[0] != "i9" || len(i.BlockedBy) != 1 || i.BlockedBy[0] != "i7" {
+		t.Errorf("relations: blocks=%v blockedBy=%v", i.Blocks, i.BlockedBy)
+	}
+}
+
+func TestListIssuesRefusesNestedOverflow(t *testing.T) {
+	srv := fakeLinear(t, func(string, map[string]any) (any, []gqlError) {
+		n := issueNode("i1", "PIPE-1", map[string]any{
+			"comments": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": true}},
+		})
+		return issuesPage([]map[string]any{n}, false, ""), nil
+	})
+	defer srv.Close()
+
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	_, err := c.ListIssues(context.Background(), "team_1", "proj_1")
+	if err == nil || !strings.Contains(err.Error(), "refusing to truncate") {
+		t.Errorf("want nested-overflow refusal, got %v", err)
+	}
+}
+
+func TestIssueWritesSendTheRightMutations(t *testing.T) {
+	var seen []string
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		switch {
+		case strings.Contains(query, "issueUpdate"):
+			input := vars["input"].(map[string]any)
+			for k := range input {
+				seen = append(seen, k)
+			}
+			return map[string]any{"issueUpdate": map[string]any{"success": true}}, nil
+		case strings.Contains(query, "commentCreate"):
+			seen = append(seen, "comment")
+			return map[string]any{"commentCreate": map[string]any{"success": true}}, nil
+		case strings.Contains(query, "issueLabels"):
+			return map[string]any{"issueLabels": map[string]any{
+				"nodes":    []any{map[string]any{"id": "l1", "name": "re-evaluate"}},
+				"pageInfo": map[string]any{"hasNextPage": false},
+			}}, nil
+		default:
+			t.Errorf("unexpected query: %s", query)
+			return nil, nil
+		}
+	})
+	defer srv.Close()
+
+	ctx := context.Background()
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	if err := c.UpdateIssueState(ctx, "i1", "st_2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CommentOnIssue(ctx, "i1", "[pipeline:v1:revert] rule=sign-off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RemoveIssueLabel(ctx, "team_1", "i1", "re-evaluate"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.AddIssueLabel(ctx, "team_1", "i1", "re-evaluate"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"stateId", "comment", "removedLabelIds", "addedLabelIds"}
+	if len(seen) != len(want) {
+		t.Fatalf("mutations = %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Errorf("mutation %d = %q, want %q", i, seen[i], want[i])
+		}
+	}
+}
+
+func TestCreateIssueSendsMilestoneAndLabels(t *testing.T) {
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		switch {
+		case strings.Contains(query, "issueCreate"):
+			input := vars["input"].(map[string]any)
+			if input["projectMilestoneId"] != "ms_1" || input["stateId"] != "st_todo" {
+				t.Errorf("input = %v", input)
+			}
+			ids := input["labelIds"].([]any)
+			if len(ids) != 1 || ids[0] != "l_boundary" {
+				t.Errorf("labelIds = %v", ids)
+			}
+			return map[string]any{"issueCreate": map[string]any{
+				"success": true,
+				"issue": map[string]any{
+					"id": "i_b", "identifier": "PIPE-99", "title": input["title"],
+					"createdAt": "2026-01-05T00:00:00Z", "state": map[string]any{"id": "st_todo"},
+				},
+			}}, nil
+		case strings.Contains(query, "issueLabels"):
+			return map[string]any{"issueLabels": map[string]any{
+				"nodes":    []any{map[string]any{"id": "l_boundary", "name": "milestone-boundary"}},
+				"pageInfo": map[string]any{"hasNextPage": false},
+			}}, nil
+		default:
+			t.Errorf("unexpected query: %s", query)
+			return nil, nil
+		}
+	})
+	defer srv.Close()
+
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	i, err := c.CreateIssue(context.Background(), tracker.NewIssue{
+		TeamID: "team_1", ProjectID: "proj_1", MilestoneID: "ms_1",
+		Title: "Milestone boundary — M: alpha", StateID: "st_todo",
+		Labels: []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i.Key != "PIPE-99" {
+		t.Errorf("issue = %+v", i)
+	}
+}

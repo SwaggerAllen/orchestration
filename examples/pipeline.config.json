@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "tracker": {
+    "teamId": "team_sample",
+    "projectId": "project_sample"
+  },
+  "states": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "designing": "Designing",
+    "design_review": "Design review",
+    "ready_for_dev": "Ready for dev",
+    "in_progress": "In progress",
+    "checks": "Checks",
+    "reconciling": "Reconciling",
+    "ready_for_rework": "Ready for rework",
+    "reworking": "Reworking",
+    "merged": "Merged",
+    "boundary_review": "Boundary review",
+    "blocked": "Blocked",
+    "done": "Done",
+    "canceled": "Canceled"
+  },
+  "designOwnedPaths": [
+    "storybook/**",
+    "screens/*.md",
+    "systems/*.md",
+    "lib/sample_web/components/**"
+  ],
+  "qualityGates": [
+    "mix format --check-formatted",
+    "mix compile --warnings-as-errors",
+    "mix test"
+  ],
+  "deploy": {
+    "provider": "digitalocean",
+    "endpoint": "https://api.digitalocean.com/v2/apps/sample-app-id/deployments",
+    "timeout": "30m"
+  },
+  "staleClaimGrace": "20m",
+  "preview": {
+    "pagesProject": "sample-storybook",
+    "buildCommand": "mix storybook.export",
+    "outputDir": "priv/static/storybook"
+  },
+  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
+  "actors": {
+    "author": ["usr_author"],
+    "controlplane": ["memory-bot"]
+  },
+  "agents": {
+    "design": "pipeline-agent-design.yml",
+    "dev": "pipeline-agent-dev.yml",
+    "reconcile": "pipeline-agent-reconcile.yml",
+    "boundary": "pipeline-agent-boundary.yml"
+  }
+}

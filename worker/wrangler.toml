@@ -1,0 +1,16 @@
+# The metronome Worker (PLAN M7). Deploy with:
+#   cd worker && npx wrangler deploy
+#   npx wrangler secret put GITHUB_DISPATCH_TOKEN
+name = "pipeline-metronome"
+main = "index.ts"
+compatibility_date = "2026-01-01"
+
+[triggers]
+# Every 5 minutes. This is the polled loop's cadence; the CI hops are
+# event-driven in the project repo and never wait for it (DESIGN §13).
+crons = ["*/5 * * * *"]
+
+[vars]
+GITHUB_REPOSITORY = "swaggerallen/orchestration-dummy"
+SWEEP_WORKFLOW = "pipeline-sweep.yml"
+DISPATCH_REF = "main"

@@ -1,0 +1,9 @@
+{
+  "name": "no forward transition while re-evaluate is set (DESIGN 7, 9)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_dev", "labels": ["re-evaluate"]},
+    {"kind": "transition", "key": "T1", "to": "in_progress", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_dev", "hasLabels": ["re-evaluate"], "markers": {"revert": 1}, "runKind": "design", "runLive": true}
+  ]
+}

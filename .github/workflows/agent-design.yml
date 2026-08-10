@@ -1,0 +1,109 @@
+# Reusable design-agent run (PLAN M5): normal passes on Designing tickets
+# and re-evaluate re-reads on queue tickets. The harness brackets the
+# model: claim asserts and marks, the model designs and writes an outcome,
+# finish lands it (draft PR + Design review, screenless auto-pass, clear,
+# or demote — DESIGN §4, §6, §7).
+name: agent-design
+
+on:
+  workflow_call:
+    inputs:
+      ticket:
+        description: Ticket key, e.g. PIPE-12
+        required: true
+        type: string
+      pipeline_ref:
+        description: Pipeline repo ref to run the harness from
+        required: false
+        type: string
+        default: main
+    secrets:
+      LINEAR_API_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  design:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: checkout project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: checkout pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: SwaggerAllen/orchestration
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .pipeline/go.mod
+
+      - name: claim
+        id: claim
+        run: |
+          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent claim \
+            --kind design \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+            --ticket "${{ inputs.ticket }}" \
+            --dispatch-id "${{ github.run_id }}" \
+            --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --out "$RUNNER_TEMP/pipeline" \
+            --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
+            --outcome-path "$RUNNER_TEMP/pipeline/outcome.json"
+
+      - name: check out the ticket branch
+        run: |
+          git config user.name "pipeline-design-agent"
+          git config user.email "pipeline@invalid"
+          BRANCH="${{ steps.claim.outputs.branch }}"
+          git fetch origin
+          git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
+          echo ".pipeline/" >> .git/info/exclude
+
+      - name: run the design agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npx --yes @anthropic-ai/claude-code@latest \
+            -p "$(cat "$RUNNER_TEMP/pipeline/prompt.md")" \
+            --dangerously-skip-permissions
+
+      - name: push artifacts (if any)
+        run: |
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add -A ':!.pipeline'
+            git commit -m "wip: uncommitted design artifacts at end of agent run"
+          fi
+          # A screenless pass has no commits; pushing an unchanged branch
+          # is a no-op that must not fail the run.
+          if [ -n "$(git log origin/main..HEAD --oneline 2>/dev/null)" ]; then
+            git push -u origin "${{ steps.claim.outputs.branch }}"
+          fi
+
+      - name: finish
+        run: |
+          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent finish \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+            --claim "$RUNNER_TEMP/pipeline/claim.json" \
+            --outcome "$RUNNER_TEMP/pipeline/outcome.json"
+
+      - name: abort on failure
+        if: failure() && steps.claim.outcome == 'success'
+        run: |
+          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent abort \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+            --claim "$RUNNER_TEMP/pipeline/claim.json" \
+            --reason failed \
+            --message "Design agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
