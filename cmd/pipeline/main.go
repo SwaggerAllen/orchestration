@@ -9,8 +9,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
 	"github.com/SwaggerAllen/orchestration/internal/sim"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
@@ -33,6 +36,10 @@ func run(args []string) error {
 	switch args[0] {
 	case "setup":
 		return cmdSetup(args[1:])
+	case "sweep":
+		return cmdSweep(args[1:])
+	case "ids":
+		return cmdIDs(args[1:])
 	case "sim":
 		return cmdSim(args[1:])
 	case "version":
@@ -52,6 +59,11 @@ func usage(w *os.File) {
 commands:
   setup    provision a Linear team with the pipeline's states and labels
            (idempotent; requires LINEAR_API_KEY)
+  sweep    one control-plane pass: build snapshot, plan, apply
+           (requires LINEAR_API_KEY; --dry-run plans without applying;
+           PIPELINE_KILL_SWITCH=true halts all planning)
+  ids      print the Linear ids a config needs: viewer, teams, projects
+           (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)
   version  print the binary version
 `)
@@ -93,6 +105,75 @@ func cmdSetup(args []string) error {
 	fmt.Printf("%d actions %s:\n", len(actions), verb)
 	for _, a := range actions {
 		fmt.Println("  " + a.String())
+	}
+	return nil
+}
+
+func cmdSweep(args []string) error {
+	fs := flag.NewFlagSet("sweep", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	dryRun := fs.Bool("dry-run", false, "plan and print actions without applying them")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	apiKey := os.Getenv("LINEAR_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("sweep: LINEAR_API_KEY is not set")
+	}
+	kill := os.Getenv("PIPELINE_KILL_SWITCH")
+	killOn := kill == "1" || kill == "true"
+
+	p := plane.New(linear.New(apiKey), cfg)
+	ctx := context.Background()
+	snap, err := p.Build(ctx, time.Now(), killOn)
+	if err != nil {
+		return err
+	}
+	acts := core.Sweep(snap)
+	if killOn {
+		fmt.Println("kill switch is on: nothing planned, nothing applied")
+		return nil
+	}
+	if len(acts) == 0 {
+		fmt.Printf("nothing to do (%d tickets read, milestone %q)\n", len(snap.Tickets), snap.CurrentMilestone)
+		return nil
+	}
+	if *dryRun {
+		fmt.Printf("%d actions planned (dry run, nothing applied):\n", len(acts))
+		for _, a := range acts {
+			fmt.Println("  " + a.String())
+		}
+		return nil
+	}
+	fmt.Printf("%d actions:\n", len(acts))
+	return p.Execute(ctx, acts, os.Stdout)
+}
+
+func cmdIDs(args []string) error {
+	fs := flag.NewFlagSet("ids", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	apiKey := os.Getenv("LINEAR_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("ids: LINEAR_API_KEY is not set")
+	}
+	id, err := linear.New(apiKey).Whoami(context.Background())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("viewer: %s  (%s)\n", id.ViewerID, id.ViewerName)
+	fmt.Println("  ^ this id belongs in actors.controlplane (the key the control plane writes with),")
+	fmt.Println("    or actors.author if this is your personal key")
+	for _, t := range id.Teams {
+		fmt.Printf("team: %s  [%s] %s\n", t.ID, t.Key, t.Name)
+		for _, p := range t.Projects {
+			fmt.Printf("  project: %s  %s\n", p.ID, p.Name)
+		}
 	}
 	return nil
 }

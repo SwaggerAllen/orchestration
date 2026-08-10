@@ -50,7 +50,18 @@ type Config struct {
 	// MilestoneNaming is the convention identifying alternating debt and
 	// product milestones (DESIGN §2.9), e.g. "debt: / product: prefixes".
 	MilestoneNaming string `json:"milestoneNaming"`
+
+	// Actors maps pipeline roles to tracker user ids. The writer matrix
+	// (DESIGN §3, §9) judges roles, and this table is where identity
+	// becomes role — the core never sees a user id. author and
+	// controlplane are required; agent roles fill in as their identities
+	// exist (M3+). An id may hold only one role, or the matrix is
+	// ambiguous.
+	Actors map[string][]string `json:"actors"`
 }
+
+// ActorRoles are the legal keys of Actors.
+var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile", "boundary"}
 
 // Tracker identifies the Linear team and project. Both are required on
 // every pickup: the state is the queue, the project is the scope (DESIGN §2).
@@ -182,6 +193,34 @@ func (c *Config) Validate() error {
 	}
 	if c.MilestoneNaming == "" {
 		add("milestoneNaming: missing")
+	}
+
+	if len(c.Actors) == 0 {
+		add("actors: missing")
+	} else {
+		legal := map[string]bool{}
+		for _, r := range ActorRoles {
+			legal[r] = true
+		}
+		for role := range c.Actors {
+			if !legal[role] {
+				add("actors.%s: not a pipeline role", role)
+			}
+		}
+		for _, required := range []string{"author", "controlplane"} {
+			if len(c.Actors[required]) == 0 {
+				add("actors.%s: missing — at least one tracker user id", required)
+			}
+		}
+		seen := map[string]string{}
+		for role, ids := range c.Actors {
+			for _, id := range ids {
+				if prev, dup := seen[id]; dup {
+					add("actors.%s: id %q already assigned to %s — one role per id, or the writer matrix is ambiguous", role, id, prev)
+				}
+				seen[id] = role
+			}
+		}
 	}
 
 	if len(problems) > 0 {

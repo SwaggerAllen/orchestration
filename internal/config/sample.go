@@ -53,5 +53,9 @@ func Sample() *Config {
 			PagesProject: "sample-storybook",
 		},
 		MilestoneNaming: "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
+		Actors: map[string][]string{
+			"author":       {"usr_author"},
+			"controlplane": {"memory-bot"},
+		},
 	}
 }

@@ -94,6 +94,9 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 		{"staleClaimGrace", func(m map[string]any) { delete(m, "staleClaimGrace") }, "staleClaimGrace: missing"},
 		{"preview.pagesProject", func(m map[string]any) { m["preview"].(map[string]any)["pagesProject"] = "" }, "preview.pagesProject: missing"},
 		{"milestoneNaming", func(m map[string]any) { delete(m, "milestoneNaming") }, "milestoneNaming: missing"},
+		{"actors", func(m map[string]any) { delete(m, "actors") }, "actors: missing"},
+		{"actors.author", func(m map[string]any) { delete(m["actors"].(map[string]any), "author") }, "actors.author: missing"},
+		{"actors.controlplane", func(m map[string]any) { delete(m["actors"].(map[string]any), "controlplane") }, "actors.controlplane: missing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +128,24 @@ func TestValidateRejectsUnknownState(t *testing.T) {
 	_, err := Load(writeConfig(t, m))
 	if err == nil || !strings.Contains(err.Error(), "not a protocol state") {
 		t.Errorf("want unknown-state error, got %v", err)
+	}
+}
+
+func TestActorsRejectDoubleAssignment(t *testing.T) {
+	m := sampleAsMap(t)
+	m["actors"].(map[string]any)["dev"] = []any{"usr_author"}
+	_, err := Load(writeConfig(t, m))
+	if err == nil || !strings.Contains(err.Error(), "already assigned") {
+		t.Errorf("want double-assignment error, got %v", err)
+	}
+}
+
+func TestActorsRejectUnknownRole(t *testing.T) {
+	m := sampleAsMap(t)
+	m["actors"].(map[string]any)["janitor"] = []any{"usr_j"}
+	_, err := Load(writeConfig(t, m))
+	if err == nil || !strings.Contains(err.Error(), "not a pipeline role") {
+		t.Errorf("want unknown-role error, got %v", err)
 	}
 }
 

@@ -1,0 +1,60 @@
+# Live verification against the scratch Linear team (PLAN M0/M2 gates).
+# Triggered by hand; the LINEAR_API_KEY lives only in this repo's Actions
+# secrets, so live checks run where the credential lives and never leave it.
+#
+# The concurrency group is the same one the real control plane will use:
+# two dispatchers at once quietly defeat every single-agent guarantee
+# downstream (DESIGN §13).
+name: verify-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: Path to a pipeline config in this repo
+        required: true
+        default: configs/scratch.config.json
+      apply:
+        description: Apply setup and run a live sweep (false = dry-run only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-control-plane
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      PIPELINE_KILL_SWITCH: ${{ vars.PIPELINE_KILL_SWITCH }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: setup (dry run)
+        run: go run ./cmd/pipeline setup --config "${{ inputs.config }}" --dry-run
+
+      - name: setup (apply, then assert idempotence)
+        if: ${{ inputs.apply }}
+        run: |
+          go run ./cmd/pipeline setup --config "${{ inputs.config }}"
+          out="$(go run ./cmd/pipeline setup --config "${{ inputs.config }}")"
+          echo "$out"
+          echo "$out" | grep -q "nothing to do" || {
+            echo "::error::second setup run was not a no-op — idempotence gate failed" >&2
+            exit 1
+          }
+
+      - name: sweep (dry run)
+        run: go run ./cmd/pipeline sweep --config "${{ inputs.config }}" --dry-run
+
+      - name: sweep (apply)
+        if: ${{ inputs.apply }}
+        run: go run ./cmd/pipeline sweep --config "${{ inputs.config }}"

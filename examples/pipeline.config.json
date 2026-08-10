@@ -39,5 +39,9 @@
   "preview": {
     "pagesProject": "sample-storybook"
   },
-  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'"
+  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
+  "actors": {
+    "author": ["usr_author"],
+    "controlplane": ["memory-bot"]
+  }
 }
