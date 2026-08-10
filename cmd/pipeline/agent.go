@@ -59,13 +59,14 @@ func cmdAgentClaim(args []string) error {
 	fs := flag.NewFlagSet("agent claim", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	ticket := fs.String("ticket", "", "ticket key, e.g. PIPE-12")
-	kind := fs.String("kind", "dev", "agent kind: dev or reconcile")
+	kind := fs.String("kind", "dev", "agent kind: dev, reconcile, or design")
 	dispatchID := fs.String("dispatch-id", "", "workflow run id (the claim's audit trail)")
 	dispatchURL := fs.String("dispatch-url", "", "workflow run URL")
 	outDir := fs.String("out", "", "directory for claim.json, scope.md and prompt.md")
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file to assemble prompt.md from")
 	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
 	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
+	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -83,8 +84,10 @@ func cmdAgentClaim(args []string) error {
 		res, err = agent.Claim(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
 	case "reconcile":
 		res, err = agent.ClaimReconcile(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+	case "design":
+		res, err = agent.ClaimDesign(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
 	default:
-		return fmt.Errorf("agent claim: --kind must be dev or reconcile")
+		return fmt.Errorf("agent claim: --kind must be dev, reconcile, or design")
 	}
 	if err != nil {
 		return err
@@ -108,9 +111,12 @@ func cmdAgentClaim(args []string) error {
 			return err
 		}
 		var prompt string
-		if *kind == "reconcile" {
+		switch *kind {
+		case "reconcile":
 			prompt = assembleReconcilePrompt(string(tpl), res, *verdictPath)
-		} else {
+		case "design":
+			prompt = assembleDesignPrompt(string(tpl), res, *outcomePath)
+		default:
 			prompt = assemblePrompt(string(tpl), res, *handbackPath)
 		}
 		if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
@@ -182,6 +188,31 @@ func assembleReconcilePrompt(template string, res *agent.ClaimResult, verdictPat
 	return string(b)
 }
 
+// assembleDesignPrompt is the design counterpart: the argument, the mode,
+// the comments, and where the outcome goes.
+func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath string) string {
+	var b []byte
+	add := func(s string) { b = append(b, s...) }
+	add(template)
+	add("\n\n---\n\n")
+	add(fmt.Sprintf("# Ticket %s: %s\n\nMode: %s\n", res.TicketKey, res.Title, res.Mode))
+	if res.Mode == "design-reread" {
+		add("\nThis queue ticket carries re-evaluate: another thread discovered a collision.\nRe-read only — decide clear or demote, do not redesign now (DESIGN 7).\n")
+	}
+	add("\n## The argument\n\n" + res.Description + "\n")
+	if len(res.Comments) > 0 {
+		add("\n## Comments, oldest first\n")
+		for _, c := range res.Comments {
+			add("\n---\n" + c + "\n")
+		}
+	}
+	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
+	if outcomePath != "" {
+		add(fmt.Sprintf("- Write your outcome JSON to `%s` before you finish (see Outcomes above).\n", outcomePath))
+	}
+	return string(b)
+}
+
 func loadClaim(path string) (*agent.ClaimResult, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -200,6 +231,7 @@ func cmdAgentFinish(args []string) error {
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
 	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
 	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
+	outcome := fs.String("outcome", "", "outcome.json written by the model (design)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -227,6 +259,21 @@ func cmdAgentFinish(args []string) error {
 			return err
 		}
 		fmt.Printf("reconciled %s: %s\n", res.TicketKey, v.Outcome)
+		return nil
+	}
+
+	if res.Mode == "design" || res.Mode == "design-reread" {
+		if *outcome == "" {
+			return fmt.Errorf("agent finish: design needs --outcome")
+		}
+		o, err := agent.LoadDesignOutcome(*outcome, res.Mode)
+		if err != nil {
+			return err
+		}
+		if err := agent.FinishDesign(context.Background(), p, h, res, o); err != nil {
+			return err
+		}
+		fmt.Printf("design %s: %s\n", res.TicketKey, o.Outcome)
 		return nil
 	}
 

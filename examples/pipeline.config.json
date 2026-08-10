@@ -38,7 +38,9 @@
   },
   "staleClaimGrace": "20m",
   "preview": {
-    "pagesProject": "sample-storybook"
+    "pagesProject": "sample-storybook",
+    "buildCommand": "mix storybook.export",
+    "outputDir": "priv/static/storybook"
   },
   "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
   "actors": {

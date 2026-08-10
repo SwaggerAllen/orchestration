@@ -27,6 +27,35 @@ func (p *Plane) AddTicketLabel(ctx context.Context, ticketID, label string) erro
 	return p.Tracker.AddIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
 }
 
+// RemoveTicketLabel detaches one label by name.
+func (p *Plane) RemoveTicketLabel(ctx context.Context, ticketID, label string) error {
+	return p.Tracker.RemoveIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
+}
+
+// EnsureScreenLabel creates the screen:<name> label if the team lacks it,
+// then attaches it. Screen labels are born per-screen as design discovers
+// them (DESIGN §6, §8), so unlike the fixed set they are created on
+// demand.
+func (p *Plane) EnsureScreenLabel(ctx context.Context, ticketID, label string) error {
+	teamID := p.Config.Tracker.TeamID
+	labels, err := p.Tracker.ListLabels(ctx, teamID)
+	if err != nil {
+		return err
+	}
+	exists := false
+	for _, l := range labels {
+		if l.Name == label {
+			exists = true
+		}
+	}
+	if !exists {
+		if _, err := p.Tracker.CreateLabel(ctx, teamID, label); err != nil {
+			return err
+		}
+	}
+	return p.Tracker.AddIssueLabel(ctx, teamID, ticketID, label)
+}
+
 // PRForTicket finds the open PR carrying the ticket key in its branch
 // name, or nil — including when no host is attached.
 func (p *Plane) PRForTicket(ctx context.Context, ticketKey string) *host.PR {

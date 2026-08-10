@@ -1,0 +1,20 @@
+# Project stub: design agent. run-name is load-bearing (correlation).
+name: pipeline-agent-design
+run-name: "pipeline: design ${{ inputs.ticket }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Ticket key, e.g. PIPE-12
+        required: true
+        type: string
+
+jobs:
+  design:
+    uses: SwaggerAllen/orchestration/.github/workflows/agent-design.yml@main
+    with:
+      ticket: ${{ inputs.ticket }}
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

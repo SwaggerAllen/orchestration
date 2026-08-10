@@ -52,6 +52,8 @@ func Sample() *Config {
 		StaleClaimGrace: Duration(20 * time.Minute),
 		Preview: Preview{
 			PagesProject: "sample-storybook",
+			BuildCommand: "mix storybook.export",
+			OutputDir:    "priv/static/storybook",
 		},
 		MilestoneNaming: "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
 		Actors: map[string][]string{

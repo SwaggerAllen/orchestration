@@ -1,0 +1,173 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
+	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
+)
+
+// ClaimDesign is the design agent's pickup: a normal pass on a Designing
+// ticket, or a re-evaluate re-read on a queue ticket (DESIGN §7). Neither
+// transitions state — Designing already means "design agent, now", and a
+// re-read leaves the queue state alone; the claim is the assertion plus
+// the dispatch marker.
+func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchURL string, now time.Time) (*ClaimResult, error) {
+	snap, err := p.Build(ctx, now, false)
+	if err != nil {
+		return nil, err
+	}
+	var t *core.Ticket
+	for _, cand := range snap.Tickets {
+		if cand.Key == ticketKey {
+			t = cand
+		}
+	}
+	if t == nil {
+		return nil, fmt.Errorf("design claim: no ticket %q in the project scope", ticketKey)
+	}
+	if err := core.VerifyPickup(snap, t.ID, core.AgentDesign); err != nil {
+		return nil, err
+	}
+
+	mode := "design"
+	if t.State != protocol.Designing {
+		mode = "design-reread"
+	}
+	res := &ClaimResult{
+		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
+		Mode:        mode,
+		Scope:       t.Description,
+		Description: t.Description,
+	}
+	for _, c := range t.Comments {
+		res.Comments = append(res.Comments, c.Body)
+	}
+	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
+		res.Branch = pr.Branch
+		res.PRNumber = pr.Number
+	} else {
+		res.Branch = deriveBranch(t.Key, t.Title)
+	}
+
+	m := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
+		"id":   dispatchID,
+		"kind": "design",
+		"url":  dispatchURL,
+	}}
+	if err := p.CommentTicket(ctx, t.ID, m.Format()); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// DesignOutcome is the design model's structured output.
+type DesignOutcome struct {
+	// Outcome by mode:
+	//   design:        "artifacts" | "screenless"
+	//   design-reread: "clear" | "demote"
+	Outcome string `json:"outcome"`
+	// Screens are the screen names this ticket touches; the harness turns
+	// them into screen:<name> labels — the mutex is fed here (DESIGN §6).
+	Screens []string `json:"screens"`
+	// Summary is the argument for what was done or decided. Required for
+	// everything but a plain artifacts pass, where it is still posted
+	// when present.
+	Summary string `json:"summary"`
+}
+
+// LoadDesignOutcome reads and validates the outcome for the given mode.
+func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("design outcome: %w (a design run that decided nothing did not design)", err)
+	}
+	var o DesignOutcome
+	if err := json.Unmarshal(raw, &o); err != nil {
+		return nil, fmt.Errorf("design outcome %s: %w", path, err)
+	}
+	legal := map[string][]string{
+		"design":        {"artifacts", "screenless"},
+		"design-reread": {"clear", "demote"},
+	}
+	ok := false
+	for _, l := range legal[mode] {
+		if o.Outcome == l {
+			ok = true
+		}
+	}
+	if !ok {
+		return nil, fmt.Errorf("design outcome: %q is not legal in mode %s (want one of %v)", o.Outcome, mode, legal[mode])
+	}
+	if o.Outcome == "screenless" && len(o.Screens) > 0 {
+		return nil, fmt.Errorf("design outcome: screenless with screens %v is a contradiction", o.Screens)
+	}
+	if o.Outcome != "artifacts" && strings.TrimSpace(o.Summary) == "" {
+		return nil, fmt.Errorf("design outcome: %q without its argument is one the next pass repeats (DESIGN §3)", o.Outcome)
+	}
+	return &o, nil
+}
+
+// FinishDesign lands the outcome:
+//
+//   - artifacts  -> screen labels ensured, draft PR opened, Design review
+//   - screenless -> screenless-pass marker, straight to Ready for dev
+//     (the §9 sign-off exception; the marker must exist before the
+//     transition or the sweep reverts it)
+//   - clear      -> re-evaluate removed with the reasoning
+//   - demote     -> back to Designing with the reasoning; the flag rides
+//     along and the live pass folds it in (DESIGN §7)
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome) error {
+	switch o.Outcome {
+	case "artifacts":
+		for _, s := range o.Screens {
+			if err := p.EnsureScreenLabel(ctx, res.TicketID, protocol.ScreenLabelPrefix+s); err != nil {
+				return err
+			}
+		}
+		if res.PRNumber == 0 {
+			pr, err := h.CreatePR(ctx, res.Branch,
+				fmt.Sprintf("%s %s", res.TicketKey, res.Title),
+				fmt.Sprintf("Design artifacts for %s. One PR per ticket; dev pushes to this same branch (DESIGN §5).", res.TicketKey),
+				true)
+			if err != nil {
+				return fmt.Errorf("design finish %s: draft PR: %w", res.TicketKey, err)
+			}
+			res.PRNumber = pr.Number
+		}
+		if o.Summary != "" {
+			if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+				return err
+			}
+		}
+		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview)
+
+	case "screenless":
+		m := marker.Marker{Kind: marker.ScreenlessPass, Fields: map[string]string{}}
+		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(o.Summary)); err != nil {
+			return err
+		}
+		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDev)
+
+	case "clear":
+		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+			return err
+		}
+		return p.RemoveTicketLabel(ctx, res.TicketID, core.LabelReEvaluate)
+
+	case "demote":
+		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+			return err
+		}
+		return p.TransitionTicket(ctx, res.TicketID, protocol.Designing)
+	}
+	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
+}

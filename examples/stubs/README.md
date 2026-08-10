@@ -8,6 +8,8 @@ bindings live.
 |---|---|
 | `pipeline-sweep.yml` | Control-plane pass: metronome dispatch + CI-hop trigger |
 | `pipeline-agent-dev.yml` | Dev agent run, dispatched by the sweep |
+| `pipeline-agent-design.yml` | Design agent run, dispatched on Designing entry and re-evaluate re-reads |
+| `pipeline-preview.yml` | Per-branch storybook export to Cloudflare Pages |
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-record-deploy.yml` | Dummy project only: records a GitHub Deployment per merge so deploy detection has real data (config `deploy.provider: "github"`) |
 

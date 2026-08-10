@@ -1,0 +1,35 @@
+# Project stub: per-branch static storybook preview on Cloudflare Pages
+# (DESIGN §4). Every push to a non-main branch rebuilds the export and
+# publishes it; Pages gives each branch a stable preview URL with no
+# machinery of ours. The build/output values must match the project's
+# pipeline.config.json preview section.
+name: pipeline-preview
+run-name: "pipeline: preview ${{ github.ref_name }}"
+
+on:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Project toolchain setup goes here (Elixir/OTP for a Phoenix app).
+      # - uses: erlef/setup-beam@v1
+      #   with: { elixir-version: "1.17", otp-version: "27" }
+      # - run: mix deps.get
+
+      - name: build the static export
+        run: mix storybook.export # keep in sync with config preview.buildCommand
+
+      - name: publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy priv/static/storybook
+            --project-name=sample-storybook
+            --branch=${{ github.ref_name }}

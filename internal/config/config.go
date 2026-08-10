@@ -98,10 +98,15 @@ type Deploy struct {
 // DeployProviders are the legal Deploy.Provider values.
 var DeployProviders = []string{"digitalocean", "github"}
 
-// Preview names the Cloudflare Pages project storybook exports publish to
-// (DESIGN §4).
+// Preview configures the static storybook export (DESIGN §4): what builds
+// it and where Cloudflare Pages serves it.
 type Preview struct {
 	PagesProject string `json:"pagesProject"`
+	// BuildCommand produces the static export; OutputDir is what gets
+	// published. Both are project-specific because the export is built by
+	// the project's own toolchain.
+	BuildCommand string `json:"buildCommand"`
+	OutputDir    string `json:"outputDir"`
 }
 
 // Duration is a time.Duration that reads and writes Go duration strings
@@ -215,6 +220,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Preview.PagesProject == "" {
 		add("preview.pagesProject: missing")
+	}
+	if c.Preview.BuildCommand == "" {
+		add("preview.buildCommand: missing")
+	}
+	if c.Preview.OutputDir == "" {
+		add("preview.outputDir: missing")
 	}
 	if c.MilestoneNaming == "" {
 		add("milestoneNaming: missing")
