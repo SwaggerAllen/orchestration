@@ -38,6 +38,7 @@ agent. Several assumptions here are load-bearing and are called out where they a
 | **Hand-back** | The comment a dev agent writes when it finishes: what landed, the commit, anything deliberately not done and why, and any open question it resolved. An issue that moves without one is a state change nobody can audit. |
 | **Triage** | Linear's intake state. Where an agent's findings go so the author can accept or decline them in one keystroke, rather than the finding evaporating in a chat log. |
 | **Gating debt** | Tech debt whose absence makes the *next* product milestone materially harder. Scheduled ahead of that milestone rather than remembered. |
+| **The sketch** | The implementation sketch a design pass posts on the ticket (§4): which systems the change touches, each new structure named as a decision, the shape of the change, the open questions. The part of architecture a human sees before implementation exists. |
 | **In flight** | Any state from `Ready for dev` through `Merged` inclusive. |
 
 ---
@@ -97,8 +98,10 @@ and the drift shows up as agents disagreeing about what a state means.
    shipped.
 7. **Push-back has a channel.** A design that can't be built as drawn goes back to `Designing`
    with a comment — never a silently worse version, never a silent third thing.
-8. **A new component or token is a decision, not a port.** It must be named in the issue.
-   Enforced in CI (§9), not by convention.
+8. **A new component, token, context, table or dependency is a decision, not a port.** It
+   must be named — components and tokens in the issue, structure in the sketch (§4) — because
+   a decision nobody named is a decision nobody reviewed. Enforced in CI (§9), not by
+   convention.
 9. **Milestones alternate debt and product.** A tech-debt milestone precedes each product
    milestone, so debt that gates a milestone is scheduled rather than remembered. A thin debt
    milestone is fine; an honest empty beats a padded one.
@@ -139,10 +142,11 @@ waiting on the author* as distinct from *design is still working*. Sign-off is t
 `Design review` → `Designing` with a comment** — the same channel the dev agent uses to push
 back, for the same reason: a rejection without its argument is one the next pass repeats.
 
-**The screenless exception:** a design pass that ends with no screen labels and no artifacts
-advances straight to `Ready for dev` (§6). Sign-off exists to approve artifacts; with nothing
-to look at it is a rubber stamp, and rubber stamps train the author to skim the reviews that
-matter.
+**The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
+and a sketch introducing no new structure — no new system, table, dependency, component or
+token — advances straight to `Ready for dev` (§6), carrying its sketch in the marker comment.
+Sign-off exists to approve decisions; with none to approve it is a rubber stamp, and rubber
+stamps train the author to skim the reviews that matter.
 
 **Why the queue and the agent get separate states on both sides.** `Ready for dev` /
 `In progress` and `Ready for rework` / `Reworking` are the same split for the same reason:
@@ -187,6 +191,34 @@ mechanical. The HTML is never committed.
 **Review is a static storybook export.** CI boots the app, crawls the story routes, and
 publishes HTML plus assets per branch. This works only because design artifacts are stateless
 — no socket required. The interactive playground is lost; the visual review is not.
+
+### The implementation sketch
+
+Every design pass also posts a **sketch** on the ticket — per ticket, not per screen: which
+systems the change touches (`system:<name>`, §6), what new structure it introduces — each new
+context, table or dependency named as a decision in as many words — the shape of the change,
+and what remains unsure. Two reasons it exists. First, structure was the least-reviewed,
+highest-blast-radius decision class in the pipeline: reconciliation checks the diff against
+the argument, never the architecture, so a wrong schema previously reached production with no
+human eyes on it — and a schema is expensive precisely when it is wrong. Second, the sketch's
+touch list is what makes system labels trustworthy (§6); a mutex fed by guesses is not a
+mutex.
+
+The sketch lives on the ticket because it is scope, and scope lives in the tracker. A standing
+structural decision the sketch creates — which system owns a concept, why a boundary sits
+where it does — goes to `systems/<name>.md`, the structural mirror of `screens/<name>.md`:
+rules that outlive the ticket, and no inventory of what the code contains, because the code is
+that inventory.
+
+The dev agent implements against the sketch as part of scope. Deviating is legal exactly as
+renaming a state is (§9): fine if the hand-back argues why, a finding if nothing does. A
+sketch that cannot survive contact with the code is a push-back (§2.7), never a silent
+improvisation.
+
+Sign-off approves the artifacts and the sketch in one review — deliberately not two states:
+consecutive reviews both answer *who has the ball* with "the author," which fails the state
+admission test, and a second per-ticket touchpoint is a cost the three-touchpoint budget
+doesn't have.
 
 **The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
 machinery of ours — per-branch previews are the platform's own feature, and glue code we don't
@@ -275,10 +307,10 @@ Consequences:
 - **Projects pin a version** (`@v1`), so a pipeline change doesn't hit every project at once.
   For something that routes tickets unattended, staged rollout is worth having.
 - **Everything project-specific is one config file:** tracker team and project ids, state name
-  mapping, design-owned paths, quality gate commands, deploy detection endpoint, deploy
-  timeout and stale-claim grace period (§12), static preview target (the Cloudflare Pages
-  project, §4), milestone naming convention. Anything not in that file is the protocol and
-  belongs here.
+  mapping, design-owned paths, the system label → path map (§6), quality gate commands, deploy
+  detection endpoint, deploy timeout and stale-claim grace period (§12), static preview target
+  (the Cloudflare Pages project, §4), milestone naming convention. Anything not in that file
+  is the protocol and belongs here.
 - **The pipeline repo needs its own tests** against a scratch tracker project. A bug here
   mis-routes tickets silently, which is the failure mode hardest to notice.
 
@@ -288,19 +320,28 @@ Consequences:
 
 Three mechanisms, each covering what the others can't.
 
-**Screen labels are a file-level mutex.** Design artifacts are per-screen, so *no two in-flight
-tickets may carry the same `screen:<name>` label*. Enforced at promotion into `Ready for dev`:
-a ticket whose screen label is already in flight does not promote. This prevents most
-collisions rather than detecting them. Two open tickets rewriting the same screen with no
-relation between them is the one case the pipeline cannot reconcile on its own.
+**Mutex labels are a file-level mutex.** Two kinds, one rule: *no two in-flight tickets may
+share a `screen:<name>` or `system:<name>` label.* Screen labels cover design artifacts, which
+are per-screen files; system labels cover the structural units the sketch declares — for a
+Phoenix app, contexts — each mapped to its paths in the project config. Enforced at promotion
+into `Ready for dev`: a ticket whose mutex label is already in flight does not promote. This
+prevents most collisions rather than detecting them. The declaration is trustworthy for the
+same reason in both cases: design *creates* the screen files, and the sketch *is* the system
+touch list — with CI auditing the latter (§9), because a diff that wanders outside its
+declared systems is a mutex nobody took.
+
+**Files owned by no system** — the router, the mix manifest — are named in the sketch when
+touched and left to git's textual conflict detection. Giving them labels would serialize
+every ticket through them, which is the mutex failing in the other direction.
 
 **Every ticket gets a design pass** — including tech debt, backend work and bugs. The pass is
-cheap and it is the only thing positioned to notice a ticket touching a screen nobody predicted.
-The boundary ticket is the sole exception, with the rest of its exceptions, in §10. A pass that
-finds nothing — no screen labels attached, no artifacts produced — records that finding in a
-marker comment (§9) and advances the ticket directly to `Ready for dev`, skipping
-`Design review`: the pass exists to catch missed screens, not to manufacture a sign-off with
-nothing to sign.
+cheap and it is the only thing positioned to notice a ticket touching a screen or a system
+nobody predicted. The boundary ticket is the sole exception, with the rest of its exceptions,
+in §10. A pass that finds nothing to decide — no screens, no artifacts, and a sketch
+introducing no new structure — records that finding and its sketch in a marker comment (§9)
+and advances the ticket directly to `Ready for dev`, skipping `Design review`: the pass exists
+to catch missed screens and unreviewed decisions, not to manufacture a sign-off with nothing
+to sign.
 
 **Every ticket is reconciled,** screen labels or not, the boundary ticket again excepted. Reconciliation reads the PR diff against
 the argument, not only the rendered surfaces, so a backend ticket has something to verify:
@@ -336,17 +377,19 @@ beats starting them.
 ### Re-evaluation
 
 When a thread discovers scope nobody predicted, it **finishes the step it's on**, adds the
-newly-discovered `screen:<name>` label to its own ticket, and adds `re-evaluate` to every ticket
-it now collides with.
+newly-discovered mutex label — `screen:<name>` or `system:<name>` — to its own ticket, and
+adds `re-evaluate` to every ticket it now collides with.
 
 By the precedence rule, the ticket further along **holds the ground** and the earlier one
 **absorbs**. So `re-evaluate` on a further-along ticket is a *check* — does what I'm doing still
 hold — and on an earlier one it is a *revision*. This is what stops a mostly-implemented ticket
 being sent back to design by something that only just started.
 
-Collision requires a shared screen label, so a ticket carrying no screen label can never be
-flagged. The only adjacent case is a ticket *acquiring* a label mid-flight, at which point it is
-no longer screenless.
+Collision requires a shared mutex label, so a ticket carrying none can never be flagged. The
+only adjacent case is a ticket *acquiring* a label mid-flight, at which point it is no longer
+unlabelled. System labels widen this machinery to backend collisions: a design pass sketching
+against a system another in-flight ticket is rewriting now produces a signal instead of a
+surprise at merge.
 
 **Behavior by the flagged ticket's state:**
 
@@ -379,7 +422,8 @@ and nothing is re-evaluated.
 | `tech-debt` | Work on the shape of the code rather than what it does. Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
 | `bug` | Defect. Runs the normal pipeline; `Urgent` is what makes it preempt. |
 | `design-inbox` | Provenance: this came from the design agent. The question you'll want answered later when something looks odd. |
-| `screen:<name>` | The mutex (§6). |
+| `screen:<name>` | The design half of the mutex (§6). |
+| `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
 | `re-evaluate` | Unresolved collision (§7). |
 | `needs-review` | Reconciliation couldn't tell. Deployed, clean, awaiting the author's eye (§11). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
@@ -413,7 +457,10 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   audit, promoted from convention to enforcement, so a proposed component cannot arrive
   unannounced inside an artifact
 - a PR touching design-owned paths carries at least one `screen:` label
-- `screens/*.md` contains no state sections
+- a PR touching a configured system's paths carries that `system:` label — the sketch audit,
+  the same promotion from convention to enforcement as the class audit: a mutex nobody took is
+  a collision nobody could prevent
+- `screens/*.md` and `systems/*.md` contain no state sections and no code inventory
 
 **Reconciliation (blocking, and the last gate before production):**
 - the PR diff says what the issue asked for
@@ -422,6 +469,8 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   noticed
 - the static storybook renders what the narrative doc describes
 - standing decisions touched by the change landed, and none were contradicted in passing
+- the structure that landed is the structure the sketch named — a deviation is fine if the
+  hand-back argues it, and if nothing does it's more likely nobody noticed
 - **a surface changed with no storybook variation at all is called out even on a pass** — a tab
   named only in prose, a route nothing renders. Comparing states to variations makes a surface
   with neither invisible, and this is the only place that gets noticed.
@@ -437,8 +486,8 @@ one no agent will act on.
 - promotion into `Ready for dev` while the screen label is already in flight → reverted
 - any forward transition while `re-evaluate` is set → reverted
 - `Designing` → `Ready for dev` without passing through `Design review`, or a sign-off not made
-  by the author → reverted — unless the design agent's marker comment declares a screenless
-  pass (§6), which advances directly
+  by the author → reverted — unless the design agent's marker comment declares a decisionless
+  pass (§3, §6), which advances directly
 - only reconciliation merges; only the post-deploy check writes `Done`, the boundary ticket
   excepted (§10). Merge rights are enforced in GitHub via branch protection (§5), not in the
   tracker — the tracker cannot police the repo.
@@ -452,8 +501,10 @@ phrased differently each time is a count that drifts.
 **Verified on pickup (agent, flags rather than blocks):** base SHA, blocking relations,
 expected-state assertion.
 
-**Left to discipline:** the quality of the argument in a description, and the §2.4 judgment
-that two changes touch the same behavior. Both are readings, and nothing can check a reading.
+**Left to discipline:** the quality of the argument in a description, the quality of the
+sketch's judgment (its *coverage* is audited above; whether the structure it proposes is good
+is not), and the §2.4 judgment that two changes touch the same behavior. All are readings, and
+nothing can check a reading.
 
 **The trust boundary is the tracker and the PR thread.** Agents read issue text, comments and
 diffs, and act with repository write access; reconciliation merges to production unattended.
@@ -796,9 +847,11 @@ detection, stale claims and timeouts have no webhook to subscribe to.
 - **`needs-review` tickets have no timeout.** They sit in `Blocked` until a milestone boundary,
   potentially weeks, deployed the whole time. Deliberate, and sound only while there is one
   author.
-- **Semantic conflict in dev-owned files has no mechanism.** The screen mutex covers design
-  artifacts only. Accepted at one serial dev agent; it is the first thing to break if that
-  changes.
+- **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
+  System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
+  what remains uncovered is files owned by no system — the router, the manifests — which are
+  named in sketches and caught only textually by git. The mutex's quality is the partition's
+  quality: revisit the system map when one label starts serializing unrelated work.
 - **Staging.** With one environment, the post-deploy check runs against production. The intended
   eventual shape is staging with a manual test gate, which would sit between `Reconciling` and
   `Merged`.
@@ -810,6 +863,10 @@ detection, stale claims and timeouts have no webhook to subscribe to.
   somebody looks — there is no alerting anywhere in this design. The cheapest fix is a
   scheduled check that pings when any ticket has been in `Blocked` past a threshold; it is
   deliberately not specified here.
-- **Concurrent dev agents are out of scope,** and §5 enforces it: one dev agent covers
-  `In progress`, `Reworking`, and every non-design pipeline change. A second concurrent dev
-  would require an owner dimension on states and a stronger claim than state-transition.
+- **Concurrent dev agents remain a deliberate later decision, but the distance shrank.** The
+  mutex now covers declared structure (§6), the run-per-ticket correlation is an owner
+  dimension in practice, and the single-dispatcher control plane (§13) makes
+  state-transition-as-claim safe for a second dev whose ticket shares no mutex label with
+  in-flight work. What flipping the switch still requires: a system map proven against months
+  of real sketches, and the author able to absorb the review throughput two agents produce —
+  the bottleneck moves to the human, which is the correct failure mode.
