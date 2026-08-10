@@ -325,6 +325,28 @@ func (c *Client) issueUpdate(ctx context.Context, issueID string, input map[stri
 	return nil
 }
 
+func (c *Client) ArchiveIssue(ctx context.Context, issueID string) error {
+	const q = `mutation Archive($id: String!) {
+	  issueArchive(id: $id) { success }
+	}`
+	var data struct {
+		IssueArchive struct {
+			Success bool `json:"success"`
+		} `json:"issueArchive"`
+	}
+	if err := c.do(ctx, q, map[string]any{"id": issueID}, &data); err != nil {
+		return err
+	}
+	if !data.IssueArchive.Success {
+		return fmt.Errorf("linear: issueArchive(%s) reported failure", issueID)
+	}
+	return nil
+}
+
+func (c *Client) UpdateIssuePriority(ctx context.Context, issueID string, priority int) error {
+	return c.issueUpdate(ctx, issueID, map[string]any{"priority": priority})
+}
+
 func (c *Client) CommentOnIssue(ctx context.Context, issueID, body string) error {
 	const q = `mutation CreateComment($input: CommentCreateInput!) {
 	  commentCreate(input: $input) { success }

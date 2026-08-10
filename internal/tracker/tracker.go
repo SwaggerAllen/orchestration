@@ -103,4 +103,9 @@ type Tracker interface {
 	CommentOnIssue(ctx context.Context, issueID, body string) error
 	AddIssueLabel(ctx context.Context, teamID, issueID, label string) error
 	RemoveIssueLabel(ctx context.Context, teamID, issueID, label string) error
+	// ArchiveIssue is the boundary's archive pass (DESIGN §10). Naturally
+	// idempotent: archiving the archived is a no-op.
+	ArchiveIssue(ctx context.Context, issueID string) error
+	// UpdateIssuePriority is the grooming re-rank (DESIGN §8, §10).
+	UpdateIssuePriority(ctx context.Context, issueID string, priority int) error
 }

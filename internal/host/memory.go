@@ -18,7 +18,9 @@ type Memory struct {
 	// Ancestry scripts IsAncestor: "ancestor..descendant" -> true.
 	// Identical SHAs are always ancestors, as in git.
 	Ancestry map[string]bool
-	nextPR   int
+	// Files holds PutFileIfAbsent writes: path -> content.
+	Files  map[string]string
+	nextPR int
 }
 
 // Dispatch records one DispatchWorkflow call.
@@ -34,6 +36,7 @@ func NewMemory() *Memory {
 		CheckState: map[string]Checks{},
 		Merged:     map[int]string{},
 		Ancestry:   map[string]bool{},
+		Files:      map[string]string{},
 	}
 }
 
@@ -113,4 +116,14 @@ func (m *Memory) IsAncestor(_ context.Context, ancestor, descendant string) (boo
 		return true, nil
 	}
 	return m.Ancestry[ancestor+".."+descendant], nil
+}
+
+func (m *Memory) PutFileIfAbsent(_ context.Context, path, content, _ string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.Files[path]; exists {
+		return false, nil
+	}
+	m.Files[path] = content
+	return true, nil
 }

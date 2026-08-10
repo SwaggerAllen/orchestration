@@ -7,6 +7,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -240,6 +241,40 @@ func (c *Client) IsAncestor(ctx context.Context, ancestor, descendant string) (b
 		return false, err
 	}
 	return data.Status == "ahead" || data.Status == "identical", nil
+}
+
+// PutFileIfAbsent commits one file to the dispatch ref via the contents
+// API, unless it already exists there.
+func (c *Client) PutFileIfAbsent(ctx context.Context, path, content, message string) (bool, error) {
+	getPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", c.owner, c.repo, path, c.ref)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+getPath, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return false, err
+	}
+	resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return false, nil // already there: re-run safety, not an error
+	case http.StatusNotFound:
+	default:
+		return false, fmt.Errorf("github: checking %s: HTTP %d", path, resp.StatusCode)
+	}
+	putPath := fmt.Sprintf("/repos/%s/%s/contents/%s", c.owner, c.repo, path)
+	body := map[string]any{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString([]byte(content)),
+		"branch":  c.ref,
+	}
+	if err := c.rest(ctx, http.MethodPut, putPath, body, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // MarkPRReady flips the draft flag off. REST cannot do this; it is a

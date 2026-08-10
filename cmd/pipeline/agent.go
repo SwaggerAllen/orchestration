@@ -28,6 +28,10 @@ func cmdAgent(args []string) error {
 		return cmdAgentFinish(args[1:])
 	case "abort":
 		return cmdAgentAbort(args[1:])
+	case "boundary-archive":
+		return cmdBoundaryArchive(args[1:])
+	case "boundary-file":
+		return cmdBoundaryFile(args[1:])
 	default:
 		return fmt.Errorf("agent: unknown subcommand %q", args[0])
 	}
@@ -59,7 +63,7 @@ func cmdAgentClaim(args []string) error {
 	fs := flag.NewFlagSet("agent claim", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	ticket := fs.String("ticket", "", "ticket key, e.g. PIPE-12")
-	kind := fs.String("kind", "dev", "agent kind: dev, reconcile, or design")
+	kind := fs.String("kind", "dev", "agent kind: dev, reconcile, design, or boundary")
 	dispatchID := fs.String("dispatch-id", "", "workflow run id (the claim's audit trail)")
 	dispatchURL := fs.String("dispatch-url", "", "workflow run URL")
 	outDir := fs.String("out", "", "directory for claim.json, scope.md and prompt.md")
@@ -79,6 +83,7 @@ func cmdAgentClaim(args []string) error {
 	}
 
 	var res *agent.ClaimResult
+	var plan *agent.BoundaryPlan
 	switch *kind {
 	case "dev":
 		res, err = agent.Claim(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
@@ -86,8 +91,13 @@ func cmdAgentClaim(args []string) error {
 		res, err = agent.ClaimReconcile(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
 	case "design":
 		res, err = agent.ClaimDesign(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+	case "boundary":
+		plan, err = agent.ClaimBoundary(context.Background(), p, *ticket, *dispatchID, *dispatchURL, time.Now())
+		if plan != nil {
+			res = &plan.ClaimResult
+		}
 	default:
-		return fmt.Errorf("agent claim: --kind must be dev, reconcile, or design")
+		return fmt.Errorf("agent claim: --kind must be dev, reconcile, design, or boundary")
 	}
 	if err != nil {
 		return err
@@ -95,7 +105,11 @@ func cmdAgentClaim(args []string) error {
 	if err := os.MkdirAll(*outDir, 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(res, "", "  ")
+	var toSave any = res
+	if plan != nil {
+		toSave = plan
+	}
+	raw, err := json.MarshalIndent(toSave, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -116,6 +130,8 @@ func cmdAgentClaim(args []string) error {
 			prompt = assembleReconcilePrompt(string(tpl), res, *verdictPath)
 		case "design":
 			prompt = assembleDesignPrompt(string(tpl), res, *outcomePath)
+		case "boundary":
+			prompt = assembleBoundaryPrompt(string(tpl), plan, *outcomePath)
 		default:
 			prompt = assemblePrompt(string(tpl), res, *handbackPath)
 		}
@@ -131,6 +147,9 @@ func cmdAgentClaim(args []string) error {
 		}
 		defer f.Close()
 		fmt.Fprintf(f, "branch=%s\npr_number=%d\nmode=%s\n", res.Branch, res.PRNumber, res.Mode)
+		if plan != nil {
+			fmt.Fprintf(f, "scan_done=%t\n", plan.Done[agent.StepScan])
+		}
 	}
 	fmt.Printf("claimed %s (%s): branch %s, PR #%d\n", res.TicketKey, res.Mode, res.Branch, res.PRNumber)
 	return nil
@@ -211,6 +230,104 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 		add(fmt.Sprintf("- Write your outcome JSON to `%s` before you finish (see Outcomes above).\n", outcomePath))
 	}
 	return string(b)
+}
+
+// assembleBoundaryPrompt: the milestone, what already ran, and the
+// bounded scan instructions live in the template; this adds the run
+// specifics.
+func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePath string) string {
+	var b []byte
+	add := func(s string) { b = append(b, s...) }
+	add(template)
+	add("\n\n---\n\n")
+	add(fmt.Sprintf("# Boundary — milestone %q (ticket %s)\n", plan.Milestone, plan.TicketKey))
+	add(fmt.Sprintf("\nSteps already completed on this ticket: archive=%t scan=%t file=%t.\n",
+		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	if outcomePath != "" {
+		add(fmt.Sprintf("\nWrite your proposals JSON to `%s` (schema above), then stop — the harness files them with dedupe keys and applies the ranking.\n", outcomePath))
+	}
+	return string(b)
+}
+
+func loadBoundaryPlan(path string) (*agent.BoundaryPlan, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var plan agent.BoundaryPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if plan.Done == nil {
+		plan.Done = map[string]bool{}
+	}
+	return &plan, nil
+}
+
+func cmdBoundaryArchive(args []string) error {
+	fs := flag.NewFlagSet("agent boundary-archive", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	claimPath := fs.String("claim", "", "claim.json written by agent claim --kind boundary")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *claimPath == "" {
+		return fmt.Errorf("boundary-archive: --claim is required")
+	}
+	p, h, err := agentDeps(*cfgPath)
+	if err != nil {
+		return err
+	}
+	plan, err := loadBoundaryPlan(*claimPath)
+	if err != nil {
+		return err
+	}
+	if err := agent.BoundaryArchive(context.Background(), p, h, plan, time.Now()); err != nil {
+		return err
+	}
+	// Persist the updated Done set for the later steps of this run.
+	raw, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(*claimPath, raw, 0o644); err != nil {
+		return err
+	}
+	fmt.Println("archive pass complete")
+	return nil
+}
+
+func cmdBoundaryFile(args []string) error {
+	fs := flag.NewFlagSet("agent boundary-file", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	claimPath := fs.String("claim", "", "claim.json written by agent claim --kind boundary")
+	proposalsPath := fs.String("proposals", "", "proposals.json from the scan (omit on resume; recovered from the scan comment)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *claimPath == "" {
+		return fmt.Errorf("boundary-file: --claim is required")
+	}
+	p, _, err := agentDeps(*cfgPath)
+	if err != nil {
+		return err
+	}
+	plan, err := loadBoundaryPlan(*claimPath)
+	if err != nil {
+		return err
+	}
+	var ps *agent.Proposals
+	if *proposalsPath != "" {
+		ps, err = agent.LoadProposals(*proposalsPath)
+		if err != nil {
+			return err
+		}
+	}
+	if err := agent.BoundaryFile(context.Background(), p, plan, ps, time.Now()); err != nil {
+		return err
+	}
+	fmt.Printf("boundary %s: proposals filed, ticket in Boundary review\n", plan.TicketKey)
+	return nil
 }
 
 func loadClaim(path string) (*agent.ClaimResult, error) {

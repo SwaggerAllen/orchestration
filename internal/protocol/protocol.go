@@ -60,6 +60,10 @@ const (
 	CategoryStarted   Category = "started"
 	CategoryCompleted Category = "completed"
 	CategoryCanceled  Category = "canceled"
+	// CategoryTriage is Linear's intake state type. Setup never creates
+	// one — Linear manages it when the team enables Triage — but the
+	// boundary agent files proposals into it when it exists (DESIGN §10).
+	CategoryTriage Category = "triage"
 )
 
 // Categories assigns each canonical state its tracker category. Queue states

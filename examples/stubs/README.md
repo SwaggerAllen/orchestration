@@ -11,6 +11,7 @@ bindings live.
 | `pipeline-agent-design.yml` | Design agent run, dispatched on Designing entry and re-evaluate re-reads |
 | `pipeline-preview.yml` | Per-branch storybook export to Cloudflare Pages |
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
+| `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
 | `pipeline-record-deploy.yml` | Dummy project only: records a GitHub Deployment per merge so deploy detection has real data (config `deploy.provider: "github"`) |
 
 A project also needs:

@@ -2,9 +2,12 @@ package plane
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
 // TransitionTicket moves one ticket, resolving the protocol state through
@@ -54,6 +57,51 @@ func (p *Plane) EnsureScreenLabel(ctx context.Context, ticketID, label string) e
 		}
 	}
 	return p.Tracker.AddIssueLabel(ctx, teamID, ticketID, label)
+}
+
+// StateIDFor resolves a protocol state to the team's state id.
+func (p *Plane) StateIDFor(ctx context.Context, s protocol.State) (string, error) {
+	if err := p.resolveStates(ctx); err != nil {
+		return "", err
+	}
+	return p.idByState[s], nil
+}
+
+// FileTriageProposal creates one boundary proposal issue. It lands in the
+// team's Triage state when one exists, Backlog otherwise — Triage is
+// Linear-managed, so setup can't guarantee it. The dedupe marker rides in
+// the description; a re-run checks it before filing (DESIGN §10).
+func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind string, gating bool, dedupe string) error {
+	if err := p.resolveStates(ctx); err != nil {
+		return err
+	}
+	states, err := p.Tracker.ListStates(ctx, p.Config.Tracker.TeamID)
+	if err != nil {
+		return err
+	}
+	stateID := p.idByState[protocol.Backlog]
+	for _, s := range states {
+		if s.Category == protocol.CategoryTriage {
+			stateID = s.ID
+		}
+	}
+	label := "tech-debt"
+	if kind == "design" {
+		label = "design-inbox"
+	}
+	m := marker.Marker{Kind: marker.TriageProposal, Fields: map[string]string{
+		"dedupe": dedupe,
+		"gating": fmt.Sprintf("%t", gating),
+	}}
+	_, err = p.Tracker.CreateIssue(ctx, tracker.NewIssue{
+		TeamID:      p.Config.Tracker.TeamID,
+		ProjectID:   p.Config.Tracker.ProjectID,
+		Title:       title,
+		Description: m.Format() + "\n\n" + description,
+		StateID:     stateID,
+		Labels:      []string{label},
+	})
+	return err
 }
 
 // PRForTicket finds the open PR carrying the ticket key in its branch

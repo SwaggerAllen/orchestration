@@ -61,10 +61,10 @@ func Sample() *Config {
 			"controlplane": {"memory-bot"},
 		},
 		Agents: map[string]string{
-			"design":    "",
+			"design":    "pipeline-agent-design.yml",
 			"dev":       "pipeline-agent-dev.yml",
 			"reconcile": "pipeline-agent-reconcile.yml",
-			"boundary":  "",
+			"boundary":  "pipeline-agent-boundary.yml",
 		},
 	}
 }

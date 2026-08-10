@@ -23,6 +23,7 @@ type Memory struct {
 	milestones map[string][]Milestone // projectID -> milestones
 	issueTeam  map[string]string      // issueID -> teamID
 	issueProj  map[string]string      // issueID -> projectID
+	archived   map[string]bool        // issueID -> archived
 
 	// ActorID stamps writes, as Linear stamps the API key's user. Tests
 	// map it to a role in config.Actors.
@@ -40,6 +41,7 @@ func NewMemory() *Memory {
 		milestones: map[string][]Milestone{},
 		issueTeam:  map[string]string{},
 		issueProj:  map[string]string{},
+		archived:   map[string]bool{},
 		ActorID:    "memory-bot",
 		Now:        time.Now,
 	}
@@ -66,7 +68,7 @@ func (m *Memory) CreateState(_ context.Context, teamID, name string, category pr
 	}
 	switch category {
 	case protocol.CategoryBacklog, protocol.CategoryUnstarted, protocol.CategoryStarted,
-		protocol.CategoryCompleted, protocol.CategoryCanceled:
+		protocol.CategoryCompleted, protocol.CategoryCanceled, protocol.CategoryTriage:
 	default:
 		return StateInfo{}, fmt.Errorf("memory tracker: invalid state category %q", category)
 	}
@@ -127,6 +129,11 @@ func (m *Memory) ListIssues(_ context.Context, teamID, projectID string) ([]Issu
 	defer m.mu.Unlock()
 	var out []Issue
 	for _, i := range m.issues {
+		// Archived issues vanish from listings, as in Linear — which is
+		// exactly why the retro note exists (DESIGN §10).
+		if m.archived[i.ID] {
+			continue
+		}
 		if m.issueTeam[i.ID] == teamID && m.issueProj[i.ID] == projectID {
 			out = append(out, cloneIssue(i))
 		}
@@ -271,6 +278,37 @@ func (m *Memory) RemoveIssueLabel(_ context.Context, teamID, issueID, label stri
 	}
 	i.Labels = keep
 	return nil
+}
+
+func (m *Memory) ArchiveIssue(_ context.Context, issueID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.find(issueID); err != nil {
+		return err
+	}
+	m.archived[issueID] = true
+	return nil
+}
+
+func (m *Memory) UpdateIssuePriority(_ context.Context, issueID string, priority int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, err := m.find(issueID)
+	if err != nil {
+		return err
+	}
+	if priority < 0 || priority > 4 {
+		return fmt.Errorf("memory tracker: priority %d out of range", priority)
+	}
+	i.Priority = priority
+	return nil
+}
+
+// Archived reports whether an issue is archived (test helper).
+func (m *Memory) Archived(issueID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.archived[issueID]
 }
 
 // Mutate is a test helper: reach into a stored issue to script conditions

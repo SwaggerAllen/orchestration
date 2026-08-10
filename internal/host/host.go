@@ -62,4 +62,10 @@ type Host interface {
 	// IsAncestor reports whether ancestor is reachable from descendant:
 	// the real meaning of the design's `>=` (DESIGN §13).
 	IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error)
+	// PutFileIfAbsent commits one file to the default branch unless it
+	// already exists, reporting whether it was created. The boundary's
+	// retro note uses it: re-run safety demands the existence check
+	// (DESIGN §10), and the boundary never opens a PR — machinery, not
+	// work.
+	PutFileIfAbsent(ctx context.Context, path, content, message string) (bool, error)
 }
