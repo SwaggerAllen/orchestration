@@ -90,12 +90,24 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("github: %s %s: HTTP %d", method, path, resp.StatusCode)
+		return fmt.Errorf("github: %s %s: HTTP %d%s", method, path, resp.StatusCode, hint(resp.StatusCode))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
+}
+
+// hint explains a 403, which for this client almost never means the
+// token is wrong. A workflow that declares a permissions: block drops
+// every permission it does not list to none, so adding one call to the
+// sweep can 403 on a token that is otherwise fine. The bare status says
+// "forbidden" and points at the credential — the wrong place to look.
+func hint(status int) string {
+	if status != http.StatusForbidden {
+		return ""
+	}
+	return " — check the calling workflow's permissions: block, which drops every permission it does not name"
 }
 
 func (c *Client) DispatchWorkflow(ctx context.Context, workflowFile string, inputs map[string]string) error {

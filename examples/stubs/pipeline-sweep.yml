@@ -17,9 +17,14 @@ on:
     workflows: [ci]
     types: [completed]
 
+# Declaring this block at all drops every permission not listed to
+# none, so it has to name everything the snapshot reads, not just the
+# unusual ones. One line per call the sweep makes:
 permissions:
-  contents: read
-  actions: write # dispatching agent workflows
+  contents: read # checkout, and compare for the deploy ancestry check
+  actions: write # dispatching agent workflows; write covers listing runs
+  pull-requests: read # the open-PR list the snapshot is built from
+  checks: read # CI verdicts per PR head, which drive the Checks hop
 
 # One dispatcher at a time: the single-dev-agent invariant is only as
 # strong as single-dispatcher (DESIGN §13).
