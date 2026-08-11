@@ -10,6 +10,8 @@ workflows and carry thin stubs (DESIGN §5).
   every rule states its rationale inline.
 - **[PLAN.md](PLAN.md)** — how it was built: three test rings, milestones
   M0–M7, each with an exit gate.
+- **[SETUP.md](SETUP.md)** — the ordered checklist from empty accounts
+  to a running pipeline, Cloudflare steps included.
 
 ## Repo map
 
@@ -45,6 +47,7 @@ covers the scratch/dry-run environment.
 | `CLOUDFLARE_ACCOUNT_ID` | project repo Actions secrets | Pages preview publish (not sensitive, kept with its token) |
 | `DIGITALOCEAN_TOKEN` | project repo Actions secrets (DO-deployed projects) | deploy detection |
 | `GITHUB_DISPATCH_TOKEN` | Cloudflare Worker secret | starting the sweep, nothing else |
+| `PIPELINE_REPO_TOKEN` | project repo Actions secrets | checkout of this repo while it is private (contents:read only; unnecessary if public) |
 
 ## The trust boundary — read before widening access
 

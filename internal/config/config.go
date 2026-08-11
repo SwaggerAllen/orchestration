@@ -76,6 +76,12 @@ var AgentKinds = []string{"design", "dev", "reconcile", "boundary", "live-suite"
 // ActorRoles are the legal keys of Actors.
 var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile", "boundary"}
 
+// sharedAuthorControlplane reports whether a duplicate id spans exactly
+// the author/controlplane pair — the solo-workspace exception.
+func sharedAuthorControlplane(a, b string) bool {
+	return (a == "author" && b == "controlplane") || (a == "controlplane" && b == "author")
+}
+
 // Tracker identifies the Linear team and project. Both are required on
 // every pickup: the state is the queue, the project is the scope (DESIGN §2).
 type Tracker struct {
@@ -250,10 +256,17 @@ func (c *Config) Validate() error {
 				add("actors.%s: missing — at least one tracker user id", required)
 			}
 		}
+		// One role per id — with one sanctioned exception: author and
+		// controlplane may share an id, because a solo workspace's
+		// personal API key IS the author. Resolution is deterministic
+		// (controlplane wins, see plane.roleOf), which means the shared
+		// identity is trusted everywhere and author-only enforcement is
+		// off — the honest reading of a shared credential.
 		seen := map[string]string{}
 		for role, ids := range c.Actors {
 			for _, id := range ids {
-				if prev, dup := seen[id]; dup {
+				prev, dup := seen[id]
+				if dup && !sharedAuthorControlplane(prev, role) {
 					add("actors.%s: id %q already assigned to %s — one role per id, or the writer matrix is ambiguous", role, id, prev)
 				}
 				seen[id] = role

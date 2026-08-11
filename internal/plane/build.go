@@ -82,11 +82,15 @@ func (p *Plane) resolveStates(ctx context.Context) error {
 }
 
 // roleOf resolves a tracker user id to a pipeline role via config.Actors.
-// Unknown ids are RoleOther: the writer matrix treats them as strangers,
-// which is exactly what an unmapped identity is.
+// Resolution order is fixed — controlplane first — so a solo workspace's
+// shared author/controlplane identity resolves to controlplane
+// deterministically: the sweep trusts its own credential rather than
+// randomly enforcing author rules against it. Unknown ids are RoleOther:
+// the writer matrix treats them as strangers, which is exactly what an
+// unmapped identity is.
 func (p *Plane) roleOf(actorID string) core.Role {
-	for role, ids := range p.Config.Actors {
-		for _, id := range ids {
+	for _, role := range []string{"controlplane", "author", "design", "dev", "reconcile", "boundary"} {
+		for _, id := range p.Config.Actors[role] {
 			if id == actorID {
 				return core.Role(role)
 			}

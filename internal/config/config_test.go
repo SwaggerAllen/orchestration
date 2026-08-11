@@ -144,6 +144,16 @@ func TestActorsRejectDoubleAssignment(t *testing.T) {
 	}
 }
 
+func TestActorsAllowSharedAuthorControlplane(t *testing.T) {
+	// The solo-workspace exception: a personal API key IS the author.
+	m := sampleAsMap(t)
+	m["actors"].(map[string]any)["author"] = []any{"usr_solo"}
+	m["actors"].(map[string]any)["controlplane"] = []any{"usr_solo"}
+	if _, err := Load(writeConfig(t, m)); err != nil {
+		t.Errorf("shared author/controlplane id must validate, got %v", err)
+	}
+}
+
 func TestActorsRejectUnknownRole(t *testing.T) {
 	m := sampleAsMap(t)
 	m["actors"].(map[string]any)["janitor"] = []any{"usr_j"}

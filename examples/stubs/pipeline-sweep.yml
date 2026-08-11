@@ -44,6 +44,7 @@ jobs:
           repository: SwaggerAllen/orchestration
           ref: main # pin to @v1 once released
           path: .pipeline
+          token: ${{ secrets.PIPELINE_REPO_TOKEN || github.token }}
 
       - uses: actions/setup-go@v5
         with:
