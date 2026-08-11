@@ -22,13 +22,51 @@ scratch environment (ORC team → `orchestration-dummy`).
 
 ## 2. GitHub tokens
 
-Both are fine-grained PATs: github.com → Settings → Developer settings
-→ Personal access tokens → **Fine-grained tokens** → Generate.
+Two fine-grained PATs: github.com → Settings → Developer settings →
+Personal access tokens → **Fine-grained tokens** → Generate new token.
+Fine-grained tokens have no blanket scope — every permission is picked
+individually under **Repository permissions**, so each token ends up
+able to do exactly one job and nothing else.
 
-| Token | Repository access | Permissions | Used for |
-|---|---|---|---|
-| `PIPELINE_REPO_TOKEN` | Only `orchestration` | Contents: **Read-only** | Cross-repo checkout of the (private) pipeline repo from project workflows |
-| `GITHUB_DISPATCH_TOKEN` | Only `orchestration-dummy` | Actions: **Read and write** | The Cloudflare Worker metronome starting the sweep — nothing else (step 7, can wait) |
+**`PIPELINE_REPO_TOKEN`**
+
+- Resource owner: `SwaggerAllen` · Repository access: **Only select
+  repositories** → `orchestration`
+- Repository permissions: **Contents → Read-only**. Nothing else.
+  (*Metadata → Read-only* is added automatically and is mandatory.)
+- What it does: lets `actions/checkout` clone the private pipeline repo
+  into `.pipeline/` from the project's workflows. Read-only is
+  sufficient — the workflows never write to this repo.
+
+**`GITHUB_DISPATCH_TOKEN`** (step 7; skip until the loop works)
+
+- Resource owner: `SwaggerAllen` · Repository access: **Only select
+  repositories** → `orchestration-dummy`
+- Repository permissions: **Actions → Read and write**. Nothing else.
+- What it does: one API call — `POST .../actions/workflows/
+  pipeline-sweep.yml/dispatches`. Write is required because starting a
+  workflow is a write; the token can start the sweep and touch nothing
+  else in the repo.
+
+**Expiry.** Fine-grained tokens expire (default 30 days, max 1 year, or
+"no expiration" if you accept that). An expired token fails quietly in
+the way this pipeline hates: agent runs die at "checkout pipeline", or
+the metronome stops dispatching with only Worker logs to say so. Pick a
+year and put the date somewhere you'll see it.
+
+**The in-workflow `GITHUB_TOKEN` is separate and already handled.**
+Every reusable workflow declares its own `permissions:` block — dev,
+design and reconcile take `contents: write` + `pull-requests: write`
+(commit, open, un-draft and merge PRs), boundary takes `contents:
+write` (the retro note), the sweep stub takes `actions: write`
+(dispatching agents), record-deploy takes `deployments: write`. Nothing
+to configure; it is declared per-workflow in the YAML.
+
+One consequence worth knowing: `GITHUB_TOKEN` may never modify files
+under `.github/workflows/`, whatever permissions it holds. A ticket
+that asks the dev agent to change a workflow will fail at push — those
+edits are yours to make by hand, which is the correct blast radius for
+the files that define what the agents may do.
 
 ## 3. GitHub secrets and settings
 
