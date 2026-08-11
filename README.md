@@ -10,6 +10,8 @@ workflows and carry thin stubs (DESIGN §5).
   every rule states its rationale inline.
 - **[PLAN.md](PLAN.md)** — how it was built: three test rings, milestones
   M0–M7, each with an exit gate.
+- **[SETUP.md](SETUP.md)** — the ordered checklist from empty accounts
+  to a running pipeline, Cloudflare steps included.
 
 ## Repo map
 
