@@ -114,27 +114,41 @@ Everything happens in the one account that already holds your domains.
    **Account ID** is in the right-hand sidebar (also visible in every
    dashboard URL). This becomes the `CLOUDFLARE_ACCOUNT_ID` secret —
    not sensitive, stored with its token for convenience.
-2. **Create the Pages project** (direct-upload mode, which is what
-   `wrangler pages deploy` publishes to):
+2. **Create one Pages project per project repo** (direct-upload mode,
+   which is what `wrangler pages deploy` publishes to):
 
    ```sh
    npx wrangler login   # one-time browser auth
    npx wrangler pages project create orchestration-dummy --production-branch main
    ```
 
-   The name must match the config's `preview.pagesProject`
-   (`orchestration-dummy`). Branch previews then appear at
+   Each name must match that repo's config `preview.pagesProject`.
+   Branch previews then appear at
    `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
    push — that's the whole preview feature; we build no machinery.
+
+   **Not shared between repos**: both repos deploy their `main` as the
+   production deployment, so one Pages project serving two repos would
+   have them overwriting each other, and a preview URL would not say
+   which repo built it.
 3. **API token**: dash.cloudflare.com → My Profile → **API Tokens** →
    Create Token → *Create Custom Token*:
    - Permissions: **Account → Cloudflare Pages → Edit** (nothing else)
    - Account Resources: your account only
-   This becomes the `CLOUDFLARE_API_TOKEN` secret on the dummy repo.
-4. Preview URLs are unauthenticated (obscure subdomains). Fine at one
+   This becomes the `CLOUDFLARE_API_TOKEN` secret on **every** project
+   repo. Pages permissions are account-scoped — there is no per-project
+   Pages grant — so unlike the GitHub PATs, one token covering all your
+   Pages projects is forced rather than chosen.
+4. **Watch the deployment allowance.** Every push to every branch
+   publishes a preview, and Cloudflare's free tier caps deployments per
+   month. The dummy will burn through them faster than a real project
+   during E2E testing; if you hit the ceiling, previews stop and the
+   `Design review` link goes stale — the fix is deleting old preview
+   deployments or pausing the preview stub on the dummy.
+5. Preview URLs are unauthenticated (obscure subdomains). Fine at one
    author (DESIGN §4); **Cloudflare Access** (Zero Trust → Access →
    Applications, free ≤50 users) is the upgrade path if that stops
-   being acceptable — gate `*.orchestration-dummy.pages.dev`.
+   being acceptable — gate `*.<pages-project>.pages.dev`.
 
 ## 5. Provision the Linear team
 
