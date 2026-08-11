@@ -723,6 +723,15 @@ deliberate choice. Correcting it is mechanical, not a judgement.
 **Tech-debt milestone composition:** all gating debt, **plus a minimum of 5 non-gating tickets
 by priority.** Without the floor, a heavy gating set means non-gating debt never runs and
 accumulates permanently — the failure mode the alternating-milestone pattern exists to prevent.
+The floor is a minimum to draw, not a quota to invent: a backlog holding fewer says so.
+
+**The boundary agent proposes this composition; the author enacts it.** The arithmetic — every
+unscheduled gating ticket, then non-gating by priority to the floor — is posted as a comment
+before the ticket reaches `Boundary review`, so the author's assignment pass is a review rather
+than a reconstruction. It stops at a proposal because **assigning a milestone is a commitment**:
+the invariant above turns unstarted current-milestone work into `Todo`, so an agent writing
+milestones would be an agent committing scope nobody accepted. Milestone assignment is the
+author's, always.
 
 ---
 

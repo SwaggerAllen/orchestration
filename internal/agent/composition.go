@@ -1,0 +1,137 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
+	"github.com/SwaggerAllen/orchestration/internal/plane"
+)
+
+// NonGatingFloor is DESIGN §10's minimum: a debt milestone takes all
+// gating debt plus at least this many non-gating tickets by priority.
+// Without the floor a heavy gating set means non-gating debt never runs
+// and accumulates permanently.
+const NonGatingFloor = 5
+
+// CompositionEntry is one candidate for the next debt milestone.
+type CompositionEntry struct {
+	Key      string
+	Title    string
+	Gating   bool
+	Priority int
+}
+
+// ProposeComposition computes what the next debt milestone should hold
+// and posts it on the boundary ticket (DESIGN §10). It proposes only —
+// assigning a milestone is a commitment, and the invariant that
+// unstarted current-milestone work sits in Todo would turn any
+// auto-assignment into auto-committed scope. The author enacts it.
+//
+// Candidates are unresolved tech-debt tickets not already scheduled into
+// a milestone. Gating is read from each ticket's triage-proposal marker,
+// which is where the boundary recorded that judgment when it filed them.
+func ProposeComposition(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, now time.Time) error {
+	snap, err := p.Build(ctx, now, false)
+	if err != nil {
+		return err
+	}
+
+	var candidates []CompositionEntry
+	for _, t := range snap.Tickets {
+		if t.Resolved() || t.IsBoundary() || t.Milestone != "" {
+			continue // resolved, machinery, or already scheduled
+		}
+		if !t.HasLabel("tech-debt") {
+			continue
+		}
+		candidates = append(candidates, CompositionEntry{
+			Key: t.Key, Title: t.Title, Priority: t.Priority,
+			Gating: gatingFromDescription(t),
+		})
+	}
+
+	// Gating first, then by priority (1 = Urgent is highest; Linear's 0
+	// means "no priority", which sorts last rather than first), then key
+	// so the list is stable across re-runs.
+	sort.Slice(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if a.Gating != b.Gating {
+			return a.Gating
+		}
+		if pri(a.Priority) != pri(b.Priority) {
+			return pri(a.Priority) < pri(b.Priority)
+		}
+		return a.Key < b.Key
+	})
+
+	var chosen []CompositionEntry
+	nonGating := 0
+	for _, c := range candidates {
+		if c.Gating {
+			chosen = append(chosen, c)
+			continue
+		}
+		if nonGating < NonGatingFloor {
+			chosen = append(chosen, c)
+			nonGating++
+		}
+	}
+
+	gatingCount := len(chosen) - nonGating
+	var b strings.Builder
+	fmt.Fprintf(&b, "Proposed contents for the next debt milestone: %d gating + %d non-gating.\n\n",
+		gatingCount, nonGating)
+	if len(chosen) == 0 {
+		b.WriteString("Nothing to schedule — no unscheduled tech-debt tickets. An honest empty beats a padded one (DESIGN §2.9).\n")
+	}
+	for _, c := range chosen {
+		kind := "non-gating"
+		if c.Gating {
+			kind = "GATING"
+		}
+		fmt.Fprintf(&b, "- %s — %s  (%s, priority %d)\n", c.Key, c.Title, kind, c.Priority)
+	}
+	if nonGating < NonGatingFloor && len(candidates) > len(chosen) {
+		fmt.Fprintf(&b, "\nNote: only %d non-gating tickets available against a floor of %d.\n", nonGating, NonGatingFloor)
+	} else if nonGating < NonGatingFloor {
+		fmt.Fprintf(&b, "\nNote: the backlog holds only %d non-gating debt tickets, below the floor of %d — the floor is a minimum to draw, not a quota to invent (DESIGN §10).\n", nonGating, NonGatingFloor)
+	}
+	b.WriteString("\nThis is a proposal. Assigning a milestone commits the work, which is yours to do — accept by setting the milestone on these tickets.\n")
+
+	keys := make([]string, 0, len(chosen))
+	for _, c := range chosen {
+		keys = append(keys, c.Key)
+	}
+	m := marker.Marker{Kind: marker.Composition, Fields: map[string]string{
+		"gating":     fmt.Sprintf("%d", gatingCount),
+		"non_gating": fmt.Sprintf("%d", nonGating),
+		"keys":       strings.Join(keys, " "),
+	}}
+	return p.CommentTicket(ctx, plan.TicketID, m.Comment(b.String()))
+}
+
+// pri normalises Linear's priority for sorting: 1 (Urgent) is highest and
+// 0 ("no priority") is lowest, not first.
+func pri(p int) int {
+	if p == 0 {
+		return 99
+	}
+	return p
+}
+
+// gatingFromDescription reads the gating judgment the boundary recorded
+// when it filed the proposal.
+func gatingFromDescription(t *core.Ticket) bool {
+	for _, line := range strings.Split(t.Description, "\n") {
+		m, ok, err := marker.Parse(line)
+		if err == nil && ok && m.Kind == marker.TriageProposal {
+			return m.Fields["gating"] == "true"
+		}
+	}
+	return false
+}

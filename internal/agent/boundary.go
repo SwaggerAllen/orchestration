@@ -307,6 +307,12 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		}
 	}
 
+	// The composition proposal is the last thing the author reads before
+	// they take over, so it is posted after filing — it can only be
+	// computed once this boundary's findings are tickets.
+	if err := ProposeComposition(ctx, p, plan, now); err != nil {
+		return fmt.Errorf("boundary file: composition: %w", err)
+	}
 	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview)
 }
 

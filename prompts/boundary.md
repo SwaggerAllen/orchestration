@@ -61,4 +61,7 @@ Write JSON to the outcome path given below:
 ```
 
 Then stop. The harness files proposals (deduped), applies the ranking,
-posts the step comments, and hands the ticket to the author.
+posts the step comments, computes the next debt milestone's proposed
+composition (all gating debt plus non-gating by priority to the floor of
+five), and hands the ticket to the author. You do not assign milestones:
+assigning one commits the work, and that is the author's call.
