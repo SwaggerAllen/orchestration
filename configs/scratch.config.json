@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "tracker": {
+    "teamId": "94b1977f-5b88-4aae-9a0e-c4d7d00ebf85",
+    "projectId": "eeeb9f30-dba6-412a-b826-e2279fc56215"
+  },
+  "states": {
+    "backlog": "Backlog",
+    "todo": "Todo",
+    "designing": "Designing",
+    "design_review": "Design review",
+    "ready_for_dev": "Ready for dev",
+    "in_progress": "In progress",
+    "checks": "Checks",
+    "reconciling": "Reconciling",
+    "ready_for_rework": "Ready for rework",
+    "reworking": "Reworking",
+    "merged": "Merged",
+    "boundary_review": "Boundary review",
+    "blocked": "Blocked",
+    "done": "Done",
+    "canceled": "Canceled"
+  },
+  "designOwnedPaths": [
+    "storybook/**",
+    "screens/*.md",
+    "systems/*.md",
+    "lib/dummy_web/components/**"
+  ],
+  "qualityGates": [
+    "mix format --check-formatted",
+    "mix compile --warnings-as-errors",
+    "mix test"
+  ],
+  "deploy": {
+    "provider": "github",
+    "endpoint": "production",
+    "timeout": "20m"
+  },
+  "staleClaimGrace": "20m",
+  "preview": {
+    "pagesProject": "orchestration-dummy",
+    "buildCommand": "sh scripts/export_storybook.sh",
+    "outputDir": "priv/static/storybook"
+  },
+  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
+  "actors": {
+    "author": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"],
+    "controlplane": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"]
+  },
+  "agents": {
+    "design": "pipeline-agent-design.yml",
+    "dev": "pipeline-agent-dev.yml",
+    "reconcile": "pipeline-agent-reconcile.yml",
+    "boundary": "pipeline-agent-boundary.yml",
+    "live-suite": "pipeline-live-suite.yml"
+  }
+}

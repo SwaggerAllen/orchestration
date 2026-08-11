@@ -20,3 +20,4 @@ jobs:
       command: "mix test --only live"
     secrets:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      PIPELINE_REPO_TOKEN: ${{ secrets.PIPELINE_REPO_TOKEN }}

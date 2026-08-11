@@ -18,3 +18,4 @@ jobs:
     secrets:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      PIPELINE_REPO_TOKEN: ${{ secrets.PIPELINE_REPO_TOKEN }}

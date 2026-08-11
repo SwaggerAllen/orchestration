@@ -24,6 +24,11 @@ on:
     secrets:
       LINEAR_API_KEY:
         required: true
+      # Needed while the pipeline repo is private: a fine-grained PAT
+      # with contents:read on it. Falls back to the caller's token,
+      # which suffices once the repo is public.
+      PIPELINE_REPO_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -44,6 +49,7 @@ jobs:
           repository: SwaggerAllen/orchestration
           ref: ${{ inputs.pipeline_ref }}
           path: .pipeline
+          token: ${{ secrets.PIPELINE_REPO_TOKEN || github.token }}
 
       - uses: actions/setup-go@v5
         with:

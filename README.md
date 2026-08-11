@@ -45,6 +45,7 @@ covers the scratch/dry-run environment.
 | `CLOUDFLARE_ACCOUNT_ID` | project repo Actions secrets | Pages preview publish (not sensitive, kept with its token) |
 | `DIGITALOCEAN_TOKEN` | project repo Actions secrets (DO-deployed projects) | deploy detection |
 | `GITHUB_DISPATCH_TOKEN` | Cloudflare Worker secret | starting the sweep, nothing else |
+| `PIPELINE_REPO_TOKEN` | project repo Actions secrets | checkout of this repo while it is private (contents:read only; unnecessary if public) |
 
 ## The trust boundary — read before widening access
 
