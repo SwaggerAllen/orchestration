@@ -113,6 +113,7 @@ func (w *World) snapshot() *core.Snapshot {
 		Now:              w.Clock,
 		CurrentMilestone: w.CurrentMilestone,
 		KillSwitch:       w.KillSwitch,
+		AuthorID:         w.AuthorID(),
 		StaleClaimGrace:  w.Config.StaleClaimGrace.Duration(),
 		DeployTimeout:    w.Config.Deploy.Timeout.Duration(),
 		Tickets:          w.Tickets,
@@ -153,6 +154,12 @@ func (w *World) apply(acts []core.Action) error {
 				return err
 			}
 			t.Comments = append(t.Comments, core.Comment{Body: a.Marker.Comment(a.Prose), Actor: core.RoleControlPlane, At: w.Clock})
+		case core.ActAssign:
+			t, err := w.ticket(a.TicketID)
+			if err != nil {
+				return err
+			}
+			t.AssigneeID = a.Assignee
 		case core.ActRemoveLabel:
 			t, err := w.ticket(a.TicketID)
 			if err != nil {

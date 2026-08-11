@@ -1,0 +1,89 @@
+# Reusable preview cleanup (DESIGN §4). Deletes a branch's Cloudflare
+# Pages preview deployments when its PR closes — merged or abandoned,
+# both mean the preview has nothing left to review.
+#
+# Deliberately not in the Go binary: this routes no tickets and reads no
+# protocol state, so it earns no adapter. It is janitorial, and its
+# failure mode is leftover clutter rather than a mis-routed ticket —
+# which is also why the job never fails the workflow.
+name: preview-cleanup
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: The closed PR's head branch
+        required: true
+        type: string
+      pages_project:
+        description: Cloudflare Pages project name
+        required: true
+        type: string
+      production_branch:
+        description: Never deleted, whatever else matches
+        required: false
+        type: string
+        default: main
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+
+permissions: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: delete this branch's preview deployments
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ inputs.pages_project }}
+          BRANCH: ${{ inputs.branch }}
+          PRODUCTION: ${{ inputs.production_branch }}
+        run: |
+          set -uo pipefail
+
+          # Refusing to touch production is a guard, not a filter: the
+          # branch comparison below would already skip it, but deleting
+          # the live deployment is the one unrecoverable mistake here.
+          if [ "$BRANCH" = "$PRODUCTION" ]; then
+            echo "refusing to clean the production branch ($PRODUCTION)"
+            exit 0
+          fi
+
+          API="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects/$PROJECT/deployments"
+          page=1
+          ids=""
+          while :; do
+            body="$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "$API?page=$page&per_page=100")" || break
+            if [ "$(echo "$body" | jq -r '.success')" != "true" ]; then
+              echo "::warning::listing deployments failed: $(echo "$body" | jq -c '.errors')"
+              exit 0
+            fi
+            count="$(echo "$body" | jq '.result | length')"
+            [ "$count" = "0" ] && break
+            ids="$ids $(echo "$body" | jq -r --arg b "$BRANCH" --arg p "$PRODUCTION" '
+              .result[]
+              | select(.deployment_trigger.metadata.branch == $b)
+              | select(.environment != "production")
+              | select(.deployment_trigger.metadata.branch != $p)
+              | .id')"
+            page=$((page + 1))
+            [ "$page" -gt 10 ] && break
+          done
+
+          deleted=0
+          for id in $ids; do
+            # force=true also removes the branch alias, which is the
+            # point: the preview URL should stop resolving.
+            resp="$(curl -sS -X DELETE -H "Authorization: Bearer $CF_TOKEN" "$API/$id?force=true")"
+            if [ "$(echo "$resp" | jq -r '.success')" = "true" ]; then
+              deleted=$((deleted + 1))
+            else
+              echo "::warning::could not delete $id: $(echo "$resp" | jq -c '.errors')"
+            fi
+          done
+          echo "deleted $deleted preview deployment(s) for branch $BRANCH"

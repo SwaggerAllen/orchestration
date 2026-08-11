@@ -1,0 +1,21 @@
+# Project stub: delete a branch's Pages previews when its PR closes
+# (DESIGN §4). Fires on merge and on abandonment alike — both mean the
+# preview has nothing left to review.
+name: pipeline-preview-cleanup
+run-name: "pipeline: preview-cleanup ${{ github.event.pull_request.head.ref }}"
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup:
+    uses: SwaggerAllen/orchestration/.github/workflows/preview-cleanup.yml@main
+    with:
+      branch: ${{ github.event.pull_request.head.ref }}
+      # Keep in sync with pipeline.config.json preview.pagesProject
+      pages_project: orchestration-dummy
+      production_branch: main
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

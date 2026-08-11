@@ -290,6 +290,17 @@ func (m *Memory) ArchiveIssue(_ context.Context, issueID string) error {
 	return nil
 }
 
+func (m *Memory) AssignIssue(_ context.Context, issueID, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, err := m.find(issueID)
+	if err != nil {
+		return err
+	}
+	i.AssigneeID = userID
+	return nil
+}
+
 func (m *Memory) UpdateIssuePriority(_ context.Context, issueID string, priority int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

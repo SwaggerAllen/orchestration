@@ -329,6 +329,7 @@ func (w *World) stepExpect(raw json.RawMessage) error {
 		State       string         `json:"state"`
 		HasLabels   []string       `json:"hasLabels"`
 		LacksLabels []string       `json:"lacksLabels"`
+		Assignee    string         `json:"assignee"` // "author", "nobody", or omitted
 		RunKind     string         `json:"runKind"`
 		RunLive     *bool          `json:"runLive"`
 		Markers     map[string]int `json:"markers"`
@@ -358,6 +359,19 @@ func (w *World) stepExpect(raw json.RawMessage) error {
 		if t.HasLabel(l) {
 			return fmt.Errorf("expect %s: unexpected label %q", p.Key, l)
 		}
+	}
+	switch p.Assignee {
+	case "":
+	case "nobody":
+		if t.AssigneeID != "" {
+			return fmt.Errorf("expect %s: assignee = %q, want nobody", p.Key, t.AssigneeID)
+		}
+	case "author":
+		if t.AssigneeID != w.AuthorID() {
+			return fmt.Errorf("expect %s: assignee = %q, want the author (%q)", p.Key, t.AssigneeID, w.AuthorID())
+		}
+	default:
+		return fmt.Errorf("expect %s: assignee must be author, nobody, or omitted", p.Key)
 	}
 	if p.RunKind != "" {
 		kind, ok := agentKinds[p.RunKind]

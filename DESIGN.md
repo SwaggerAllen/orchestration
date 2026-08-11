@@ -132,7 +132,20 @@ and the drift shows up as agents disagreeing about what a state means.
 
 `Blocked` and `Boundary review` both hand the ball to the author. `Blocked` is any ticket
 needing attention, at any point; `Boundary review` is only ever the boundary ticket, waiting on
-triage. It is deliberately not named `Needs review`: the `needs-review` *label* (§8) means
+triage.
+
+**Assignment mirrors the ball.** The tracker's assignee is derived, not chosen: the control
+plane assigns the author exactly when a state hands them the ball — `Design review`, `Blocked`,
+`Boundary review`, and the boundary ticket's `Todo` (§10) — and unassigns everywhere else. The
+state table already answers *who has the ball*; without this, the answer is readable only by
+someone who has memorised the table, and the author's own "assigned to me" view — the one place
+they actually look — says nothing. Agent-held states go unassigned rather than to an agent
+identity, because at one shared credential an agent assignee would be indistinguishable from
+the author's.
+
+The cost, stated plainly: **assignment stops being a field a human can use.** Self-assigning a
+`Todo` ticket as a personal reminder is undone on the next sweep. That is the price of making
+the field mean one thing reliably, and the reminder belongs in priority or a comment. It is deliberately not named `Needs review`: the `needs-review` *label* (§8) means
 something unrelated — reconciliation couldn't tell — and a state and a label one hyphen apart
 is a confusion every agent prompt would have to fight.
 
@@ -236,6 +249,14 @@ architecture document into `systems/<name>.md` with file maps, stub `screens/<na
 existing surfaces, and surface what maps to no system. Its output is a PR the author reviews
 like any design — the bootstrap proposes, the author decides. A prompt rather than pipeline
 machinery because it runs once per project, with a human watching.
+
+**Previews are deleted when their PR closes.** A branch preview exists to be reviewed; once
+the PR is merged or abandoned it is clutter that also consumes a metered deployment allowance.
+Deletion is keyed to PR close rather than a scheduled sweep, because "the branch this belonged
+to is gone" is a fact the host already publishes and a cron would only rediscover late. The
+production deployment is never touched — a rule the cleanup enforces explicitly rather than
+relying on the branch filter, since deleting production would be the one unrecoverable
+mistake in an otherwise janitorial job.
 
 **The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
 machinery of ours — per-branch previews are the platform's own feature, and glue code we don't

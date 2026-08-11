@@ -130,7 +130,8 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 			ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description,
 			State: st, StateSince: i.StateSince, CreatedAt: i.CreatedAt,
 			Labels: i.Labels, Priority: i.Priority, Milestone: i.Milestone,
-			Blocks: i.Blocks, BlockedBy: i.BlockedBy,
+			AssigneeID: i.AssigneeID,
+			Blocks:     i.Blocks, BlockedBy: i.BlockedBy,
 		}
 		if i.LastChange != nil {
 			from, okFrom := p.stateByID[i.LastChange.FromStateID]
@@ -156,8 +157,15 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 		return nil, err
 	}
 
+	// The first configured author id is the assignment target (DESIGN §3).
+	authorID := ""
+	if ids := p.Config.Actors["author"]; len(ids) > 0 {
+		authorID = ids[0]
+	}
+
 	return &core.Snapshot{
 		Now:              now,
+		AuthorID:         authorID,
 		CurrentMilestone: currentMilestone(milestones, tickets),
 		KillSwitch:       killSwitch,
 		StaleClaimGrace:  p.Config.StaleClaimGrace.Duration(),
