@@ -41,7 +41,8 @@ covers the scratch/dry-run environment.
 |---|---|---|
 | `LINEAR_API_KEY` | project + pipeline repo Actions secrets | tracker read/write |
 | `ANTHROPIC_API_KEY` | project repo Actions secrets | agent model runs |
-| `CLOUDFLARE_API_TOKEN` + account id | project repo Actions secrets | Pages preview publish |
+| `CLOUDFLARE_API_TOKEN` | project repo Actions secrets | Pages preview publish |
+| `CLOUDFLARE_ACCOUNT_ID` | project repo Actions secrets | Pages preview publish (not sensitive, kept with its token) |
 | `DIGITALOCEAN_TOKEN` | project repo Actions secrets (DO-deployed projects) | deploy detection |
 | `GITHUB_DISPATCH_TOKEN` | Cloudflare Worker secret | starting the sweep, nothing else |
 
