@@ -117,17 +117,26 @@ Everything happens in the one account that already holds your domains.
    dashboard URL). This becomes the `CLOUDFLARE_ACCOUNT_ID` secret —
    not sensitive, stored with its token for convenience.
 2. **Create one Pages project per project repo, in direct-upload mode.**
-   Either:
+   Use wrangler, not the dashboard:
 
    ```sh
    npx wrangler login   # one-time browser auth
-   npx wrangler pages project create orchestration --production-branch main
+   npx wrangler pages project create orchestration-dummy --production-branch main
    ```
 
-   …or in the dashboard: Workers & Pages → Create → **Pages** tab →
-   **Upload assets** (*not* "Connect to Git"), name it, and complete the
-   first upload with any placeholder `index.html` — the preview
-   workflow replaces it.
+   **The dashboard's create flow makes a Worker, not a Pages project.**
+   Workers & Pages → Create now routes "upload assets" into a Worker
+   with static assets — a different product that `wrangler pages
+   deploy` cannot target. The failure comes much later and does not
+   mention Workers: `Project not found. The specified project name does
+   not match any of your existing projects [code: 8000007]`. The tell is
+   the dashboard URL — a Pages project is at `/pages/view/<name>`, a
+   Worker at `/workers/services/view/<name>`. If you have one of the
+   latter, leave it and create the Pages project with the command above.
+
+   Because Workers and Pages share one namespace per account, the
+   metronome Worker (step 7) and a Pages project cannot share a name.
+   Naming each Pages project after its repo keeps them apart.
 
    **Direct upload vs Git-connected is fixed at creation.** A
    Git-connected project rejects `wrangler pages deploy`, so choosing
@@ -149,16 +158,14 @@ Everything happens in the one account that already holds your domains.
      receives finished files.
    - **Access Policy off** for now — see item 5.
 
-   **The Pages name need not match the repo name**, and here it does
-   not: the dummy repo `orchestration-dummy` publishes to the Pages
-   project `orchestration`. The only name that has to agree is that
-   repo's config `preview.pagesProject` — both the preview and cleanup
-   workflows read it from there rather than carrying their own copy, so
-   the config is the one place to change it.
+   The Pages name need not match the repo name, but the only name that
+   has to agree is that repo's config `preview.pagesProject` — both the
+   preview and cleanup workflows read it from there rather than
+   carrying their own copy, so the config is the one place to set it.
 
    Branch previews then appear at
-   `<branch-slug>.orchestration.pages.dev`, updated on every push —
-   that's the whole preview feature; we build no machinery.
+   `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
+   push — that's the whole preview feature; we build no machinery.
 
    The project's own `.pages.dev` root stays at the placeholder,
    because the preview stub deliberately skips `main`: design review
