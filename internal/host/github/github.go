@@ -25,7 +25,7 @@ const DefaultBaseURL = "https://api.github.com"
 // runNameRe matches the stub workflows' run-name convention:
 // "pipeline: <kind> <ticket-key>". The convention is the correlation — a
 // run named otherwise is not an agent run (PLAN M3).
-var runNameRe = regexp.MustCompile(`^pipeline: (design|dev|reconcile|boundary) (\S+)`)
+var runNameRe = regexp.MustCompile(`^pipeline: (design|dev|reconcile|boundary|live-suite) (\S+)`)
 
 // Client implements host.Host.
 type Client struct {

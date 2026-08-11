@@ -1,0 +1,22 @@
+# Project stub: live suite. run-name is load-bearing (correlation).
+name: pipeline-live-suite
+run-name: "pipeline: live-suite ${{ inputs.ticket }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: Boundary ticket key
+        required: true
+        type: string
+
+jobs:
+  live:
+    uses: SwaggerAllen/orchestration/.github/workflows/live-suite.yml@main
+    with:
+      ticket: ${{ inputs.ticket }}
+      # The project's :live-tagged tests: real network, real providers,
+      # budget-capped. This is the once-per-milestone end-to-end check.
+      command: "mix test --only live"
+    secrets:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}

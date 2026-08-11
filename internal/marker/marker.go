@@ -58,6 +58,10 @@ const (
 	// check reads it to compare against the platform's deployment
 	// (DESIGN §13) — without it, "is this deployed" has no left-hand side.
 	Merged Kind = "merged"
+	// LiveSuite records the milestone live-suite result on the boundary
+	// ticket — the once-per-milestone real-network check the author's
+	// pass reads (DESIGN §10). Fields: result=pass|fail, run=<url>.
+	LiveSuite Kind = "live-suite"
 )
 
 // Marker is one parsed or to-be-formatted marker line.
