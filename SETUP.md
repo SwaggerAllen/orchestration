@@ -38,7 +38,7 @@ able to do exactly one job and nothing else.
   into `.pipeline/` from the project's workflows. Read-only is
   sufficient — the workflows never write to this repo.
 
-**`GITHUB_DISPATCH_TOKEN`** (step 7; skip until the loop works)
+**`DISPATCH_TOKEN`** (step 7; skip until the loop works)
 
 - Resource owner: `SwaggerAllen` · Repository access: **Only select
   repositories** → `orchestration-dummy`
@@ -47,6 +47,10 @@ able to do exactly one job and nothing else.
   pipeline-sweep.yml/dispatches`. Write is required because starting a
   workflow is a write; the token can start the sweep and touch nothing
   else in the repo.
+- Lives as a **Cloudflare Worker secret**, not a GitHub secret — the
+  Worker is the only thing that uses it. Named without a `GITHUB_`
+  prefix because Actions reserves that prefix, and one name everywhere
+  beats two.
 
 **Expiry.** Fine-grained tokens expire (default 30 days, max 1 year, or
 "no expiration" if you accept that). An expired token fails quietly in
@@ -163,7 +167,7 @@ those in Linear's UI by renaming the defaults away).
 cd worker
 # edit wrangler.toml [vars] if the repo/workflow names differ
 npx wrangler deploy
-npx wrangler secret put GITHUB_DISPATCH_TOKEN   # paste the step-2 token
+npx wrangler secret put DISPATCH_TOKEN   # paste the step-2 token
 ```
 
 Cron fires every 5 minutes and calls `workflow_dispatch` on the dummy's
@@ -178,4 +182,4 @@ in the project repo variable, so un-killing never redeploys the Worker.
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
 | pipeline repo Actions secrets | `LINEAR_API_KEY` |
-| Cloudflare Worker secret | `GITHUB_DISPATCH_TOKEN` |
+| Cloudflare Worker secret | `DISPATCH_TOKEN` |

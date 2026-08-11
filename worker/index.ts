@@ -19,7 +19,7 @@ export interface Env {
   /** branch the dispatch targets (the stub lives on main) */
   DISPATCH_REF: string;
   /** fine-grained token, Actions read+write on the project repo ONLY (secret) */
-  GITHUB_DISPATCH_TOKEN: string;
+  DISPATCH_TOKEN: string;
 }
 
 export default {
@@ -28,7 +28,7 @@ export default {
     const res = await fetch(url, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
+        authorization: `Bearer ${env.DISPATCH_TOKEN}`,
         accept: "application/vnd.github+json",
         "content-type": "application/json",
         "user-agent": "pipeline-metronome",

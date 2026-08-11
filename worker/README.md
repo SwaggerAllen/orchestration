@@ -16,7 +16,7 @@ still never learns what a ticket is.
 ```sh
 cd worker
 npx wrangler deploy
-npx wrangler secret put GITHUB_DISPATCH_TOKEN
+npx wrangler secret put DISPATCH_TOKEN
 ```
 
 The token is a fine-grained PAT scoped to the project repo with

@@ -1,6 +1,6 @@
 # The metronome Worker (PLAN M7). Deploy with:
 #   cd worker && npx wrangler deploy
-#   npx wrangler secret put GITHUB_DISPATCH_TOKEN
+#   npx wrangler secret put DISPATCH_TOKEN
 name = "pipeline-metronome"
 main = "index.ts"
 compatibility_date = "2026-01-01"
