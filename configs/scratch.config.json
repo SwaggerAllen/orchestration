@@ -43,10 +43,13 @@
     "buildCommand": "sh scripts/export_storybook.sh",
     "outputDir": "priv/static/storybook"
   },
-  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
   "actors": {
-    "author": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"],
-    "controlplane": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"]
+    "author": [
+      "35acc20f-05b8-4931-8cc2-3b4a5dffe6da"
+    ],
+    "controlplane": [
+      "35acc20f-05b8-4931-8cc2-3b4a5dffe6da"
+    ]
   },
   "agents": {
     "design": "pipeline-agent-design.yml",

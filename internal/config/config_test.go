@@ -96,7 +96,6 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 		{"preview.pagesProject", func(m map[string]any) { m["preview"].(map[string]any)["pagesProject"] = "" }, "preview.pagesProject: missing"},
 		{"preview.buildCommand", func(m map[string]any) { delete(m["preview"].(map[string]any), "buildCommand") }, "preview.buildCommand: missing"},
 		{"preview.outputDir", func(m map[string]any) { delete(m["preview"].(map[string]any), "outputDir") }, "preview.outputDir: missing"},
-		{"milestoneNaming", func(m map[string]any) { delete(m, "milestoneNaming") }, "milestoneNaming: missing"},
 		{"actors", func(m map[string]any) { delete(m, "actors") }, "actors: missing"},
 		{"actors.author", func(m map[string]any) { delete(m["actors"].(map[string]any), "author") }, "actors.author: missing"},
 		{"actors.controlplane", func(m map[string]any) { delete(m["actors"].(map[string]any), "controlplane") }, "actors.controlplane: missing"},

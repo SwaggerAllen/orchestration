@@ -56,7 +56,6 @@ func Sample() *Config {
 			BuildCommand: "mix storybook.export",
 			OutputDir:    "priv/static/storybook",
 		},
-		MilestoneNaming: "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
 		Actors: map[string][]string{
 			"author":       {"usr_author"},
 			"controlplane": {"memory-bot"},

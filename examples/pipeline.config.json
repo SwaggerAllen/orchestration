@@ -43,10 +43,13 @@
     "buildCommand": "mix storybook.export",
     "outputDir": "priv/static/storybook"
   },
-  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
   "actors": {
-    "author": ["usr_author"],
-    "controlplane": ["memory-bot"]
+    "author": [
+      "usr_author"
+    ],
+    "controlplane": [
+      "memory-bot"
+    ]
   },
   "agents": {
     "design": "pipeline-agent-design.yml",

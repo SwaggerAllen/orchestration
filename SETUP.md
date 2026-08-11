@@ -15,8 +15,10 @@ scratch environment (ORC team → `orchestration-dummy`).
   trusts everything that identity does. Give agents their own
   identities later if you want the writer matrix enforcing against you.
 - ☐ **Milestones**: the boundary flow needs them. In the project,
-  create at least `M: first` (product) — and assign the seed tickets to
-  it. Naming convention lives in the config (`Debt:` / `M:` prefixes).
+  create at least one product milestone and assign the seed tickets to
+  it. Nothing to configure — the pipeline queries the project's
+  milestones and reads their order from the tracker; the boundary agent
+  gets that list verbatim, so name them however reads best.
 - States and labels are **not** created by hand — step 5 provisions
   them idempotently.
 
@@ -201,7 +203,7 @@ those in Linear's UI by renaming the defaults away).
 
 1. Merge the scaffold PR on `orchestration-dummy` (its own `ci` run is
    the first live gate check).
-2. Create `M: first` in Test orchestration and a seed ticket in it
+2. Create a first milestone in Test orchestration and a seed ticket in it
    (state **Todo**, then move to **Designing** when ready), e.g. "Add a
    farewell to the home screen" — small, touches one screen and one
    system, exercises the whole loop.
@@ -245,7 +247,8 @@ Once the dummy loop is green, a second project is small — and needs no
 new Linear provisioning, because states and labels are **team-level**:
 both projects live in ORC, so step 5 already covered them.
 
-1. Linear: the project exists (✅) — add milestones (`M: …`).
+1. Linear: the project exists (✅) — add its milestones, named and
+   ordered however suits the project.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
    `teamId`), its own `designOwnedPaths`, gates, deploy provider

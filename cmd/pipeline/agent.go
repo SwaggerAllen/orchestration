@@ -271,6 +271,17 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	add(fmt.Sprintf("# Boundary — milestone %q (ticket %s)\n", plan.Milestone, plan.TicketKey))
 	add(fmt.Sprintf("\nSteps already completed on this ticket: archive=%t scan=%t file=%t.\n",
 		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	if len(plan.Roster) > 0 {
+		add("\n## Milestones, in the tracker's order\n\n")
+		for _, m := range plan.Roster {
+			mark := ""
+			if m.Current {
+				mark = "  <- this boundary"
+			}
+			add(fmt.Sprintf("- %s (%d open)%s\n", m.Name, m.Open, mark))
+		}
+		add("\nThe gating test asks about the next PRODUCT milestone — read it off this list rather than assuming a naming convention.\n")
+	}
 	if outcomePath != "" {
 		add(fmt.Sprintf("\nWrite your proposals JSON to `%s` (schema above), then stop — the harness files them with dedupe keys and applies the ranking.\n", outcomePath))
 	}
