@@ -1,0 +1,32 @@
+{
+  "name": "assignment mirrors who has the ball across a lifecycle (DESIGN 3)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "designing"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "designing", "assignee": "nobody"},
+
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "transition", "key": "T1", "to": "design_review", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "assignee": "author"},
+
+    {"kind": "transition", "key": "T1", "to": "ready_for_dev", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_dev", "assignee": "nobody"},
+
+    {"kind": "transition", "key": "T1", "to": "in_progress", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "red", "run": "https://ci/1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "assignee": "nobody"},
+
+    {"kind": "transition", "key": "T1", "to": "blocked", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "assignee": "author"},
+
+    {"kind": "transition", "key": "T1", "to": "canceled", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "canceled", "assignee": "nobody"}
+  ]
+}

@@ -54,6 +54,15 @@ func Sweep(s *Snapshot) []Action {
 		}
 		acts = append(acts, ciFor(s, t)...)
 	}
+	// Assignment last among the per-ticket rules: it is derived from the
+	// state a sweep leaves behind, and a ticket this pass is moving gets
+	// its assignee on the next one rather than one keystroke early.
+	for _, t := range tickets {
+		if reverted[t.ID] {
+			continue
+		}
+		acts = append(acts, assignmentFor(s, t)...)
+	}
 	for _, t := range tickets {
 		if reverted[t.ID] {
 			continue

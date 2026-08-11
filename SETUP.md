@@ -141,10 +141,12 @@ Everything happens in the one account that already holds your domains.
    Pages projects is forced rather than chosen.
 4. **Watch the deployment allowance.** Every push to every branch
    publishes a preview, and Cloudflare's free tier caps deployments per
-   month. The dummy will burn through them faster than a real project
-   during E2E testing; if you hit the ceiling, previews stop and the
-   `Design review` link goes stale — the fix is deleting old preview
-   deployments or pausing the preview stub on the dummy.
+   month. The `pipeline-preview-cleanup.yml` stub deletes a branch's
+   previews when its PR closes, which keeps the steady state small; a
+   heavy testing day can still hit the ceiling, and the symptom is a
+   stale `Design review` link rather than an obvious failure. The fix is
+   deleting old deployments in the dashboard or pausing the preview stub
+   on the dummy.
 5. Preview URLs are unauthenticated (obscure subdomains). Fine at one
    author (DESIGN §4); **Cloudflare Access** (Zero Trust → Access →
    Applications, free ≤50 users) is the upgrade path if that stops

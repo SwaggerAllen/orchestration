@@ -119,10 +119,13 @@ type Ticket struct {
 	Blocks    []string
 	BlockedBy []string
 	Comments  []Comment
-	CI        CIInfo
-	Deploy    DeployStatus
-	Run       *Run
-	CreatedAt time.Time
+	// AssigneeID is the tracker's current assignee ("" = nobody). The
+	// sweep drives it from state (DESIGN §3), never reads it as intent.
+	AssigneeID string
+	CI         CIInfo
+	Deploy     DeployStatus
+	Run        *Run
+	CreatedAt  time.Time
 }
 
 // Snapshot is everything one sweep may consider. Durations that would
@@ -130,10 +133,14 @@ type Ticket struct {
 type Snapshot struct {
 	Now              time.Time
 	CurrentMilestone string
-	KillSwitch       bool
-	StaleClaimGrace  time.Duration
-	DeployTimeout    time.Duration
-	Tickets          []*Ticket
+	// AuthorID is the author's tracker id, for assignment (DESIGN §3).
+	// Empty turns assignment off rather than assigning nobody, so a
+	// project without the mapping keeps whatever a human set.
+	AuthorID        string
+	KillSwitch      bool
+	StaleClaimGrace time.Duration
+	DeployTimeout   time.Duration
+	Tickets         []*Ticket
 }
 
 const urgentPriority = 1

@@ -64,6 +64,10 @@ func (p *Plane) Execute(ctx context.Context, acts []core.Action, log io.Writer) 
 			if err := p.Tracker.CommentOnIssue(ctx, a.TicketID, commentBody(a)); err != nil {
 				return fmt.Errorf("execute: %s: %w", a, err)
 			}
+		case core.ActAssign:
+			if err := p.Tracker.AssignIssue(ctx, a.TicketID, a.Assignee); err != nil {
+				return fmt.Errorf("execute: %s: %w", a, err)
+			}
 		case core.ActRemoveLabel:
 			if err := p.Tracker.RemoveIssueLabel(ctx, teamID, a.TicketID, a.Label); err != nil {
 				return fmt.Errorf("execute: %s: %w", a, err)

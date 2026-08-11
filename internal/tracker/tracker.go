@@ -62,6 +62,7 @@ type Issue struct {
 	StateID     string
 	Labels      []string
 	Priority    int
+	AssigneeID  string // "" = unassigned
 	Milestone   string // milestone name; "" if none
 	CreatedAt   time.Time
 	// StateSince is when the issue entered its current state, from
@@ -108,4 +109,7 @@ type Tracker interface {
 	ArchiveIssue(ctx context.Context, issueID string) error
 	// UpdateIssuePriority is the grooming re-rank (DESIGN §8, §10).
 	UpdateIssuePriority(ctx context.Context, issueID string, priority int) error
+	// AssignIssue sets the assignee; "" unassigns. Assignment mirrors who
+	// has the ball (DESIGN §3).
+	AssignIssue(ctx context.Context, issueID, userID string) error
 }

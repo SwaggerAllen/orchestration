@@ -40,6 +40,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 	    nodes {
 	      id identifier title description priority createdAt
 	      state { id }
+	      assignee { id }
 	      projectMilestone { name }
 	      labels(first: $nested) { nodes { name } pageInfo { hasNextPage } }
 	      comments(first: $nested) {
@@ -73,6 +74,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 				Priority    int       `json:"priority"`
 				CreatedAt   time.Time `json:"createdAt"`
 				State       actorRef  `json:"state"`
+				Assignee    *actorRef `json:"assignee"`
 				Milestone   *struct {
 					Name string `json:"name"`
 				} `json:"projectMilestone"`
@@ -154,6 +156,9 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 				ID: n.ID, Key: n.Identifier, Title: n.Title, Description: n.Description,
 				StateID: n.State.ID, Priority: n.Priority, CreatedAt: n.CreatedAt,
 				StateSince: n.CreatedAt,
+			}
+			if n.Assignee != nil {
+				issue.AssigneeID = n.Assignee.ID
 			}
 			if n.Milestone != nil {
 				issue.Milestone = n.Milestone.Name
@@ -345,6 +350,16 @@ func (c *Client) ArchiveIssue(ctx context.Context, issueID string) error {
 
 func (c *Client) UpdateIssuePriority(ctx context.Context, issueID string, priority int) error {
 	return c.issueUpdate(ctx, issueID, map[string]any{"priority": priority})
+}
+
+// AssignIssue sets or clears the assignee. Linear unassigns on an
+// explicit null, which is why the value is nil rather than omitted.
+func (c *Client) AssignIssue(ctx context.Context, issueID, userID string) error {
+	var v any
+	if userID != "" {
+		v = userID
+	}
+	return c.issueUpdate(ctx, issueID, map[string]any{"assigneeId": v})
 }
 
 func (c *Client) CommentOnIssue(ctx context.Context, issueID, body string) error {

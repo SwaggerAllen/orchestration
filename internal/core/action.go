@@ -18,6 +18,9 @@ const (
 	ActComment ActionKind = "comment"
 	// ActRemoveLabel removes one label.
 	ActRemoveLabel ActionKind = "remove-label"
+	// ActAssign sets the assignee ("" unassigns). Derived from state:
+	// assignment mirrors who has the ball (DESIGN §3).
+	ActAssign ActionKind = "assign"
 	// ActDispatch starts an agent run for a ticket.
 	ActDispatch ActionKind = "dispatch"
 	// ActCreateBoundary creates the milestone boundary ticket (DESIGN §10).
@@ -34,6 +37,7 @@ type Action struct {
 	Marker    *marker.Marker // optional comment on transition; required for ActComment
 	Prose     string         // human half of the comment
 	Label     string         // ActRemoveLabel
+	Assignee  string         // ActAssign; "" means unassign
 	Agent     AgentKind      // ActDispatch
 	Milestone string         // ActCreateBoundary
 	Reason    string
@@ -47,6 +51,11 @@ func (a Action) String() string {
 		return fmt.Sprintf("comment %s %s (%s)", a.TicketID, a.Marker.Kind, a.Reason)
 	case ActRemoveLabel:
 		return fmt.Sprintf("remove-label %s %q (%s)", a.TicketID, a.Label, a.Reason)
+	case ActAssign:
+		if a.Assignee == "" {
+			return fmt.Sprintf("unassign %s (%s)", a.TicketID, a.Reason)
+		}
+		return fmt.Sprintf("assign %s -> %s (%s)", a.TicketID, a.Assignee, a.Reason)
 	case ActDispatch:
 		return fmt.Sprintf("dispatch %s agent for %s (%s)", a.Agent, a.TicketID, a.Reason)
 	case ActCreateBoundary:
