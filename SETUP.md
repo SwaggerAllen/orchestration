@@ -114,18 +114,48 @@ Everything happens in the one account that already holds your domains.
    **Account ID** is in the right-hand sidebar (also visible in every
    dashboard URL). This becomes the `CLOUDFLARE_ACCOUNT_ID` secret —
    not sensitive, stored with its token for convenience.
-2. **Create one Pages project per project repo** (direct-upload mode,
-   which is what `wrangler pages deploy` publishes to):
+2. **Create one Pages project per project repo, in direct-upload mode.**
+   Either:
 
    ```sh
    npx wrangler login   # one-time browser auth
    npx wrangler pages project create orchestration-dummy --production-branch main
    ```
 
+   …or in the dashboard: Workers & Pages → Create → **Pages** tab →
+   **Upload assets** (*not* "Connect to Git"), name it, and complete the
+   first upload with any placeholder `index.html` — the preview
+   workflow replaces it.
+
+   **Direct upload vs Git-connected is fixed at creation.** A
+   Git-connected project rejects `wrangler pages deploy`, so choosing
+   wrong means deleting the project and starting over. Connecting the
+   repo is also wrong on its own terms: Cloudflare would build on every
+   push alongside our workflow — double deployments against the
+   allowance, and its build would fail anyway, since the export needs
+   the project's own toolchain.
+
+   Then, in the project's settings:
+
+   - **Production branch: `main`.** This is what makes every other
+     branch a preview, and what both Cloudflare's own protection and
+     the cleanup workflow key off.
+   - **Build command / output directory: leave empty.** They apply only
+     to Git-connected projects; being asked for them means you are in
+     the wrong flow.
+   - **No environment variables.** The build happens in Actions; Pages
+     receives finished files.
+   - **Access Policy off** for now — see item 5.
+
    Each name must match that repo's config `preview.pagesProject`.
    Branch previews then appear at
    `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
    push — that's the whole preview feature; we build no machinery.
+
+   The project's own `.pages.dev` root stays at the placeholder,
+   because the preview stub deliberately skips `main`: design review
+   reads branch previews, and publishing main would spend a deployment
+   on a URL nothing in the protocol consults.
 
    **Not shared between repos**: both repos deploy their `main` as the
    production deployment, so one Pages project serving two repos would
