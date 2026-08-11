@@ -15,8 +15,10 @@ import (
 // than remembered.
 const boundaryDescription = `This ticket is pipeline machinery. Automation created it and will not close it.
 
-  Todo            → your pass. Manual test the milestone, and clear any Blocked
-                    tickets labelled needs-review.
+  Todo            → your pass. The live suite's result lands below as a comment —
+                    read it first; a failure becomes a blocker like any finding.
+                    Manual test the milestone, and clear any Blocked tickets
+                    labelled needs-review.
   In progress     → YOU move it here when your pass is done. This is the signal.
                     The boundary agent then runs archive / debt scan / grooming,
                     posting a comment per step. If it fails, move it back here and

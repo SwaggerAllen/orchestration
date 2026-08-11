@@ -1,0 +1,72 @@
+# Reusable live-suite run (DESIGN §10). Dispatched by the sweep when the
+# boundary ticket opens, before the author's pass: the once-per-milestone
+# real-network check. The suite command is project-specific and comes in
+# as an input; this workflow's job is to run it and report the result
+# marker — the run reports its own verdict, like every agent.
+name: live-suite
+
+on:
+  workflow_call:
+    inputs:
+      ticket:
+        description: Boundary ticket key
+        required: true
+        type: string
+      command:
+        description: The project's live-suite command (e.g. "mix test --only live")
+        required: true
+        type: string
+      pipeline_ref:
+        description: Pipeline repo ref to run the harness from
+        required: false
+        type: string
+        default: main
+    secrets:
+      LINEAR_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: checkout project
+        uses: actions/checkout@v4
+
+      - name: checkout pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: SwaggerAllen/orchestration
+          ref: ${{ inputs.pipeline_ref }}
+          path: .pipeline
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .pipeline/go.mod
+
+      # The project's own toolchain setup belongs in the stub or in the
+      # command itself — this workflow makes no assumptions about it.
+      - name: run live suite
+        id: suite
+        continue-on-error: true
+        run: ${{ inputs.command }}
+
+      - name: report
+        run: |
+          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent live-suite-report \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+            --ticket "${{ inputs.ticket }}" \
+            --result "${{ steps.suite.outcome == 'success' && 'pass' || 'fail' }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      # The job's own status mirrors the suite so the run is red in the
+      # Actions UI when the suite failed — the marker is the record, but
+      # a green run wrapping a red suite misleads at a glance.
+      - name: propagate failure
+        if: steps.suite.outcome != 'success'
+        run: exit 1

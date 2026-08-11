@@ -516,10 +516,10 @@ one no agent will act on.
   tracker — the tracker cannot police the repo.
 
 **Pipeline comments are programmatic, not agent-authored.** Every comment the control plane
-relies on later — CI failure comments (§12), dispatch ids (§6), boundary step completions
-(§10) — opens with a fixed machine-readable marker and is written by the control plane or the
-run harness, never composed by a model. A count or a resume that depends on prose an agent
-phrased differently each time is a count that drifts.
+relies on later — CI failure comments (§12), dispatch ids (§6), boundary step completions,
+live-suite results (§10) — opens with a fixed machine-readable marker and is written by the
+control plane or the run harness, never composed by a model. A count or a resume that depends
+on prose an agent phrased differently each time is a count that drifts.
 
 **Verified on pickup (agent, flags rather than blocks):** base SHA, blocking relations,
 expected-state assertion.
@@ -570,27 +570,39 @@ signal that was missing.
 ### The sequence
 
 1. Last ticket in the milestone resolves. **Queue pauses.** Boundary ticket created.
-2. **Gate:** all `re-evaluate` labels clear, and nothing in `Blocked` except tickets carrying
+2. **Live suite.** The control plane dispatches the project's live-suite workflow (config
+   `agents.live-suite`; unwired = logged and skipped) against the boundary ticket: the
+   project's `:live`-tagged tests — real network, real providers, the one deliberately
+   non-deterministic check, once per milestone. The run posts a result marker on the ticket;
+   the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
+   Per-ticket CI stays deterministic and merges never gate on this — the live suite gates the
+   milestone, not the ticket, because a live check on every ticket would put network flake
+   inside the escalation rules (§12), and a live check that never runs is how "merged and
+   green" quietly diverges from "works against the world". A run that dies without posting its
+   marker is the author's to re-run — the sweep does not resurrect it, for the same reason
+   stale claims are detected rather than silently retried.
+3. **Gate:** all `re-evaluate` labels clear, and nothing in `Blocked` except tickets carrying
    `needs-review` — those are the author's pass, not a barrier to it. Anything outstanding is
    named on the boundary ticket.
-3. **Author's pass**, with the ticket still in `Todo`: manual testing across the milestone, plus
-   every `Blocked` ticket carrying `needs-review`, each of which the author closes or sends to
-   `Ready for rework`. Blockers filed during the pass run the normal design and dev loop.
-4. Author moves the boundary ticket to `In progress`. **This is the signal.**
-5. **Archive pass.** The milestone's `Done` issues are archived — which reclaims tracker
+4. **Author's pass**, with the ticket still in `Todo`: the live-suite result first, then manual
+   testing across the milestone, plus every `Blocked` ticket carrying `needs-review`, each of
+   which the author closes or sends to `Ready for rework`. Blockers filed during the pass run
+   the normal design and dev loop.
+5. Author moves the boundary ticket to `In progress`. **This is the signal.**
+6. **Archive pass.** The milestone's `Done` issues are archived — which reclaims tracker
    headroom but makes them invisible to the "is this already filed?" check. So the archive pass
    **emits a retro note into the repo**: issue keys, titles, one line each. Without it,
    archiving silently breaks duplicate detection.
-6. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
+7. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
    skipped or deleted tests, dependency and advisory drift. Bounded because "did we take on
    debt?" asked openly produces invented findings.
    *Gating test:* does the next product milestone get materially harder without it? Yes →
    propose for the gating debt milestone. No → backlog.
-7. **Grooming pass.** Re-ranks existing debt as well as proposing additions.
-8. Proposals land in **Triage**. Design findings and debt only, never bugs: a bug parked in a
+8. **Grooming pass.** Re-ranks existing debt as well as proposing additions.
+9. Proposals land in **Triage**. Design findings and debt only, never bugs: a bug parked in a
    queue has been rescheduled rather than repaired.
-9. Boundary agent moves the ticket to `Boundary review`.
-10. **Author** accepts or declines Triage, confirms the ranking, closes the boundary ticket, and
+10. Boundary agent moves the ticket to `Boundary review`.
+11. **Author** accepts or declines Triage, confirms the ranking, closes the boundary ticket, and
     pulls the next milestone into `Todo` in one pass. `Done` resumes the queue.
 
 ### Blocking work found during the pass
@@ -659,8 +671,10 @@ Milestone boundary — <milestone name>
 
 This ticket is pipeline machinery. Automation created it and will not close it.
 
-  Todo            → your pass. Manual test the milestone, and clear any Blocked
-                    tickets labelled needs-review.
+  Todo            → your pass. The live suite's result lands below as a comment —
+                    read it first; a failure becomes a blocker like any finding.
+                    Manual test the milestone, and clear any Blocked tickets
+                    labelled needs-review.
   In progress     → YOU move it here when your pass is done. This is the signal.
                     The boundary agent then runs archive / debt scan / grooming,
                     posting a comment per step. If it fails, move it back here and
@@ -834,6 +848,7 @@ invariant is only as strong as one-dispatcher.
 | Reconcile fail | State → `Ready for rework` |
 | Deployment active, SHA ≥ merge SHA | Post-deploy check → `Done`, or `Blocked` if it failed or carries `needs-review` |
 | Last milestone ticket resolves | Pause queue; create the boundary ticket (§10) |
+| Boundary ticket in `Todo`, no live-suite result | Dispatch the live-suite run, once; its result marker ends the loop (§10) |
 | Boundary ticket → `In progress` | Boundary agent run: archive, debt scan, grooming |
 | Boundary ticket → `Done` | Resume queue |
 | Agent-owned state, dispatched run dead past grace period | State → `Blocked`, comment naming the dead run (§12) |

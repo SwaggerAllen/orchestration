@@ -363,3 +363,53 @@ func TestReEvaluateBlocksPickupAndTriggersReRead(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveSuiteDispatchesWhenBoundaryOpens(t *testing.T) {
+	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	acts := Sweep(snap(b))
+	a := find(acts, ActDispatch, "B1")
+	if a == nil || a.Agent != AgentLiveSuite {
+		t.Fatalf("want a live-suite dispatch for the open boundary ticket, got %v", acts)
+	}
+}
+
+func TestLiveSuiteNotRedispatchedAfterResult(t *testing.T) {
+	b := tk("B1", protocol.Todo,
+		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+		withComment(marker.LiveSuite, map[string]string{"result": "fail", "run": "https://ci/1"}))
+	if a := find(Sweep(snap(b)), ActDispatch, "B1"); a != nil {
+		t.Fatalf("the result marker ends the loop — no dispatch wanted, got %v", a)
+	}
+}
+
+func TestLiveSuiteNotRedispatchedWhileRunningOrAfterDeadRun(t *testing.T) {
+	live := tk("B1", protocol.Todo, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "r1", Kind: AgentLiveSuite, Live: true}
+	})
+	if a := find(Sweep(snap(live)), ActDispatch, "B1"); a != nil {
+		t.Fatalf("live run: no second dispatch wanted, got %v", a)
+	}
+	// A run that died without posting its marker is the author's to
+	// re-run — resurrecting it silently would hide the failure.
+	dead := tk("B1", protocol.Todo, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "r1", Kind: AgentLiveSuite, Live: false, EndedAt: t0.Add(-time.Minute)}
+	})
+	if a := find(Sweep(snap(dead)), ActDispatch, "B1"); a != nil {
+		t.Fatalf("dead run without a marker: no silent resurrection, got %v", a)
+	}
+}
+
+func TestLiveSuiteNotDispatchedPastTodo(t *testing.T) {
+	b := tk("B1", protocol.InProgress,
+		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+		arrived(protocol.Todo, RoleAuthor))
+	acts := Sweep(snap(b))
+	for _, a := range acts {
+		if a.Kind == ActDispatch && a.Agent == AgentLiveSuite {
+			t.Fatalf("live suite dispatches only in Todo, got %v", a)
+		}
+	}
+}

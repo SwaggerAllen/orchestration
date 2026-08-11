@@ -5,12 +5,17 @@
     {"kind": "seed", "key": "T1", "state": "done", "milestone": "M1"},
     {"kind": "sweep"},
     {"kind": "expect-boundary", "milestone": "M1"},
+    {"kind": "expect", "key": "B-M1", "runKind": "live-suite", "runLive": true},
+
+    {"kind": "run-end", "key": "B-M1"},
+    {"kind": "comment", "key": "B-M1", "marker": "live-suite", "fields": {"result": "pass", "run": "https://ci/live/1"}, "actor": "controlplane"},
 
     {"kind": "seed", "key": "T2", "state": "ready_for_dev", "milestone": "M2", "priority": 1},
     {"kind": "sweep"},
     {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true},
 
     {"kind": "seed", "key": "T3", "state": "ready_for_dev", "milestone": "M1", "blocks": ["B-M1"]},
+    {"kind": "advance", "by": "1m"},
     {"kind": "transition", "key": "B-M1", "to": "in_progress", "actor": "author"},
     {"kind": "sweep"},
     {"kind": "expect", "key": "B-M1", "state": "in_progress", "runLive": false},

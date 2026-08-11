@@ -19,7 +19,7 @@ import (
 
 func cmdAgent(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("agent: want a subcommand: claim, finish, abort")
+		return fmt.Errorf("agent: want a subcommand: claim, finish, abort, boundary-archive, boundary-file, live-suite-report")
 	}
 	switch args[0] {
 	case "claim":
@@ -32,9 +32,37 @@ func cmdAgent(args []string) error {
 		return cmdBoundaryArchive(args[1:])
 	case "boundary-file":
 		return cmdBoundaryFile(args[1:])
+	case "live-suite-report":
+		return cmdLiveSuiteReport(args[1:])
 	default:
 		return fmt.Errorf("agent: unknown subcommand %q", args[0])
 	}
+}
+
+// cmdLiveSuiteReport posts the live-suite result on the boundary ticket.
+// Called by the live-suite workflow after the project's :live tests run
+// (DESIGN §10) — the run reports its own verdict, like every agent.
+func cmdLiveSuiteReport(args []string) error {
+	fs := flag.NewFlagSet("agent live-suite-report", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	ticket := fs.String("ticket", "", "boundary ticket key")
+	result := fs.String("result", "", "pass or fail")
+	runURL := fs.String("run-url", "", "workflow run URL")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *ticket == "" || *result == "" {
+		return fmt.Errorf("agent live-suite-report: --ticket and --result are required")
+	}
+	p, _, err := agentDeps(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := agent.LiveSuiteReport(context.Background(), p, *ticket, *result, *runURL, time.Now()); err != nil {
+		return err
+	}
+	fmt.Printf("live suite %s: %s\n", *ticket, *result)
+	return nil
 }
 
 // agentDeps builds the plane and host from the environment the Actions

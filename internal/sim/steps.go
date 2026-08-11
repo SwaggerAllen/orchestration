@@ -77,6 +77,7 @@ func parseRole(s string) (core.Role, error) {
 var agentKinds = map[string]core.AgentKind{
 	"design": core.AgentDesign, "dev": core.AgentDev,
 	"reconcile": core.AgentReconcile, "boundary": core.AgentBoundary,
+	"live-suite": core.AgentLiveSuite,
 }
 
 func (w *World) stepSeed(raw json.RawMessage) error {
