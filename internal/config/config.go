@@ -68,8 +68,10 @@ type Config struct {
 	Agents map[string]string `json:"agents"`
 }
 
-// AgentKinds are the legal keys of Agents.
-var AgentKinds = []string{"design", "dev", "reconcile", "boundary"}
+// AgentKinds are the legal keys of Agents. live-suite is not an LLM
+// agent — it is the project's once-per-milestone real-network test run
+// (DESIGN §10) — but it dispatches through the same machinery.
+var AgentKinds = []string{"design", "dev", "reconcile", "boundary", "live-suite"}
 
 // ActorRoles are the legal keys of Actors.
 var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile", "boundary"}

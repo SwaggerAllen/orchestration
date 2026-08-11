@@ -35,6 +35,11 @@ const (
 	AgentDev       AgentKind = "dev"
 	AgentReconcile AgentKind = "reconcile"
 	AgentBoundary  AgentKind = "boundary"
+	// AgentLiveSuite is not an LLM agent: it is the project's live-suite
+	// workflow (real network, real providers), dispatched once per
+	// milestone against the boundary ticket (DESIGN §10). It rides the
+	// same dispatch/run-name machinery as the agents.
+	AgentLiveSuite AgentKind = "live-suite"
 )
 
 // CIStatus is the state of a ticket's checks, as the adapter reports it.

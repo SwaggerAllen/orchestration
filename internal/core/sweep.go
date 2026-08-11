@@ -493,6 +493,19 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 		acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentBoundary,
 			Reason: "author signalled the manual pass is done (DESIGN §10)"})
 	}
+
+	// Live suite: dispatched once when the boundary ticket opens, before
+	// the author's pass, so the pass reads real end-to-end results
+	// (DESIGN §10). The run posts its own result marker; the marker is
+	// what ends the loop. A dead run without one is the author's to
+	// re-run — the sweep does not resurrect it, for the same reason
+	// stale claims are detected rather than silently retried (§12).
+	if boundary != nil && boundary.State == protocol.Todo &&
+		len(markersOf(boundary, marker.LiveSuite)) == 0 &&
+		awaitingDispatch(boundary) && !s.agentBusy(AgentLiveSuite) {
+		acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentLiveSuite,
+			Reason: "boundary open: live suite before the author's pass (DESIGN §10)"})
+	}
 	return acts
 }
 
