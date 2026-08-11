@@ -17,9 +17,12 @@ openly produces invented findings:
 - Dependency and advisory drift.
 
 For each finding, apply the **gating test**: does the next product
-milestone get materially harder without this? Yes → `"gating": true`
-(it belongs in the gating debt milestone). No → `"gating": false`
-(backlog). An honest empty scan beats a padded one.
+milestone get materially harder without this? The milestone list below
+is queried live from the tracker, in its real order — identify the next
+product milestone from those names and what they contain, not from an
+assumed prefix convention. Yes → `"gating": true` (it belongs in the
+gating debt milestone). No → `"gating": false` (backlog). An honest
+empty scan beats a padded one.
 
 ## Grooming pass
 
@@ -58,4 +61,7 @@ Write JSON to the outcome path given below:
 ```
 
 Then stop. The harness files proposals (deduped), applies the ranking,
-posts the step comments, and hands the ticket to the author.
+posts the step comments, computes the next debt milestone's proposed
+composition (all gating debt plus non-gating by priority to the floor of
+five), and hands the ticket to the author. You do not assign milestones:
+assigning one commits the work, and that is the author's call.

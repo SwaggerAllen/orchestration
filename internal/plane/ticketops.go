@@ -3,6 +3,7 @@ package plane
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -57,6 +58,18 @@ func (p *Plane) EnsureMutexLabel(ctx context.Context, ticketID, label string) er
 		}
 	}
 	return p.Tracker.AddIssueLabel(ctx, teamID, ticketID, label)
+}
+
+// Milestones returns the project's milestones in the tracker's own order.
+// Milestones are queried, never configured: the tracker is canonical for
+// scope (DESIGN §1, §5).
+func (p *Plane) Milestones(ctx context.Context) ([]tracker.Milestone, error) {
+	ms, err := p.Tracker.ListMilestones(ctx, p.Config.Tracker.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(ms, func(i, j int) bool { return ms[i].SortOrder < ms[j].SortOrder })
+	return ms, nil
 }
 
 // StateIDFor resolves a protocol state to the team's state id.

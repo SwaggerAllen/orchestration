@@ -25,7 +25,9 @@ const boundaryDescription = `This ticket is pipeline machinery. Automation creat
                     it resumes from the first step with no comment.
   Boundary review → the agent put it back. Proposals are in Triage; accept or
                     decline, confirm the ranking, then close this ticket and pull
-                    the next milestone into Todo.
+                    the next milestone into Todo. The comment above proposes the
+                    next debt milestone's contents — assigning those milestones is
+                    yours, because assigning one commits the work.
   Done            → you close it. The queue resumes.
 
 The queue is paused while this ticket is open. The dev agent will only pick up

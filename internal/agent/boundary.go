@@ -31,6 +31,21 @@ type BoundaryPlan struct {
 	ClaimResult
 	Milestone string
 	Done      map[string]bool
+	// Roster is every milestone in the tracker's order, with how much of
+	// each is still open. The gating test asks about "the next product
+	// milestone" (DESIGN §10), and this is where that comes from —
+	// queried, not configured, so it cannot describe a convention the
+	// project stopped following.
+	Roster []MilestoneStatus
+}
+
+// MilestoneStatus is one milestone as the boundary agent sees it.
+type MilestoneStatus struct {
+	Name string `json:"name"`
+	// Open counts unresolved tickets; archived work is invisible here,
+	// which is what the retro notes exist to compensate for (DESIGN §10).
+	Open    int  `json:"open"`
+	Current bool `json:"current"`
 }
 
 // ClaimBoundary asserts and marks. The author's Todo -> In progress move
@@ -67,6 +82,20 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 		if err == nil && ok && m.Kind == marker.BoundaryStep {
 			plan.Done[m.Fields["step"]] = true
 		}
+	}
+
+	milestones, err := p.Milestones(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range milestones {
+		st := MilestoneStatus{Name: m.Name, Current: m.Name == t.Milestone}
+		for _, cand := range snap.Tickets {
+			if cand.Milestone == m.Name && !cand.IsBoundary() && !cand.Resolved() {
+				st.Open++
+			}
+		}
+		plan.Roster = append(plan.Roster, st)
 	}
 
 	dm := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
@@ -278,6 +307,12 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		}
 	}
 
+	// The composition proposal is the last thing the author reads before
+	// they take over, so it is posted after filing — it can only be
+	// computed once this boundary's findings are tickets.
+	if err := ProposeComposition(ctx, p, plan, now); err != nil {
+		return fmt.Errorf("boundary file: composition: %w", err)
+	}
 	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview)
 }
 

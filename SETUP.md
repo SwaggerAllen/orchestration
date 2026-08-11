@@ -15,8 +15,10 @@ scratch environment (ORC team → `orchestration-dummy`).
   trusts everything that identity does. Give agents their own
   identities later if you want the writer matrix enforcing against you.
 - ☐ **Milestones**: the boundary flow needs them. In the project,
-  create at least `M: first` (product) — and assign the seed tickets to
-  it. Naming convention lives in the config (`Debt:` / `M:` prefixes).
+  create at least one product milestone and assign the seed tickets to
+  it. Nothing to configure — the pipeline queries the project's
+  milestones and reads their order from the tracker; the boundary agent
+  gets that list verbatim, so name them however reads best.
 - States and labels are **not** created by hand — step 5 provisions
   them idempotently.
 
@@ -114,18 +116,48 @@ Everything happens in the one account that already holds your domains.
    **Account ID** is in the right-hand sidebar (also visible in every
    dashboard URL). This becomes the `CLOUDFLARE_ACCOUNT_ID` secret —
    not sensitive, stored with its token for convenience.
-2. **Create one Pages project per project repo** (direct-upload mode,
-   which is what `wrangler pages deploy` publishes to):
+2. **Create one Pages project per project repo, in direct-upload mode.**
+   Either:
 
    ```sh
    npx wrangler login   # one-time browser auth
    npx wrangler pages project create orchestration-dummy --production-branch main
    ```
 
+   …or in the dashboard: Workers & Pages → Create → **Pages** tab →
+   **Upload assets** (*not* "Connect to Git"), name it, and complete the
+   first upload with any placeholder `index.html` — the preview
+   workflow replaces it.
+
+   **Direct upload vs Git-connected is fixed at creation.** A
+   Git-connected project rejects `wrangler pages deploy`, so choosing
+   wrong means deleting the project and starting over. Connecting the
+   repo is also wrong on its own terms: Cloudflare would build on every
+   push alongside our workflow — double deployments against the
+   allowance, and its build would fail anyway, since the export needs
+   the project's own toolchain.
+
+   Then, in the project's settings:
+
+   - **Production branch: `main`.** This is what makes every other
+     branch a preview, and what both Cloudflare's own protection and
+     the cleanup workflow key off.
+   - **Build command / output directory: leave empty.** They apply only
+     to Git-connected projects; being asked for them means you are in
+     the wrong flow.
+   - **No environment variables.** The build happens in Actions; Pages
+     receives finished files.
+   - **Access Policy off** for now — see item 5.
+
    Each name must match that repo's config `preview.pagesProject`.
    Branch previews then appear at
    `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
    push — that's the whole preview feature; we build no machinery.
+
+   The project's own `.pages.dev` root stays at the placeholder,
+   because the preview stub deliberately skips `main`: design review
+   reads branch previews, and publishing main would spend a deployment
+   on a URL nothing in the protocol consults.
 
    **Not shared between repos**: both repos deploy their `main` as the
    production deployment, so one Pages project serving two repos would
@@ -157,21 +189,30 @@ Everything happens in the one account that already holds your domains.
 Actions (this repo) → **verify-live** → Run workflow →
 config `configs/scratch.config.json`, **apply = true**.
 
-This creates the fifteen states and eight labels in ORC, asserts a
-second run is a no-op (the M0 idempotence gate), and runs a live sweep
-dry-run. Re-run any time; it only ever creates what's missing and
-refuses to retype live states.
+This creates the missing states and labels in ORC, asserts a second run
+is a no-op (the M0 idempotence gate), and then sweeps. Re-run any time:
+setup only ever creates what is missing and refuses to retype a live
+state, so applying is safe on every run.
 
-Note: ORC keeps whatever default states Linear gave it (Todo, In
-Progress, Done may collide by name — the provisioner adopts same-name
-states if their category matches and errors loudly if not; resolve
-those in Linear's UI by renaming the defaults away).
+**Run it with apply checked.** With apply unchecked the workflow can
+only plan the setup — the sweep reads the team *through* the state
+table, so it has nothing to read until setup has applied once. The
+workflow says so instead of failing.
+
+**Linear's own defaults are adopted, not duplicated.** ORC arrives with
+Backlog / Todo / In Progress / Done / Canceled; the config maps the
+pipeline's states onto those names exactly, so setup leaves them alone
+and creates only the ten it lacks. Watch the capitalisation — a config
+saying `In progress` against Linear's `In Progress` produces two
+near-identical states rather than an error, which is the confusing
+outcome rather than the dangerous one. If a same-name state has the
+wrong category, setup refuses loudly and you resolve it in Linear.
 
 ## 6. First end-to-end run
 
 1. Merge the scaffold PR on `orchestration-dummy` (its own `ci` run is
    the first live gate check).
-2. Create `M: first` in Test orchestration and a seed ticket in it
+2. Create a first milestone in Test orchestration and a seed ticket in it
    (state **Todo**, then move to **Designing** when ready), e.g. "Add a
    farewell to the home screen" — small, touches one screen and one
    system, exercises the whole loop.
@@ -215,7 +256,8 @@ Once the dummy loop is green, a second project is small — and needs no
 new Linear provisioning, because states and labels are **team-level**:
 both projects live in ORC, so step 5 already covered them.
 
-1. Linear: the project exists (✅) — add milestones (`M: …`).
+1. Linear: the project exists (✅) — add its milestones, named and
+   ordered however suits the project.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
    `teamId`), its own `designOwnedPaths`, gates, deploy provider

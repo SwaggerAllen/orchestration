@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/config"
+
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
@@ -160,4 +162,22 @@ func TestParseProposalsRejectsBugs(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "never bugs") {
 		t.Errorf("bugs must never park in Triage, got %v", err)
 	}
+}
+
+// seedBoundary makes a boundary ticket the way the sweep would.
+func seedBoundary(t *testing.T, tr *tracker.Memory, cfg *config.Config) tracker.Issue {
+	t.Helper()
+	i, err := tr.CreateIssue(context.Background(), tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Milestone boundary — M1", Description: "machinery",
+		StateID: stateID(t, tr, cfg, protocol.InProgress),
+		Labels:  []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Mutate(i.ID, func(is *tracker.Issue) { is.Milestone = "M1" }); err != nil {
+		t.Fatal(err)
+	}
+	return i
 }

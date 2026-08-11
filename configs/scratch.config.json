@@ -10,7 +10,7 @@
     "designing": "Designing",
     "design_review": "Design review",
     "ready_for_dev": "Ready for dev",
-    "in_progress": "In progress",
+    "in_progress": "In Progress",
     "checks": "Checks",
     "reconciling": "Reconciling",
     "ready_for_rework": "Ready for rework",
@@ -43,10 +43,13 @@
     "buildCommand": "sh scripts/export_storybook.sh",
     "outputDir": "priv/static/storybook"
   },
-  "milestoneNaming": "debt milestones prefixed 'Debt:', product milestones prefixed 'M:'",
   "actors": {
-    "author": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"],
-    "controlplane": ["35acc20f-05b8-4931-8cc2-3b4a5dffe6da"]
+    "author": [
+      "35acc20f-05b8-4931-8cc2-3b4a5dffe6da"
+    ],
+    "controlplane": [
+      "35acc20f-05b8-4931-8cc2-3b4a5dffe6da"
+    ]
   },
   "agents": {
     "design": "pipeline-agent-design.yml",

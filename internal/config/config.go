@@ -47,10 +47,6 @@ type Config struct {
 
 	Preview Preview `json:"preview"`
 
-	// MilestoneNaming is the convention identifying alternating debt and
-	// product milestones (DESIGN §2.9), e.g. "debt: / product: prefixes".
-	MilestoneNaming string `json:"milestoneNaming"`
-
 	// Actors maps pipeline roles to tracker user ids. The writer matrix
 	// (DESIGN §3, §9) judges roles, and this table is where identity
 	// becomes role — the core never sees a user id. author and
@@ -235,10 +231,6 @@ func (c *Config) Validate() error {
 	if c.Preview.OutputDir == "" {
 		add("preview.outputDir: missing")
 	}
-	if c.MilestoneNaming == "" {
-		add("milestoneNaming: missing")
-	}
-
 	if len(c.Actors) == 0 {
 		add("actors: missing")
 	} else {
