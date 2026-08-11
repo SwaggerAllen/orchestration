@@ -41,16 +41,24 @@ able to do exactly one job and nothing else.
 **`DISPATCH_TOKEN`** (step 7; skip until the loop works)
 
 - Resource owner: `SwaggerAllen` · Repository access: **Only select
-  repositories** → `orchestration-dummy`
+  repositories** → **every project repo the metronome serves**
+  (`orchestration-dummy`, and the first real project's repo alongside
+  it). Adding a project later means editing this token's repo list.
 - Repository permissions: **Actions → Read and write**. Nothing else.
-- What it does: one API call — `POST .../actions/workflows/
+- What it does: one API call per project — `POST .../actions/workflows/
   pipeline-sweep.yml/dispatches`. Write is required because starting a
-  workflow is a write; the token can start the sweep and touch nothing
-  else in the repo.
+  workflow is a write; the token can start sweeps and touch nothing
+  else.
 - Lives as a **Cloudflare Worker secret**, not a GitHub secret — the
   Worker is the only thing that uses it. Named without a `GITHUB_`
   prefix because Actions reserves that prefix, and one name everywhere
   beats two.
+- One shared token is the recommended shape (see step 7). It is the
+  least powerful credential in the system — the project repos' own
+  workflows already hold contents:write, merge rights and the model
+  key. Split into per-repo tokens only if you want no single credential
+  able to start workflows in two projects, and then run one Worker per
+  project.
 
 **Expiry.** Fine-grained tokens expire (default 30 days, max 1 year, or
 "no expiration" if you accept that). An expired token fails quietly in
@@ -163,18 +171,53 @@ those in Linear's UI by renaming the defaults away).
 
 ## 7. Cloudflare — Worker metronome (after the loop works)
 
+One Worker serves every project: `PROJECTS` in `wrangler.toml` is a
+JSON array of `{repository, workflow, ref}`, one entry per project
+repo, and one cron fires them all.
+
 ```sh
 cd worker
-# edit wrangler.toml [vars] if the repo/workflow names differ
+# list every project repo in wrangler.toml's PROJECTS
 npx wrangler deploy
 npx wrangler secret put DISPATCH_TOKEN   # paste the step-2 token
 ```
 
-Cron fires every 5 minutes and calls `workflow_dispatch` on the dummy's
-sweep stub — punctual where GitHub's own `schedule:` jitters. Verify in
-the Worker's dashboard logs (one dispatch per tick) and the dummy's
-Actions tab (sweep runs arriving on the fives). The kill switch stays
-in the project repo variable, so un-killing never redeploys the Worker.
+Cron fires every 5 minutes and calls `workflow_dispatch` on each sweep
+stub — punctual where GitHub's own `schedule:` jitters. A failing
+dispatch is logged and skipped rather than stopping the others; the
+sweep is convergent, so a missed beat costs latency, never correctness.
+Verify in the Worker's dashboard logs (one dispatch per project per
+tick) and each Actions tab (sweep runs arriving on the fives).
+
+Halting stays per-project and outside the Worker: `PIPELINE_KILL_SWITCH`
+is a repo variable the sweep reads, so stopping one project leaves the
+others running and un-killing never redeploys anything.
+
+## 8. Adding the next project
+
+Once the dummy loop is green, a second project is small — and needs no
+new Linear provisioning, because states and labels are **team-level**:
+both projects live in ORC, so step 5 already covered them.
+
+1. Linear: the project exists (✅) — add milestones (`M: …`).
+2. Project repo: copy the stubs from `examples/stubs/`, add a
+   `pipeline.config.json` with that project's `projectId` (same
+   `teamId`), its own `designOwnedPaths`, gates, deploy provider
+   (`digitalocean` for a real DO app) and preview project.
+3. Bootstrap the docs: run `prompts/bootstrap.md` with Claude Code,
+   attended, to split the existing architecture doc into
+   `systems/*.md` with file maps and stub `screens/*.md` (DESIGN §4).
+4. Secrets on that repo: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,
+   `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
+   grants read on the pipeline repo), Cloudflare pair,
+   `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
+5. Metronome: add the repo to `PROJECTS`, add it to `DISPATCH_TOKEN`'s
+   repository list, redeploy the Worker.
+
+Note: labels are team-level too, so `screen:`/`system:` labels from
+both projects appear in one list. That is cosmetic only — the queue and
+the mutex are scoped by project (DESIGN §2), so a `screen:home` in one
+project never collides with a `screen:home` in the other.
 
 ## Secrets recap
 
