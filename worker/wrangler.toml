@@ -1,16 +1,19 @@
 # The metronome Worker (PLAN M7). Deploy with:
 #   cd worker && npx wrangler deploy
-#   npx wrangler secret put GITHUB_DISPATCH_TOKEN
+#   npx wrangler secret put DISPATCH_TOKEN
 name = "pipeline-metronome"
 main = "index.ts"
 compatibility_date = "2026-01-01"
 
 [triggers]
-# Every 5 minutes. This is the polled loop's cadence; the CI hops are
-# event-driven in the project repo and never wait for it (DESIGN §13).
+# Every 5 minutes, one cron however many projects are listed. This is
+# the polled loop's cadence; the CI hops are event-driven in each
+# project repo and never wait for it (DESIGN §13).
 crons = ["*/5 * * * *"]
 
 [vars]
-GITHUB_REPOSITORY = "swaggerallen/orchestration-dummy"
-SWEEP_WORKFLOW = "pipeline-sweep.yml"
-DISPATCH_REF = "main"
+# One entry per project repo. Adding a project is an edit here plus a
+# redeploy — and adding that repo to DISPATCH_TOKEN's repository list.
+PROJECTS = '''[
+  {"repository": "swaggerallen/orchestration-dummy", "workflow": "pipeline-sweep.yml", "ref": "main"}
+]'''
