@@ -117,17 +117,27 @@ Everything happens in the one account that already holds your domains.
    dashboard URL). This becomes the `CLOUDFLARE_ACCOUNT_ID` secret —
    not sensitive, stored with its token for convenience.
 2. **Create one Pages project per project repo, in direct-upload mode.**
-   Either:
+   On the project repo: Actions → **pipeline-pages-provision** → Run
+   workflow. It reads the name from that repo's config and creates the
+   project through the API, using the token from step 3 — so it works
+   from a phone, and re-running it is a no-op.
 
-   ```sh
-   npx wrangler login   # one-time browser auth
-   npx wrangler pages project create orchestration-dummy --production-branch main
-   ```
+   **Not the dashboard.** Workers & Pages → Create no longer makes a
+   Pages project: it routes an asset upload into a *Worker* with static
+   assets, a different product `wrangler pages deploy` cannot target.
+   Nothing says so at the time. The failure surfaces later, from the
+   deploy, as `Project not found. The specified project name does not
+   match any of your existing projects [code: 8000007]`, which reads
+   like a typo rather than the wrong product. The tell is the dashboard
+   URL: a Pages project sits at `/pages/view/<name>`, a Worker at
+   `/workers/services/view/<name>`.
 
-   …or in the dashboard: Workers & Pages → Create → **Pages** tab →
-   **Upload assets** (*not* "Connect to Git"), name it, and complete the
-   first upload with any placeholder `index.html` — the preview
-   workflow replaces it.
+   Because Workers and Pages share one namespace per account, the
+   metronome Worker (step 7) and a Pages project cannot share a name.
+   Naming each Pages project after its repo keeps them apart.
+
+   From a laptop, `npx wrangler login && npx wrangler pages project
+   create <name> --production-branch main` does the same thing.
 
    **Direct upload vs Git-connected is fixed at creation.** A
    Git-connected project rejects `wrangler pages deploy`, so choosing
@@ -149,7 +159,11 @@ Everything happens in the one account that already holds your domains.
      receives finished files.
    - **Access Policy off** for now — see item 5.
 
-   Each name must match that repo's config `preview.pagesProject`.
+   The Pages name need not match the repo name, but the only name that
+   has to agree is that repo's config `preview.pagesProject` — both the
+   preview and cleanup workflows read it from there rather than
+   carrying their own copy, so the config is the one place to set it.
+
    Branch previews then appear at
    `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
    push — that's the whole preview feature; we build no machinery.
@@ -285,7 +299,9 @@ step 5 already covered them.
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
    grants read on the pipeline repo), Cloudflare pair,
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
-5. Metronome: add the repo to `PROJECTS`, add it to `DISPATCH_TOKEN`'s
+5. Pages project: Actions → **pipeline-pages-provision** → Run
+   workflow, once. It creates the project named in that repo's config.
+6. Metronome: add the repo to `PROJECTS`, add it to `DISPATCH_TOKEN`'s
    repository list, redeploy the Worker.
 
 Note: labels are never per-project either, so `screen:`/`system:` labels from

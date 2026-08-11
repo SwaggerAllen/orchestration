@@ -1,0 +1,81 @@
+# Reusable Pages provisioning (DESIGN §4). Creates the project's
+# Cloudflare Pages project in direct-upload mode if it does not exist.
+#
+# Deliberately not in the Go binary, on the same rule as preview-cleanup:
+# this routes no tickets and reads no protocol state, so it earns no
+# adapter. It exists because the dashboard cannot do this any more —
+# Workers & Pages → Create routes asset uploads into a Worker with
+# static assets, and `wrangler pages project create` needs a laptop.
+# The API needs neither, and the token is already a repo secret.
+#
+# Idempotent, like `pipeline setup`: an existing project is reported and
+# left alone. It never edits one, because a live project may be serving
+# previews and its mode is fixed at creation.
+name: pages-provision
+
+on:
+  workflow_call:
+    inputs:
+      pages_project:
+        description: Cloudflare Pages project name to ensure exists
+        required: true
+        type: string
+      production_branch:
+        description: The branch treated as production; every other branch is a preview
+        required: false
+        type: string
+        default: main
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
+
+permissions: {}
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: create the Pages project if it is missing
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ inputs.pages_project }}
+          PRODUCTION: ${{ inputs.production_branch }}
+        run: |
+          set -uo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/pages/projects"
+
+          existing="$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "$API/$PROJECT")"
+          if [ "$(echo "$existing" | jq -r '.success')" = "true" ]; then
+            echo "nothing to do: Pages project \"$PROJECT\" already exists"
+            echo "  production branch: $(echo "$existing" | jq -r '.result.production_branch')"
+            exit 0
+          fi
+
+          # Any failure other than "no such project" is reported as-is
+          # rather than treated as absence — creating over a permissions
+          # error would produce a second, confusing failure.
+          code="$(echo "$existing" | jq -r '.errors[0].code // empty')"
+          if [ "$code" != "8000007" ]; then
+            echo "::error::could not read Pages project $PROJECT: $(echo "$existing" | jq -c '.errors')"
+            exit 1
+          fi
+
+          # No "source" field is what makes this a direct-upload project.
+          # A Git-connected one would reject `wrangler pages deploy` and
+          # the mode cannot be changed afterwards.
+          created="$(curl -sS -X POST "$API" \
+            -H "Authorization: Bearer $CF_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg n "$PROJECT" --arg b "$PRODUCTION" \
+                  '{name: $n, production_branch: $b}')")"
+
+          if [ "$(echo "$created" | jq -r '.success')" != "true" ]; then
+            echo "::error::creating Pages project $PROJECT failed: $(echo "$created" | jq -c '.errors')"
+            exit 1
+          fi
+
+          echo "created Pages project \"$PROJECT\" (direct upload, production branch $PRODUCTION)"
+          echo "  previews will appear at <branch-slug>.$(echo "$created" | jq -r '.result.subdomain')"

@@ -9,12 +9,25 @@ on:
     types: [closed]
 
 jobs:
+  # A reusable-workflow call runs no steps of its own, so reading the
+  # project name out of the config takes a job. Worth it: the alternative
+  # is a second copy of the name that drifts from the one the preview
+  # publishes to, and then cleanup quietly deletes from the wrong project.
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      pages_project: ${{ steps.read.outputs.pages_project }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "pages_project=$(jq -r .preview.pagesProject pipeline.config.json)" >> "$GITHUB_OUTPUT"
+
   cleanup:
+    needs: config
     uses: SwaggerAllen/orchestration/.github/workflows/preview-cleanup.yml@main
     with:
       branch: ${{ github.event.pull_request.head.ref }}
-      # Keep in sync with pipeline.config.json preview.pagesProject
-      pages_project: orchestration-dummy
+      pages_project: ${{ needs.config.outputs.pages_project }}
       production_branch: main
     secrets:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

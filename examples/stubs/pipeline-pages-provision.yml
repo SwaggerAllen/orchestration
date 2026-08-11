@@ -1,0 +1,34 @@
+# Project stub: create this repo's Cloudflare Pages project (DESIGN §4).
+# Run once per repo, by hand, from the Actions tab — including from a
+# phone, which is the point: the dashboard can no longer create a Pages
+# project and `wrangler pages project create` needs a laptop.
+#
+# Safe to re-run: an existing project is reported and left alone.
+name: pipeline-pages-provision
+run-name: "pipeline: provision Pages project"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # The project name comes from the config, the same read the preview
+  # and cleanup workflows do, so provisioning cannot create a project
+  # under a name the deploy will not look for.
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      pages_project: ${{ steps.read.outputs.pages_project }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: echo "pages_project=$(jq -r .preview.pagesProject pipeline.config.json)" >> "$GITHUB_OUTPUT"
+
+  provision:
+    needs: config
+    uses: SwaggerAllen/orchestration/.github/workflows/pages-provision.yml@main
+    with:
+      pages_project: ${{ needs.config.outputs.pages_project }}
+      production_branch: main
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
