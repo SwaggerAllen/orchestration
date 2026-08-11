@@ -194,9 +194,18 @@ func (c *Client) CreateState(ctx context.Context, teamID, name string, category 
 	return tracker.StateInfo{ID: s.ID, Name: s.Name, Category: protocol.Category(s.Type)}, nil
 }
 
+// ListLabels returns every label the team can apply: its own, plus the
+// workspace-scoped ones. Workspace labels belong to no team, so a
+// team-equality filter silently omits them — which reads as "the team has
+// no label called frontend" when frontend is right there in the picker.
+// Setup then plans a create the API rejects as a duplicate, and label
+// attachment fails on a name that exists.
 func (c *Client) ListLabels(ctx context.Context, teamID string) ([]tracker.Label, error) {
 	const q = `query Labels($teamId: ID!, $first: Int!) {
-	  issueLabels(filter: {team: {id: {eq: $teamId}}}, first: $first) {
+	  issueLabels(
+	    filter: {or: [{team: {id: {eq: $teamId}}}, {team: {null: true}}]},
+	    first: $first
+	  ) {
 	    nodes { id name }
 	    pageInfo { hasNextPage }
 	  }
@@ -216,7 +225,7 @@ func (c *Client) ListLabels(ctx context.Context, teamID string) ([]tracker.Label
 		return nil, err
 	}
 	if data.IssueLabels.PageInfo.HasNextPage {
-		return nil, fmt.Errorf("linear: team %s has over %d labels, which the pipeline does not expect", teamID, pageSize)
+		return nil, fmt.Errorf("linear: team %s can see over %d labels (its own plus workspace-scoped), which the pipeline does not expect", teamID, pageSize)
 	}
 	out := make([]tracker.Label, 0, len(data.IssueLabels.Nodes))
 	for _, n := range data.IssueLabels.Nodes {

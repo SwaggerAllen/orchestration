@@ -83,6 +83,57 @@ func TestPlanCreatesOnlyWhatIsMissing(t *testing.T) {
 	}
 }
 
+// The workspace half of the label namespace. Linear's workspace-level
+// labels belong to no team, and a team-scoped read misses them — which is
+// how setup came to plan a create the API rejected as a duplicate.
+func TestPlanAdoptsWorkspaceLabels(t *testing.T) {
+	ctx := context.Background()
+	tr := tracker.NewMemory()
+	cfg := config.Sample()
+
+	for _, name := range []string{"frontend", "backend", "tech-debt", "design-inbox"} {
+		if _, err := tr.AddWorkspaceLabel(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	actions, err := Plan(ctx, tr, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range actions {
+		if a.Op == CreateLabel {
+			switch a.Name {
+			case "frontend", "backend", "tech-debt", "design-inbox":
+				t.Errorf("planned to create workspace label %q — Linear rejects that as a duplicate", a.Name)
+			}
+		}
+	}
+	if err := Apply(ctx, tr, cfg, actions); err != nil {
+		t.Fatalf("apply over an adopted workspace taxonomy: %v", err)
+	}
+	again, err := Plan(ctx, tr, cfg)
+	if err != nil || len(again) != 0 {
+		t.Errorf("second plan = %d actions, %v; want a no-op", len(again), err)
+	}
+}
+
+// A name that differs only in case is one taxonomy split in two. Setup
+// does not rename, so it must stop rather than create the near-duplicate.
+func TestPlanRefusesCaseVariantLabel(t *testing.T) {
+	ctx := context.Background()
+	tr := tracker.NewMemory()
+	cfg := config.Sample()
+
+	if _, err := tr.AddWorkspaceLabel("Bug"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Plan(ctx, tr, cfg)
+	if err == nil || !strings.Contains(err.Error(), "near-duplicate") {
+		t.Errorf("want a refusal naming the conflict, got %v", err)
+	}
+}
+
 func TestPlanRefusesCategoryConflict(t *testing.T) {
 	ctx := context.Background()
 	tr := tracker.NewMemory()

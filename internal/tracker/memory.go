@@ -17,7 +17,7 @@ type Memory struct {
 	mu     sync.Mutex
 	nextID int
 	states map[string][]StateInfo // teamID -> states
-	labels map[string][]Label     // teamID -> labels
+	labels map[string][]Label     // teamID -> labels, WorkspaceScope -> workspace labels
 
 	issues     []*Issue
 	milestones map[string][]Milestone // projectID -> milestones
@@ -82,27 +82,59 @@ func (m *Memory) CreateState(_ context.Context, teamID, name string, category pr
 	return s, nil
 }
 
+// WorkspaceScope is the labels key for labels that belong to no team.
+// Linear's workspace-level labels are usable by every team but carry no
+// team id, so a team-scoped read misses them entirely — the fake models
+// the two scopes so that gap is reachable from a test.
+const WorkspaceScope = ""
+
+// ListLabels returns what the team can apply: workspace labels first, then
+// its own, matching what the Linear client's filter now asks for.
 func (m *Memory) ListLabels(_ context.Context, teamID string) ([]Label, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]Label, len(m.labels[teamID]))
-	copy(out, m.labels[teamID])
-	return out, nil
+	return m.visibleLabels(teamID), nil
+}
+
+// visibleLabels is every label the team can apply — workspace-scoped plus
+// its own. Every existence check goes through it so none of them can
+// regress to the team-only read that hid the workspace half.
+func (m *Memory) visibleLabels(teamID string) []Label {
+	out := make([]Label, 0, len(m.labels[WorkspaceScope])+len(m.labels[teamID]))
+	out = append(out, m.labels[WorkspaceScope]...)
+	if teamID != WorkspaceScope {
+		out = append(out, m.labels[teamID]...)
+	}
+	return out
 }
 
 func (m *Memory) CreateLabel(_ context.Context, teamID, name string) (Label, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.createLabel(teamID, name)
+}
+
+// AddWorkspaceLabel seeds a workspace-scoped label. Tests use it to stand
+// up the shape a real workspace has: a shared taxonomy no team owns.
+func (m *Memory) AddWorkspaceLabel(name string) (Label, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.createLabel(WorkspaceScope, name)
+}
+
+// createLabel enforces Linear's uniqueness: a name is taken if any scope
+// the team can see already holds it, not just the scope being written to.
+func (m *Memory) createLabel(scope, name string) (Label, error) {
 	if name == "" {
 		return Label{}, fmt.Errorf("memory tracker: label name is required")
 	}
-	for _, l := range m.labels[teamID] {
+	for _, l := range m.visibleLabels(scope) {
 		if l.Name == name {
-			return Label{}, fmt.Errorf("memory tracker: label %q already exists in team %s", name, teamID)
+			return Label{}, fmt.Errorf("memory tracker: label %q already exists", name)
 		}
 	}
 	l := Label{ID: m.id("label"), Name: name}
-	m.labels[teamID] = append(m.labels[teamID], l)
+	m.labels[scope] = append(m.labels[scope], l)
 	return l, nil
 }
 
@@ -161,7 +193,7 @@ func (m *Memory) CreateIssue(_ context.Context, n NewIssue) (Issue, error) {
 		return Issue{}, fmt.Errorf("memory tracker: title and state are required")
 	}
 	haveLabels := map[string]bool{}
-	for _, l := range m.labels[n.TeamID] {
+	for _, l := range m.visibleLabels(n.TeamID) {
 		haveLabels[l.Name] = true
 	}
 	for _, l := range n.Labels {
@@ -246,7 +278,7 @@ func (m *Memory) AddIssueLabel(_ context.Context, teamID, issueID, label string)
 		return err
 	}
 	exists := false
-	for _, l := range m.labels[teamID] {
+	for _, l := range m.visibleLabels(teamID) {
 		if l.Name == label {
 			exists = true
 		}
