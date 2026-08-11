@@ -24,6 +24,12 @@ jobs:
       - name: build the static export
         run: mix storybook.export # keep in sync with config preview.buildCommand
 
+      # The project name is read from the config rather than written
+      # here. A second copy drifts silently: previews publish to one
+      # project while cleanup deletes from another, and nothing says so.
+      - id: cfg
+        run: echo "pages_project=$(jq -r .preview.pagesProject pipeline.config.json)" >> "$GITHUB_OUTPUT"
+
       - name: publish to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -31,5 +37,5 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: >-
             pages deploy priv/static/storybook
-            --project-name=sample-storybook
+            --project-name=${{ steps.cfg.outputs.pages_project }}
             --branch=${{ github.ref_name }}

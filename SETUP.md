@@ -121,7 +121,7 @@ Everything happens in the one account that already holds your domains.
 
    ```sh
    npx wrangler login   # one-time browser auth
-   npx wrangler pages project create orchestration-dummy --production-branch main
+   npx wrangler pages project create orchestration --production-branch main
    ```
 
    …or in the dashboard: Workers & Pages → Create → **Pages** tab →
@@ -149,10 +149,16 @@ Everything happens in the one account that already holds your domains.
      receives finished files.
    - **Access Policy off** for now — see item 5.
 
-   Each name must match that repo's config `preview.pagesProject`.
+   **The Pages name need not match the repo name**, and here it does
+   not: the dummy repo `orchestration-dummy` publishes to the Pages
+   project `orchestration`. The only name that has to agree is that
+   repo's config `preview.pagesProject` — both the preview and cleanup
+   workflows read it from there rather than carrying their own copy, so
+   the config is the one place to change it.
+
    Branch previews then appear at
-   `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
-   push — that's the whole preview feature; we build no machinery.
+   `<branch-slug>.orchestration.pages.dev`, updated on every push —
+   that's the whole preview feature; we build no machinery.
 
    The project's own `.pages.dev` root stays at the placeholder,
    because the preview stub deliberately skips `main`: design review
