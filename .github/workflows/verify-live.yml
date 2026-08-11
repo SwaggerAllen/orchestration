@@ -52,7 +52,19 @@ jobs:
             exit 1
           }
 
+      # The sweep reads the team through the state table, so it cannot run
+      # against a team setup has never provisioned. With apply unchecked
+      # this workflow therefore proves exactly one thing — the config
+      # loads and the setup plan is sane — and says so rather than
+      # failing on a dependency it declined to satisfy.
+      - name: sweep (skipped)
+        if: ${{ !inputs.apply }}
+        run: |
+          echo "sweep checks skipped: the team is not provisioned until setup applies."
+          echo "Re-run with apply=true — setup is idempotent, so applying is safe on every run."
+
       - name: sweep (dry run)
+        if: ${{ inputs.apply }}
         run: go run ./cmd/pipeline sweep --config "${{ inputs.config }}" --dry-run
 
       - name: sweep (apply)

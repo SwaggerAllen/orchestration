@@ -189,15 +189,24 @@ Everything happens in the one account that already holds your domains.
 Actions (this repo) → **verify-live** → Run workflow →
 config `configs/scratch.config.json`, **apply = true**.
 
-This creates the fifteen states and eight labels in ORC, asserts a
-second run is a no-op (the M0 idempotence gate), and runs a live sweep
-dry-run. Re-run any time; it only ever creates what's missing and
-refuses to retype live states.
+This creates the missing states and labels in ORC, asserts a second run
+is a no-op (the M0 idempotence gate), and then sweeps. Re-run any time:
+setup only ever creates what is missing and refuses to retype a live
+state, so applying is safe on every run.
 
-Note: ORC keeps whatever default states Linear gave it (Todo, In
-Progress, Done may collide by name — the provisioner adopts same-name
-states if their category matches and errors loudly if not; resolve
-those in Linear's UI by renaming the defaults away).
+**Run it with apply checked.** With apply unchecked the workflow can
+only plan the setup — the sweep reads the team *through* the state
+table, so it has nothing to read until setup has applied once. The
+workflow says so instead of failing.
+
+**Linear's own defaults are adopted, not duplicated.** ORC arrives with
+Backlog / Todo / In Progress / Done / Canceled; the config maps the
+pipeline's states onto those names exactly, so setup leaves them alone
+and creates only the ten it lacks. Watch the capitalisation — a config
+saying `In progress` against Linear's `In Progress` produces two
+near-identical states rather than an error, which is the confusing
+outcome rather than the dangerous one. If a same-name state has the
+wrong category, setup refuses loudly and you resolve it in Linear.
 
 ## 6. First end-to-end run
 
