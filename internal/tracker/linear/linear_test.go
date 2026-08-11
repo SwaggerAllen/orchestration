@@ -109,6 +109,11 @@ func TestListAndCreateLabels(t *testing.T) {
 				"issueLabel": map[string]any{"id": "l9", "name": input["name"]},
 			}}, nil
 		case strings.Contains(query, "issueLabels"):
+			// Workspace labels carry no team, so a bare team-equality
+			// filter omits them and setup plans a create Linear rejects.
+			if !strings.Contains(query, "team: {null: true}") {
+				t.Errorf("label query must reach workspace-scoped labels too:\n%s", query)
+			}
 			return map[string]any{"issueLabels": map[string]any{
 				"nodes":    []map[string]any{{"id": "l1", "name": "bug"}},
 				"pageInfo": map[string]any{"hasNextPage": false},

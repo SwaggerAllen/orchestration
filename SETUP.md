@@ -208,6 +208,21 @@ near-identical states rather than an error, which is the confusing
 outcome rather than the dangerous one. If a same-name state has the
 wrong category, setup refuses loudly and you resolve it in Linear.
 
+**Labels come in two scopes.** Linear labels are either team-level or
+workspace-level, and workspace labels belong to no team while every team
+can apply them. Setup reads both scopes, so a workspace `frontend` is
+adopted rather than re-created — creating it would fail, because label
+names are unique across the two scopes together.
+
+**One label you may have to rename by hand.** A label differing only in
+case — Linear's default `Bug` against the protocol's `bug` — is not a
+second label anyone means to have; it is one taxonomy split across two
+picker entries, and half the tickets land on the wrong side of it.
+Setup does not rename, so it stops and names the conflict. Rename `Bug`
+to `bug` in Linear (Settings → Labels), or delete it if nothing uses it,
+and re-run. The same applies to `Feature` and `Improvement` only if you
+later add them to the protocol set — today they are ignored.
+
 ## 6. First end-to-end run
 
 1. Merge the scaffold PR on `orchestration-dummy` (its own `ci` run is
@@ -253,8 +268,9 @@ others running and un-killing never redeploys anything.
 ## 8. Adding the next project
 
 Once the dummy loop is green, a second project is small — and needs no
-new Linear provisioning, because states and labels are **team-level**:
-both projects live in ORC, so step 5 already covered them.
+new Linear provisioning, because states and labels are **team- or
+workspace-level**, never per-project: both projects live in ORC, so
+step 5 already covered them.
 
 1. Linear: the project exists (✅) — add its milestones, named and
    ordered however suits the project.
@@ -272,7 +288,7 @@ both projects live in ORC, so step 5 already covered them.
 5. Metronome: add the repo to `PROJECTS`, add it to `DISPATCH_TOKEN`'s
    repository list, redeploy the Worker.
 
-Note: labels are team-level too, so `screen:`/`system:` labels from
+Note: labels are never per-project either, so `screen:`/`system:` labels from
 both projects appear in one list. That is cosmetic only — the queue and
 the mutex are scoped by project (DESIGN §2), so a `screen:home` in one
 project never collides with a `screen:home` in the other.

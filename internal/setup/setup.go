@@ -12,6 +12,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -78,13 +79,22 @@ func Plan(ctx context.Context, t tracker.Tracker, cfg *config.Config) ([]Action,
 	if err != nil {
 		return nil, fmt.Errorf("setup: listing labels: %w", err)
 	}
-	haveLabel := map[string]bool{}
+	// Folded case, because a label that differs only in case is not a
+	// second label anyone means to have: it is one taxonomy split across
+	// two picker entries, and half the tickets end up on the wrong side of
+	// it. Setup will not rename, so it reports and stops.
+	haveLabel := map[string]string{}
 	for _, l := range labels {
-		haveLabel[l.Name] = true
+		haveLabel[strings.ToLower(l.Name)] = l.Name
 	}
 	for _, name := range protocol.Labels {
-		if !haveLabel[name] {
+		switch have, ok := haveLabel[strings.ToLower(name)]; {
+		case !ok:
 			actions = append(actions, Action{Op: CreateLabel, Name: name})
+		case have != name:
+			return nil, fmt.Errorf(
+				"setup: the tracker has label %q where the protocol wants %q — rename it (or delete it if unused) and run setup again; setup will not create a near-duplicate",
+				have, name)
 		}
 	}
 	return actions, nil
