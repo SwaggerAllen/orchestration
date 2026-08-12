@@ -853,10 +853,10 @@ dispatches. The state machine already lives in the tracker, so there is nothing 
 persist. It is deliberately *not* triggered by GitHub's own `schedule:` — under load those
 crons fire 5–15 minutes late, a ticket crosses six or more polled transitions on its way to
 `Done`, and the jitter compounds to an hour of dead time on a lifecycle that is otherwise
-minutes of compute. Instead a **Cloudflare Worker cron** — punctual to seconds, ~10 lines,
-holding one fine-scoped GitHub token that can fire `workflow_dispatch` and nothing else —
-pings the workflow on the interval. The Worker contains no pipeline logic at all: it is a
-metronome, and keeping it dumb is what keeps the control plane in one place.
+minutes of compute. Instead a **Cloudflare Worker** — punctual to seconds, holding one
+fine-scoped GitHub token that can fire `workflow_dispatch` and nothing else — pings the workflow
+on tracker events and, failing those, hourly. The Worker contains no pipeline logic at all: it is
+a metronome that also receives, and keeping it dumb is what keeps the control plane in one place.
 
 **The control-plane workflow declares a single `concurrency` group, `cancel-in-progress:
 false`.** A delayed cron run and the next one can otherwise overlap, and two dispatchers
@@ -900,13 +900,30 @@ The `≥` is shorthand for *is an ancestor of* — a compare-API call, not SHA a
 **Kill switch:** a single flag halting dispatch without revoking credentials or leaving a ticket
 mid-claim. In-flight runs finish; nothing new starts.
 
-**If the polled hops are still too slow,** the escalation is to teach the same Worker to
-receive Linear webhooks and dispatch on events instead of intervals — the metronome grows into
-a receiver without changing vendors or credentials. Durable Objects are on the free plan with
-the SQLite backend, and one Durable Object per project *is* the single-dev-agent mutex,
-serialized by construction. Watch the free-plan cap of three cron triggers per Worker, and the
-absence of retries or failure alerting on them. The polled sweep survives even then: deploy
-detection, stale claims and timeouts have no webhook to subscribe to.
+**The tracker hops are webhook-driven** (the escalation this section used to hold in reserve,
+taken). The same Worker receives Linear webhooks and dispatches on the event, so a state change
+reaches the sweep in seconds rather than averaging half the poll interval. It gained exactly one
+capability to do it — verify an HMAC signature, route by project id, POST — and still reads no
+state name, no label, no ticket field. Keeping it dumb is what keeps the control plane in one
+place, and that rule survives the escalation.
+
+The endpoint is public and holds a token that can start workflows in every project repo, so the
+signature check is the door: unsigned bodies, bodies altered after signing, and timestamps outside
+a one-minute replay window are dropped before anything is dispatched. A Worker deployed with no
+signing secret rejects *everything* rather than accepting everything — the failure mode is a
+pipeline that runs at the cron's pace, not one that anyone can drive.
+
+**The polled sweep survives, hourly**, because two conditions have nothing to subscribe to: stale
+claims and deploy timeouts are elapsed-time judgments. Both sit behind grace periods of tens of
+minutes (§12), so an hourly beat finds them well within tolerance, and it doubles as the backstop
+for any webhook that is dropped. Deploy *detection* — the common path, and otherwise the hop most
+likely to sit waiting on the clock — is event-driven wherever the platform records GitHub
+Deployments, via a `deployment_status` trigger on the project stub.
+
+**If even that is too slow,** Durable Objects are on the free plan with the SQLite backend, and one
+Durable Object per project *is* the single-dev-agent mutex, serialized by construction. Watch the
+free-plan cap of three cron triggers per Worker, and the absence of retries or failure alerting on
+them.
 
 ---
 

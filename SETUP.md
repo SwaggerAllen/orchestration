@@ -292,6 +292,7 @@ repo, and one cron fires them all.
 | `CLOUDFLARE_WORKERS_TOKEN` | A **second** Cloudflare token, from the *Edit Cloudflare Workers* template. Deliberately not the project repos' `CLOUDFLARE_API_TOKEN`, which edits Pages and nothing else — so no project repo can redeploy the control plane's metronome. |
 | `CLOUDFLARE_ACCOUNT_ID` | Same account id as everywhere else. |
 | `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The deploy uploads it as the Worker's secret, so it is never typed into a `wrangler secret put` prompt and cannot drift from the value here. |
+| `LINEAR_WEBHOOK_SECRET` | Linear's signing secret, from the webhook you create below. Set a placeholder for the first deploy — you need the Worker's URL before Linear will give you the real one — then update it and re-run. |
 
 After that it is automatic: any push to `main` touching `worker/`
 redeploys. That is the point — the realistic failure is not a bad
@@ -303,16 +304,50 @@ From a laptop, `cd worker && npx wrangler deploy` does the same thing —
 but then `DISPATCH_TOKEN` has to be set separately with
 `npx wrangler secret put DISPATCH_TOKEN`.
 
-Cron fires every 5 minutes and calls `workflow_dispatch` on each sweep
-stub — punctual where GitHub's own `schedule:` jitters. A failing
-dispatch is logged and skipped rather than stopping the others; the
-sweep is convergent, so a missed beat costs latency, never correctness.
-Verify in the Worker's dashboard logs (one dispatch per project per
-tick) and each Actions tab (sweep runs arriving on the fives).
+**Then create the Linear webhook**, which is what makes the pipeline
+respond in seconds rather than on the hour:
+
+1. After the first successful deploy, note the Worker's URL —
+   `https://pipeline-metronome.<your-subdomain>.workers.dev`. It is on
+   the Worker's dashboard page, and `workers_dev = true` in
+   `wrangler.toml` is what guarantees it exists.
+2. Linear → Settings → API → **Webhooks** → New webhook:
+   - URL: the Worker URL above
+   - Team: **Orchestration (ORC)**
+   - Resources: **Issues** and **Comments** only. This is the filter —
+     the Worker dispatches on any webhook it can verify, deliberately,
+     so choosing here is choosing without a redeploy.
+3. Copy the **signing secret** Linear shows, put it in this repo's
+   `LINEAR_WEBHOOK_SECRET` secret, and re-run **worker-deploy**.
+
+Until that last step the Worker rejects every webhook — which is the
+right failure: a Worker with no secret must reject everything rather
+than accept everything, and the pipeline merely falls back to the
+hourly beat.
+
+**What fires when.** Tracker changes arrive by webhook, in seconds. CI
+green and red are GitHub events on the project stub and never waited on
+the poll. Deploy detection is a `deployment_status` event wherever the
+platform records GitHub Deployments. The hourly cron is left with the
+two elapsed-time conditions that announce nothing — stale claims and
+deploy timeouts, both behind grace periods of tens of minutes — and
+with catching any webhook that gets dropped.
+
+A failing dispatch is logged and skipped rather than stopping the
+others; the sweep is convergent, so a missed beat costs latency, never
+correctness.
+
+**Verify:** move a ticket in Linear and watch a sweep start in the
+dummy's Actions tab within seconds. If nothing happens, the Worker's
+logs say which door it failed at — bad signature, stale timestamp, or
+no matching project. That last one means `trackerProject` in
+`wrangler.toml` does not match the Linear project the ticket is in.
 
 Halting stays per-project and outside the Worker: `PIPELINE_KILL_SWITCH`
 is a repo variable the sweep reads, so stopping one project leaves the
-others running and un-killing never redeploys anything.
+others running and un-killing never redeploys anything. Note it stops
+the sweep from *planning*, not from *running* — the job still starts
+and spends its minute.
 
 ## 8. Adding the next project
 
@@ -340,11 +375,14 @@ step 5 already covered them.
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
-6. Metronome: add the repo to `PROJECTS` in `worker/wrangler.toml` and
-   to `DISPATCH_TOKEN`'s repository list. Merging the `PROJECTS` edit
+6. Metronome: add the repo to `PROJECTS` in `worker/wrangler.toml`,
+   with its Linear project id as `trackerProject`, and add the repo to
+   `DISPATCH_TOKEN`'s repository list. Merging the `PROJECTS` edit
    redeploys the Worker on its own — but widening the token is a
    separate act in GitHub's settings, and a beat that dispatches with
-   a token that cannot reach the repo just logs a 404 every tick.
+   a token that cannot reach the repo just logs a 404 every hour.
+   One webhook on the ORC team serves every project in it; the
+   `trackerProject` ids are what route each event to one repo.
 
 Note: labels are never per-project either, so `screen:`/`system:` labels from
 both projects appear in one list. That is cosmetic only — the queue and

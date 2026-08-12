@@ -1,16 +1,47 @@
 # The metronome
 
-~60 lines of TypeScript whose only job is punctuality: cron fires, one
-`workflow_dispatch` per project repo. GitHub's own `schedule:` trigger
-jitters 5–15 minutes under load; a Worker cron fires within seconds
-(DESIGN §13).
+TypeScript whose only job is punctuality: something happens, one
+`workflow_dispatch` per affected project repo. Two triggers —
 
-**The Worker stays dumb — permanently** (PLAN §1). Every protocol
-behavior lives in the Go binary; a static list of dispatch targets is
-still just "cron → POST". If polling latency ever justifies the stage-2
-escalation, this Worker grows exactly one trick — validating a Linear
-webhook signature and forwarding into the same dispatch — and still
-never learns what a ticket is.
+- **Linear webhook** for tracker changes, which is the common path and
+  lands in seconds.
+- **Hourly cron** for the two conditions nothing announces: stale
+  claims and deploy timeouts are elapsed-time judgments (DESIGN §12).
+  It is also the backstop for a dropped webhook.
+
+CI hops need neither: they are GitHub-native events on the project
+stub, along with `deployment_status` for the post-deploy check.
+GitHub's own `schedule:` trigger is unused because it jitters 5–15
+minutes under load, and that compounds across a ticket's six polled
+hops (DESIGN §13).
+
+**The Worker stays dumb — permanently** (PLAN §1). The webhook receiver
+was the one extension DESIGN §13 held in reserve, and taking it changed
+nothing about that rule: the Worker verifies a signature, routes by
+project id, and POSTs. It reads no state name, no label, no ticket
+field. Every protocol behavior lives in the Go binary.
+
+## The door
+
+The endpoint is public and the Worker holds a token that starts
+workflows in every project repo, so verification is not a formality.
+Rejected before anything is dispatched: bodies with no valid
+`Linear-Signature` HMAC over the *raw* bytes, bodies altered after
+signing, and timestamps outside a one-minute replay window.
+
+A Worker with no `LINEAR_WEBHOOK_SECRET` rejects **everything** rather
+than accepting everything. The pipeline then runs at the cron's pace —
+slow, not open.
+
+Tests are `index.test.ts`, run by `worker-deploy` before every deploy:
+
+```sh
+cd worker && node --test --experimental-strip-types index.test.ts
+```
+
+No framework and no dependencies — Node strips the types and supplies
+the same Web Crypto the Worker runtime does, so the signature check is
+exercised against the real primitive.
 
 ## Deploy
 
@@ -29,13 +60,21 @@ npx wrangler secret put DISPATCH_TOKEN   # only needed on this path
 
 ## One Worker, several projects
 
-`PROJECTS` in `wrangler.toml` is a JSON array; each entry is a repo and
-its sweep stub. Adding a project is an edit here — merging it
-redeploys — plus adding that repo to the token's repository list, which
-is a separate act in GitHub's settings. One cron serves them all, and a
-failing dispatch is logged and skipped rather than stopping the others
-— the sweep is convergent, so a missed beat costs latency, never
+`PROJECTS` in `wrangler.toml` is a JSON array; each entry is a repo,
+its sweep stub, and the Linear project id that routes webhooks to it.
+Adding a project is an edit here — merging it redeploys — plus adding
+that repo to the token's repository list, which is a separate act in
+GitHub's settings. One cron and one Linear webhook serve them all, and
+a failing dispatch is logged and skipped rather than stopping the
+others — the sweep is convergent, so a missed beat costs latency, never
 correctness.
+
+Routing has two fallbacks that lean opposite ways, on purpose. A
+payload whose shape hides the project id wakes **every** project: a
+wasted sweep is a no-op, a dropped hop is real latency. A payload
+naming a project not in the list wakes **nothing**: the ORC team holds
+projects this pipeline does not manage, and their activity is not ours
+to spend runs on.
 
 `DISPATCH_TOKEN` is a fine-grained PAT with **Actions: read and write**
 on exactly the listed repos. That is the least powerful credential in

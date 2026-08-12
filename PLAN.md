@@ -163,7 +163,8 @@ scratch team, including a kill mid-`In progress` and a resume that files no dupl
 proposals.
 
 ### M7 — Metronome, hardening, v1
-Cloudflare Worker cron (staging interval against the dummy first), fine-scoped dispatch token,
+Cloudflare Worker: Linear webhook receiver for the tracker hops plus an hourly cron for the
+elapsed-time conditions that announce nothing (DESIGN §13), fine-scoped dispatch token,
 stale-claim live test (cancel an agent run mid-flight, watch the sweep catch it), failure
 injection day against the dummy, README (setup checklist, secrets inventory, trust-boundary
 note per DESIGN §9), tag `v1` and pin the dummy to it.
@@ -191,4 +192,5 @@ Needed by M0/M2, none blocking the start of M0's local work:
 | Anthropic API key | project repo Actions secrets | agent runs | M3 |
 | Reconcile merge identity | project repo Actions secrets | reconcile merge | M4 |
 | Cloudflare Pages token | project repo Actions secrets | storybook publish | M5 |
-| GitHub dispatch token (workflow_dispatch only) | Cloudflare Worker secret | metronome | M7 |
+| GitHub dispatch token (workflow_dispatch only) | pipeline repo secret, uploaded to the Worker by the deploy | metronome | M7 |
+| Linear webhook signing secret | pipeline repo secret, uploaded to the Worker by the deploy | webhook verification | M7 |
