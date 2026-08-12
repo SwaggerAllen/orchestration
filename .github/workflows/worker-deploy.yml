@@ -21,7 +21,11 @@ on:
       - .github/workflows/worker-deploy.yml
   workflow_dispatch:
 
-permissions: {}
+# checkout needs contents:read, and an empty block grants nothing — on a
+# private repo that surfaces as "Repository not found", which reads as a
+# bad URL rather than a missing permission.
+permissions:
+  contents: read
 
 concurrency:
   group: worker-deploy
