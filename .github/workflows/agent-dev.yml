@@ -31,9 +31,18 @@ on:
       PIPELINE_REPO_TOKEN:
         required: false
 
+# Every pipeline command here builds a snapshot first, and the snapshot
+# has a fixed read-set: the agent run list (actions), the open PRs
+# (pull-requests), each PR head's CI verdict (checks), and commit
+# ancestry for deploy detection (contents). Those four are needed even
+# by a run that only writes a comment, so they look broader than this
+# job's apparent work — they are the cost of reading the world, not of
+# changing it. A missing one surfaces as an HTTP 403 mid-claim.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: write # commits the implementation, and reads ancestry
+  pull-requests: write # opens or un-drafts the PR, and reads the open list
+  actions: read # the snapshot's agent run list
+  checks: read # CI verdict per PR head
 
 jobs:
   dev:

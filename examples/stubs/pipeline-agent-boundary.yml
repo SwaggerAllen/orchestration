@@ -16,7 +16,10 @@ on:
 # callee asks for more, the run dies before a runner is allocated:
 # "startup_failure", with no job and no logs to read.
 permissions:
-  contents: write # writes the retro note
+  contents: write # writes the retro note, and reads ancestry
+  pull-requests: read # the snapshot's open PR list
+  actions: read # the snapshot's agent run list
+  checks: read # CI verdict per PR head
 
 jobs:
   boundary:
