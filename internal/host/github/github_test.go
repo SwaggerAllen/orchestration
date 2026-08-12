@@ -173,3 +173,17 @@ func TestCreatePRAndMarkReady(t *testing.T) {
 		t.Error("undraft must go through GraphQL — REST cannot flip the draft flag")
 	}
 }
+
+// A 403 here is nearly always the calling workflow's permissions block,
+// not the token — and the bare status sends you to the wrong place.
+func TestForbiddenExplainsWorkflowPermissions(t *testing.T) {
+	srv := fakeGitHub(t, func(*http.Request, map[string]any) (int, any) {
+		return http.StatusForbidden, map[string]any{"message": "Resource not accessible by integration"}
+	})
+	defer srv.Close()
+
+	_, err := client(t, srv).ListOpenPRs(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "permissions:") {
+		t.Errorf("a 403 must point at the workflow's permissions block, got %v", err)
+	}
+}
