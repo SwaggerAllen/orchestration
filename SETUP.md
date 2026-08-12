@@ -349,6 +349,59 @@ others running and un-killing never redeploys anything. Note it stops
 the sweep from *planning*, not from *running* — the job still starts
 and spends its minute.
 
+## 7b. Rehearsals
+
+The Ring-3 loop: reset the disposable project to nothing, seed a fixed
+set of tickets, let the real pipeline run them, then check where
+everything landed. Same scenario every time, so a run that behaves
+differently means something changed — the fixture is fixed, and the
+agents' judgment is the only variable.
+
+**One-time:** tag the dummy's starting state, so "back to the
+beginning" has a definition.
+
+```sh
+git -C orchestration-dummy tag seed <the scaffold commit>
+git -C orchestration-dummy push origin seed
+```
+
+Add `REHEARSAL_REPO_TOKEN` to this repo's secrets: a fine-grained PAT
+with **Contents → Read and write** on `orchestration-dummy` only. The
+reset force-pushes `main` back to `seed` and deletes last run's
+branches, which the read-only `PIPELINE_REPO_TOKEN` cannot do — and
+which is exactly why it is a separate, narrower token rather than a
+widening of that one.
+
+**Each rehearsal:** Actions → **rehearse** → Run workflow.
+
+| Phase | What it does |
+| --- | --- |
+| `full` | Reset then seed, and stop |
+| `reset` | Archive every ticket; restore the dummy to `seed` |
+| `seed` | Create the scenario's milestones and tickets |
+| `check` | Assert the final states, files and markers |
+
+There is no exercise phase, because there is nothing for the harness to
+run: after seeding, the metronome, the webhooks and the agents carry
+the tickets. Your part is the designed touchpoints — sign-off at
+`Design review`, and the boundary pass. When it settles, run `check`.
+
+**Two keys guard the destructive half.** The config must carry
+`"disposable": true`, and the project id is passed separately and must
+match it. A real project's config never carries the flag, so a reset
+aimed at one fails on the config rather than on a prompt someone can
+hurry past. Tickets are **archived**, not deleted — Linear keeps them
+recoverable, so a reset fired at the wrong moment costs a restore
+rather than the work.
+
+Milestones are reused by name rather than recreated, because their
+order is what "the next milestone" means (DESIGN §10); recreating them
+each run would reshuffle the thing the boundary flow reads.
+
+Scenarios live in `scenarios/`. `pipeline scenario validate` checks
+them, and the Go suite validates every shipped one — a fixture with a
+typo'd ref asserts nothing while looking like it asserts something.
+
 ## 8. Adding the next project
 
 Once the dummy loop is green, a second project is small — and needs no
@@ -394,7 +447,7 @@ project never collides with a `screen:home` in the other.
 | Where | Name |
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
-| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN` |
+| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
 
 The two Cloudflare tokens are separate on purpose: project repos can

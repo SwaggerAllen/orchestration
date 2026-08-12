@@ -1,0 +1,166 @@
+# Ring-3 rehearsal against the disposable project (PLAN §2).
+#
+# Lives here and is deliberately absent from examples/stubs. The reset
+# phase archives every ticket in a project and force-restores a branch;
+# a destructive workflow shipped as a stub is one that eventually lands
+# in a real project repo. Nothing here is ever copied to a project.
+#
+# Four phases, run one at a time so a human can look between them:
+#
+#   reset  — archive every ticket, restore the dummy to its seed commit
+#   seed   — create the scenario's milestones and tickets
+#   check  — assert where everything ended up
+#   full   — reset then seed, and stop; the pipeline does the middle
+#
+# There is no "exercise" phase because there is nothing to run: after
+# seed, the real metronome, the real webhooks and the real agents carry
+# the tickets. That is the point of Ring 3 — the harness sets the table
+# and then gets out of the way.
+name: rehearse
+run-name: "rehearse: ${{ inputs.phase }} ${{ inputs.scenario }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: What to do
+        required: true
+        type: choice
+        options: [full, reset, seed, check]
+        default: full
+      scenario:
+        description: Scenario file under scenarios/
+        required: true
+        type: string
+        default: single-ticket.json
+      config:
+        description: Config naming the disposable project
+        required: false
+        type: string
+        default: configs/scratch.config.json
+
+permissions:
+  contents: read
+
+# One rehearsal at a time. Two resets racing would interleave archive
+# and create against the same project and leave a state no scenario
+# describes.
+concurrency:
+  group: rehearse
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      SCENARIO: scenarios/${{ inputs.scenario }}
+      CONFIG: ${{ inputs.config }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: read the project id from the config
+        id: cfg
+        run: |
+          # Reset takes the project id as a second key, and reading it
+          # from the config the command will also read means the two
+          # cannot disagree. The guard that matters is elsewhere: the
+          # config must declare itself disposable.
+          echo "project=$(jq -r .tracker.projectId "$CONFIG")" >> "$GITHUB_OUTPUT"
+          echo "disposable=$(jq -r '.disposable // false' "$CONFIG")" >> "$GITHUB_OUTPUT"
+
+      - name: refuse a config that is not disposable
+        if: steps.cfg.outputs.disposable != 'true'
+        run: |
+          echo "::error::${{ env.CONFIG }} does not set \"disposable\": true — this workflow archives tickets and force-pushes a branch, and only a rehearsal project may carry that flag"
+          exit 1
+
+      - name: checkout the project repo
+        uses: actions/checkout@v4
+        with:
+          repository: SwaggerAllen/orchestration-dummy
+          path: .project
+          fetch-depth: 0
+          token: ${{ secrets.REHEARSAL_REPO_TOKEN }}
+
+      - name: reset the tracker
+        if: inputs.phase == 'reset' || inputs.phase == 'full'
+        run: |
+          go run ./cmd/pipeline scenario reset \
+            --config "$CONFIG" \
+            --confirm "${{ steps.cfg.outputs.project }}"
+
+      - name: reset the repo to its seed commit
+        if: inputs.phase == 'reset' || inputs.phase == 'full'
+        working-directory: .project
+        run: |
+          set -euo pipefail
+          # The seed tag is the documentation-and-scaffold state a
+          # rehearsal starts from. Without it there is no defined "back
+          # to the beginning", and each run would start from wherever
+          # the last one happened to stop.
+          if ! git rev-parse --verify --quiet refs/tags/seed >/dev/null; then
+            echo "::error::orchestration-dummy has no 'seed' tag. Tag the commit a rehearsal should start from: git tag seed <sha> && git push origin seed"
+            exit 1
+          fi
+          git config user.name "pipeline-rehearsal"
+          git config user.email "pipeline@invalid"
+
+          git push --force origin refs/tags/seed:refs/heads/main
+          echo "main restored to the seed tag"
+
+          # Every branch the pipeline made last run. main and the seed
+          # tag are what survive; anything else is last run's litter.
+          for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin \
+                       | sed 's|^origin/||' | grep -v -e '^main$' -e '^HEAD$'); do
+            echo "  deleting branch $ref"
+            git push origin --delete "$ref" || echo "  (already gone)"
+          done
+
+      - name: seed the scenario
+        if: inputs.phase == 'seed' || inputs.phase == 'full'
+        run: |
+          go run ./cmd/pipeline scenario seed \
+            --config "$CONFIG" \
+            --scenario "$SCENARIO" \
+            --out seeded.json
+          cat seeded.json
+
+      - name: keep the seed map for the check phase
+        if: inputs.phase == 'seed' || inputs.phase == 'full'
+        uses: actions/upload-artifact@v4
+        with:
+          name: seeded-${{ inputs.scenario }}
+          path: seeded.json
+          retention-days: 14
+
+      - name: fetch the seed map
+        if: inputs.phase == 'check'
+        uses: actions/download-artifact@v4
+        with:
+          name: seeded-${{ inputs.scenario }}
+
+      - name: check
+        if: inputs.phase == 'check'
+        run: |
+          # The project checkout is on main, which is where merged work
+          # lands, so file expectations are asserted against the result
+          # rather than against a branch.
+          git -C .project fetch origin main --quiet
+          git -C .project checkout --quiet origin/main
+          go run ./cmd/pipeline scenario check \
+            --config "$CONFIG" \
+            --scenario "$SCENARIO" \
+            --seeded seeded.json \
+            --repo .project
+
+      - name: what happens next
+        if: (inputs.phase == 'full' || inputs.phase == 'seed') && success()
+        run: |
+          echo "Seeded. The metronome and webhooks take it from here."
+          echo "Your touchpoints are the designed ones: sign off at Design review, and the boundary pass."
+          echo "When it settles, run this workflow again with phase=check."

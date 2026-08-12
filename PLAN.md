@@ -91,10 +91,14 @@ only ring where the agents' actual judgment is exercised.
   command that creates/verifies the states, labels, and Triage settings from DESIGN §3/§8 in
   any team it's pointed at. The same command later provisions real projects, so the dummy setup
   path *is* the production setup path.
-- **`pipeline seed` / `pipeline reset`**: seed writes a scenario's tickets into the scratch
-  team and branches into the dummy repo; reset archives/cancels everything and force-restores
-  the dummy repo's default branch. Dry runs must be repeatable from zero, or they stop being
-  run.
+- **`pipeline scenario`** (reset / seed / check / validate), driven by the `rehearse` workflow:
+  reset archives every ticket and force-restores the dummy to its `seed` tag; seed writes a
+  fixture's milestones and tickets; check asserts where they ended up. Dry runs must be
+  repeatable from zero, or they stop being run. Two keys guard the destructive half — the config
+  must declare itself `disposable`, and the project id is confirmed separately — and the harness
+  is absent from `examples/stubs` so it can never be copied into a real project. There is no
+  exercise phase: after seeding, the real metronome, webhooks and agents carry the tickets, which
+  is the whole point of Ring 3.
 - **`--dry-run` on every mutating command**: prints the action list without executing it. The
   first live sweep against any new project is always run this way.
 

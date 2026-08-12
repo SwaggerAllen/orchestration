@@ -99,6 +99,11 @@ type Tracker interface {
 
 	ListIssues(ctx context.Context, teamID, projectID string) ([]Issue, error)
 	ListMilestones(ctx context.Context, projectID string) ([]Milestone, error)
+	// CreateMilestone exists for the scenario harness, which must stand a
+	// rehearsal project up from nothing. The pipeline itself never creates
+	// one: assigning a milestone commits the work, and that is the
+	// author's call (DESIGN §10).
+	CreateMilestone(ctx context.Context, projectID, name string, sortOrder float64) (Milestone, error)
 	CreateIssue(ctx context.Context, n NewIssue) (Issue, error)
 	UpdateIssueState(ctx context.Context, issueID, stateID string) error
 	CommentOnIssue(ctx context.Context, issueID, body string) error

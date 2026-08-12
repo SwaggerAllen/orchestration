@@ -27,6 +27,13 @@ type Config struct {
 	Version int     `json:"version"`
 	Tracker Tracker `json:"tracker"`
 
+	// Disposable marks a project that exists only to rehearse the
+	// pipeline, and whose tickets the scenario harness may destroy.
+	// `scenario reset` requires it, so a reset aimed at a real project
+	// fails on the config rather than on a prompt someone can hurry
+	// past. Real project configs simply never carry it.
+	Disposable bool `json:"disposable"`
+
 	// States maps each canonical protocol state to the tracker's state name
 	// for this team. All canonical states must be mapped, and no two may
 	// share a tracker name: the state machine reads tracker states through

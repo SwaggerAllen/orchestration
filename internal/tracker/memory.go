@@ -138,6 +138,22 @@ func (m *Memory) createLabel(scope, name string) (Label, error) {
 	return l, nil
 }
 
+func (m *Memory) CreateMilestone(_ context.Context, projectID, name string, sortOrder float64) (Milestone, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if name == "" {
+		return Milestone{}, fmt.Errorf("memory tracker: milestone name is required")
+	}
+	for _, ms := range m.milestones[projectID] {
+		if ms.Name == name {
+			return Milestone{}, fmt.Errorf("memory tracker: milestone %q already exists in project %s", name, projectID)
+		}
+	}
+	ms := Milestone{ID: m.id("milestone"), Name: name, SortOrder: sortOrder}
+	m.milestones[projectID] = append(m.milestones[projectID], ms)
+	return ms, nil
+}
+
 // AddMilestone is a test helper: milestones are author-created in Linear,
 // so the port has no write for them.
 func (m *Memory) AddMilestone(projectID, name string, sortOrder float64) Milestone {

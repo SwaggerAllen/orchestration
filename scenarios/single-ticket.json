@@ -1,0 +1,33 @@
+{
+  "name": "single-ticket",
+  "description": "One ticket through the whole loop: design pass, author sign-off, dev, checks, reconcile, merge, deploy, Done. The smallest rehearsal that touches every hop, so it is the one to run first when anything changes.",
+  "milestones": [
+    {
+      "name": "Rehearsal 1",
+      "sortOrder": 1
+    }
+  ],
+  "tickets": [
+    {
+      "ref": "farewell",
+      "title": "Add a farewell to the home screen",
+      "description": "The home screen greets the visitor by name. Add a farewell alongside it, worded by the greetings system rather than by the screen — the screen renders copy verbatim (see systems/greetings.md).\n\nOne screen, one system, no new dependencies.",
+      "labels": ["frontend"],
+      "milestone": "Rehearsal 1",
+      "priority": 2,
+      "state": "todo"
+    }
+  ],
+  "expect": {
+    "finalStates": {
+      "farewell": "done"
+    },
+    "files": ["screens/home.md", "systems/greetings.md"],
+    "markers": {
+      "farewell": ["dispatch", "merged"]
+    },
+    "absentMarkers": {
+      "farewell": ["stale-claim", "revert", "ci-red", "reconcile-bounce"]
+    }
+  }
+}
