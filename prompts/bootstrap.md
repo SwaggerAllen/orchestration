@@ -40,6 +40,17 @@ in the stub — that is a finding for the author, not something to build
 now. No state sections at all: the state list lives in the stories alone
 (DESIGN §4).
 
+**`CLAUDE.md` — orientation for later runs.** Start from
+`.pipeline/examples/stubs/CLAUDE.template.md` (copy it to the repo root
+under that name) and fill in only its two PROJECT sections: the real
+gate commands, and what a newcomer cannot infer from the tree in five
+minutes — toolchain, the domain in two or three sentences, the seams
+that are load-bearing. Leave the rest as written; it is the same in
+every project, and every agent run on this repo pays for its length in
+context. No tour of the directory tree: that is already visible. If the
+template's layout table is wrong for this repo, correct it rather than
+appending a contradiction.
+
 **The unowned list.** Paths no system claims — the router, manifests,
 config, release files. Put it in `systems/README.md` with one line each
 on why it is unowned. Unowned is a deliberate status (DESIGN §6), not a
