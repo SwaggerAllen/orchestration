@@ -187,3 +187,40 @@ func TestForbiddenExplainsWorkflowPermissions(t *testing.T) {
 		t.Errorf("a 403 must point at the workflow's permissions block, got %v", err)
 	}
 }
+
+// The PR-creation 403 has a different cause from every other 403 here,
+// and pointing at the permissions block sends you to a block that is
+// already correct. It cost a live round: pull-requests: write was
+// granted and the call was refused anyway.
+func TestForbiddenOnPRCreationNamesTheRepositorySetting(t *testing.T) {
+	srv := fakeGitHub(t, func(*http.Request, map[string]any) (int, any) {
+		return http.StatusForbidden, map[string]any{"message": "Resource not accessible by integration"}
+	})
+	defer srv.Close()
+
+	_, err := client(t, srv).CreatePR(context.Background(), "b", "t", "body", true)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if !strings.Contains(err.Error(), "create and approve pull requests") {
+		t.Errorf("a PR-creation 403 must name the repository setting, got %v", err)
+	}
+	// It must still say the permissions block matters — both are needed.
+	if !strings.Contains(err.Error(), "pull-requests: write") {
+		t.Errorf("and still name the workflow permission, got %v", err)
+	}
+}
+
+// Reading PRs is refused for the ordinary reason, so it must keep the
+// ordinary advice rather than blaming a setting about creation.
+func TestForbiddenOnReadingPRsKeepsTheOrdinaryHint(t *testing.T) {
+	srv := fakeGitHub(t, func(*http.Request, map[string]any) (int, any) {
+		return http.StatusForbidden, map[string]any{"message": "Resource not accessible by integration"}
+	})
+	defer srv.Close()
+
+	_, err := client(t, srv).ListOpenPRs(context.Background())
+	if err == nil || strings.Contains(err.Error(), "create and approve") {
+		t.Errorf("a read 403 should point at the permissions block, got %v", err)
+	}
+}

@@ -90,7 +90,7 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("github: %s %s: HTTP %d%s", method, path, resp.StatusCode, hint(resp.StatusCode))
+		return fmt.Errorf("github: %s %s: HTTP %d%s", method, path, resp.StatusCode, hint(resp.StatusCode, method, path))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -99,15 +99,31 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 }
 
 // hint explains a 403, which for this client almost never means the
-// token is wrong. A workflow that declares a permissions: block drops
-// every permission it does not list to none, so adding one call to the
-// sweep can 403 on a token that is otherwise fine. The bare status says
-// "forbidden" and points at the credential — the wrong place to look.
-func hint(status int) string {
+// token is wrong. The bare status says "forbidden" and points at the
+// credential, which is the wrong place to look.
+//
+// Opening a pull request gets its own answer. It is refused even with
+// pull-requests: write, by a repository setting no workflow file can
+// grant — and a hint naming only the permissions block sends you to a
+// block that is already correct, which cost a debugging round.
+func hint(status int, method, path string) string {
 	if status != http.StatusForbidden {
 		return ""
 	}
+	if method == http.MethodPost && strings.HasSuffix(pathOnly(path), "/pulls") {
+		return " — opening a PR needs BOTH pull-requests: write on the workflow AND" +
+			" Settings → Actions → General → \"Allow GitHub Actions to create and approve pull requests\"" +
+			" on the repository; the second is not grantable from a workflow file"
+	}
 	return " — check the calling workflow's permissions: block, which drops every permission it does not name"
+}
+
+// pathOnly trims a query string so a suffix match is not defeated by one.
+func pathOnly(path string) string {
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		return path[:i]
+	}
+	return path
 }
 
 func (c *Client) DispatchWorkflow(ctx context.Context, workflowFile string, inputs map[string]string) error {
