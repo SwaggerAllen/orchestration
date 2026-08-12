@@ -1,6 +1,6 @@
 {
   "name": "single-ticket",
-  "description": "One ticket through the whole loop: design pass, author sign-off, dev, checks, reconcile, merge, deploy, Done. The smallest rehearsal that touches every hop, so it is the one to run first when anything changes.",
+  "description": "One ticket through the whole loop: design pass, author sign-off, dev, checks, reconcile, merge, deploy, Done. The smallest rehearsal that touches every hop, so it is the one to run first when anything changes. Seeded in Designing rather than Todo on purpose — the Todo pull is the author choosing what to work on, which has no pipeline behaviour to exercise, so seeding behind it would stall every rehearsal on a human.",
   "milestones": [
     {
       "name": "Rehearsal 1",
@@ -15,7 +15,7 @@
       "labels": ["frontend"],
       "milestone": "Rehearsal 1",
       "priority": 2,
-      "state": "todo"
+      "state": "designing"
     }
   ],
   "expect": {
