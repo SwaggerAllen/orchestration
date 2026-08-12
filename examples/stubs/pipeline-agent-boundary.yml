@@ -1,4 +1,8 @@
-# Project stub: boundary agent. run-name is load-bearing (correlation).
+# Project stub: boundary agent.
+#
+# run-name is load-bearing: "pipeline: boundary <ticket>" is how the
+# control plane correlates this run to its ticket (stale claims, busy
+# checks). Set it exactly.
 name: pipeline-agent-boundary
 run-name: "pipeline: boundary ${{ inputs.ticket }}"
 
@@ -6,15 +10,20 @@ on:
   workflow_dispatch:
     inputs:
       ticket:
-        description: Boundary ticket key
+        description: Ticket key, e.g. PIPE-12
         required: true
         type: string
 
-# Stated explicitly because a called workflow cannot be granted more
-# than the calling job holds, and a caller with no permissions block
-# inherits the repository default — restrictive on a new repo. When the
-# callee asks for more, the run dies before a runner is allocated:
-# "startup_failure", with no job and no logs to read.
+# Every pipeline command builds a snapshot first, and the snapshot has a
+# fixed read-set: the agent run list (actions), the open PRs
+# (pull-requests), each PR head's CI verdict (checks), and commit
+# ancestry (contents). Those are needed even by a run that only writes a
+# comment — the cost of reading the world, not of changing it. A missing
+# one surfaces as an HTTP 403 partway through the claim.
+#
+# Opening the draft PR additionally needs the repository setting
+# Settings → Actions → General → "Allow GitHub Actions to create and
+# approve pull requests". No workflow file can grant it.
 permissions:
   contents: write # writes the retro note, and reads ancestry
   pull-requests: read # the snapshot's open PR list
@@ -23,10 +32,31 @@ permissions:
 
 jobs:
   boundary:
-    uses: SwaggerAllen/orchestration/.github/workflows/agent-boundary.yml@main
-    with:
-      ticket: ${{ inputs.ticket }}
-    secrets:
-      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      PIPELINE_REPO_TOKEN: ${{ secrets.PIPELINE_REPO_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 — the retro note is written against history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---- this project's toolchain, before the agent runs --------------
+      # The whole reason the pipeline ships composite actions rather than
+      # reusable workflows: a reusable workflow cannot accept `uses:`
+      # steps, so there was nowhere to put this and agents ran without
+      # the language they were being asked to write in. Replace with
+      # whatever this project needs.
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.16"
+          otp-version: "26"
+      # ------------------------------------------------------------------
+
+      # Pin to a pipeline release tag (@v1) once one exists; main while
+      # the pipeline itself is under construction (DESIGN §5).
+      - uses: SwaggerAllen/orchestration/.github/actions/agent-boundary@main
+        with:
+          ticket: ${{ inputs.ticket }}
+          linear_api_key: ${{ secrets.LINEAR_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}

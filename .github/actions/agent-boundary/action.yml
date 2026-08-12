@@ -1,0 +1,116 @@
+# Boundary-agent run (DESIGN §10): archive, debt scan, grooming. Each
+# step posts its own marker, and a resumed pass skips the steps whose
+# markers are already there — so a crash costs the step, not the pass.
+#
+# A composite action rather than a reusable workflow, because the calling
+# job must be able to run its own steps first: a project's toolchain is
+# project-specific and no reusable workflow can accept `uses:` steps as
+# an input. The caller checks out the project, sets up its language, then
+# calls this — see examples/stubs/pipeline-agent-boundary.yml.
+#
+# The caller's checkout needs fetch-depth: 0; the retro note is written
+# against history.
+name: pipeline boundary agent
+description: Run a milestone boundary pass — archive, debt scan, grooming
+
+inputs:
+  ticket:
+    description: Boundary ticket key
+    required: true
+  linear_api_key:
+    description: Linear API key
+    required: true
+  github_token:
+    description: Token for the project repo; pass ${{ github.token }}
+    required: true
+  anthropic_api_key:
+    description: Model key for the scan and grooming pass
+    required: true
+  pipeline_repo_token:
+    description: >-
+      Contents:read PAT for the pipeline repo while it is private.
+      Falls back to github_token, which suffices once it is public.
+    required: false
+    default: ""
+  pipeline_ref:
+    description: Pipeline repo ref to run the harness from
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: checkout pipeline
+      uses: actions/checkout@v4
+      with:
+        repository: SwaggerAllen/orchestration
+        ref: ${{ inputs.pipeline_ref }}
+        path: .pipeline
+        token: ${{ inputs.pipeline_repo_token || github.token }}
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: .pipeline/go.mod
+
+    - name: claim
+      id: claim
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent claim \
+          --kind boundary \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --ticket "${{ inputs.ticket }}" \
+          --dispatch-id "${{ github.run_id }}" \
+          --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/boundary.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/proposals.json"
+
+    - name: archive pass + retro note
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent boundary-archive \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json"
+
+    - name: debt scan + grooming
+      if: steps.claim.outputs.scan_done != 'true'
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+      run: |
+        npx --yes @anthropic-ai/claude-code@latest \
+          -p "$(cat "$RUNNER_TEMP/pipeline/prompt.md")" \
+          --dangerously-skip-permissions
+
+    - name: file proposals and hand back
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json" --claim "$RUNNER_TEMP/pipeline/claim.json")
+        if [ "${{ steps.claim.outputs.scan_done }}" != "true" ]; then
+          ARGS+=(--proposals "$RUNNER_TEMP/pipeline/proposals.json")
+        fi
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent boundary-file "${ARGS[@]}"
+
+    - name: abort on failure
+      if: failure() && steps.claim.outcome == 'success'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent abort \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json" \
+          --reason failed \
+          --message "Boundary run failed; move the ticket back to In progress to resume from the last completed step (DESIGN 10). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

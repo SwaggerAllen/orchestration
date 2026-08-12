@@ -57,7 +57,7 @@ agent. Several assumptions here are load-bearing and are called out where they a
 |---|---|
 | **Linear** | Intent, scope, state, decisions, the argument |
 | **The project repo** | Everything that ships, including all design source |
-| **The pipeline repo** | This protocol, agent prompts, reusable workflows |
+| **The pipeline repo** | This protocol, agent prompts, the composite actions the project stubs call |
 | **Static preview** | Nothing. A rendering of a branch. |
 
 **Artifacts never pass through an external store.** Design writes to a branch. A file-sharing
