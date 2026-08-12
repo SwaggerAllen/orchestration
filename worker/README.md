@@ -14,20 +14,28 @@ never learns what a ticket is.
 
 ## Deploy
 
+The `worker-deploy` workflow, on any push to `main` touching this
+directory or on demand from the Actions tab. It uploads
+`DISPATCH_TOKEN` from the repo secret as part of the deploy, so there
+is one value to change rather than two that can disagree.
+
+By hand, when you have a laptop and wrangler auth:
+
 ```sh
 cd worker
 npx wrangler deploy
-npx wrangler secret put DISPATCH_TOKEN
+npx wrangler secret put DISPATCH_TOKEN   # only needed on this path
 ```
 
 ## One Worker, several projects
 
 `PROJECTS` in `wrangler.toml` is a JSON array; each entry is a repo and
-its sweep stub. Adding a project is an edit plus a redeploy, plus
-adding that repo to the token's repository list. One cron serves them
-all, and a failing dispatch is logged and skipped rather than stopping
-the others — the sweep is convergent, so a missed beat costs latency,
-never correctness.
+its sweep stub. Adding a project is an edit here — merging it
+redeploys — plus adding that repo to the token's repository list, which
+is a separate act in GitHub's settings. One cron serves them all, and a
+failing dispatch is logged and skipped rather than stopping the others
+— the sweep is convergent, so a missed beat costs latency, never
+correctness.
 
 `DISPATCH_TOKEN` is a fine-grained PAT with **Actions: read and write**
 on exactly the listed repos. That is the least powerful credential in

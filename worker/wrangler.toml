@@ -1,6 +1,7 @@
-# The metronome Worker (PLAN M7). Deploy with:
-#   cd worker && npx wrangler deploy
-#   npx wrangler secret put DISPATCH_TOKEN
+# The metronome Worker (PLAN M7). Deployed by the worker-deploy
+# workflow on any push to main touching worker/ — including the
+# PROJECTS edit below, so adding a project cannot be half-done.
+# By hand: cd worker && npx wrangler deploy (see README).
 name = "pipeline-metronome"
 main = "index.ts"
 compatibility_date = "2026-01-01"
