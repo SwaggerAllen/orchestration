@@ -244,6 +244,42 @@ func (c *Client) ListMilestones(ctx context.Context, projectID string) ([]tracke
 	return out, nil
 }
 
+// CreateMilestone is used only by the scenario harness standing a
+// rehearsal project up from nothing (PLAN §2). The pipeline proper never
+// calls it: assigning work to a milestone commits it, and that is the
+// author's decision (DESIGN §10).
+func (c *Client) CreateMilestone(ctx context.Context, projectID, name string, sortOrder float64) (tracker.Milestone, error) {
+	const q = `mutation CreateMilestone($input: ProjectMilestoneCreateInput!) {
+	  projectMilestoneCreate(input: $input) {
+	    success
+	    projectMilestone { id name sortOrder }
+	  }
+	}`
+	var data struct {
+		ProjectMilestoneCreate struct {
+			Success          bool `json:"success"`
+			ProjectMilestone struct {
+				ID        string  `json:"id"`
+				Name      string  `json:"name"`
+				SortOrder float64 `json:"sortOrder"`
+			} `json:"projectMilestone"`
+		} `json:"projectMilestoneCreate"`
+	}
+	vars := map[string]any{"input": map[string]any{
+		"projectId": projectID,
+		"name":      name,
+		"sortOrder": sortOrder,
+	}}
+	if err := c.do(ctx, q, vars, &data); err != nil {
+		return tracker.Milestone{}, err
+	}
+	if !data.ProjectMilestoneCreate.Success {
+		return tracker.Milestone{}, fmt.Errorf("linear: projectMilestoneCreate(%q) reported failure", name)
+	}
+	m := data.ProjectMilestoneCreate.ProjectMilestone
+	return tracker.Milestone{ID: m.ID, Name: m.Name, SortOrder: m.SortOrder}, nil
+}
+
 func (c *Client) CreateIssue(ctx context.Context, n tracker.NewIssue) (tracker.Issue, error) {
 	labelIDs, err := c.labelIDs(ctx, n.TeamID, n.Labels)
 	if err != nil {

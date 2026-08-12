@@ -37,17 +37,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: check the dispatch token is present
+      - name: check the secrets are present
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
         run: |
-          # wrangler would deploy happily with an empty secret and the
-          # metronome would then 401 against GitHub every five minutes,
-          # in logs nobody is reading.
+          # wrangler deploys happily with an empty secret. The failures
+          # land later and quietly: a blank DISPATCH_TOKEN 401s against
+          # GitHub every beat, and a blank LINEAR_WEBHOOK_SECRET makes
+          # every webhook fail verification, which looks exactly like a
+          # pipeline that has simply gone slow.
           if [ -z "$DISPATCH_TOKEN" ]; then
-            echo "::error::DISPATCH_TOKEN is not set on this repository — the metronome would deploy and then fail every tick"
+            echo "::error::DISPATCH_TOKEN is not set on this repository — the metronome would deploy and then fail every beat"
             exit 1
           fi
+          if [ -z "$LINEAR_WEBHOOK_SECRET" ]; then
+            echo "::error::LINEAR_WEBHOOK_SECRET is not set — every Linear webhook would be rejected and the pipeline would fall back to the hourly cron"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: test
+        working-directory: worker
+        # The signature check is the only thing standing between a
+        # public URL and a token that starts workflows in every project
+        # repo. It is not deployed untested.
+        run: node --test --experimental-strip-types index.test.ts
 
       - name: deploy
         uses: cloudflare/wrangler-action@v3
@@ -59,8 +77,10 @@ jobs:
           # and never drifts from the value in this repo's settings.
           secrets: |
             DISPATCH_TOKEN
+            LINEAR_WEBHOOK_SECRET
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
 
       - name: what was deployed
         run: |

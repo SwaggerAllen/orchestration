@@ -1,0 +1,276 @@
+package scenario
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"sort"
+
+	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
+)
+
+// ErrNotDisposable is returned by Reset when pointed at a config that
+// does not declare itself disposable. It is a separate error type so
+// the CLI can say something better than "failed".
+type ErrNotDisposable struct{ ProjectID string }
+
+func (e ErrNotDisposable) Error() string {
+	return fmt.Sprintf(
+		"refusing to reset project %s: its config does not set \"disposable\": true.\n"+
+			"Reset archives every ticket in the project. Only a rehearsal project should carry that flag,\n"+
+			"and no real project's config should ever gain it.", e.ProjectID)
+}
+
+// Guard is the two-key check on a destructive command. The config must
+// declare the project disposable, and the caller must name the project
+// id independently — so neither a config pointed at the wrong project
+// nor a command typed against the wrong config is enough on its own.
+func Guard(cfg *config.Config, confirmProjectID string) error {
+	if !cfg.Disposable {
+		return ErrNotDisposable{ProjectID: cfg.Tracker.ProjectID}
+	}
+	if confirmProjectID != cfg.Tracker.ProjectID {
+		return fmt.Errorf(
+			"refusing to reset: --confirm %q does not match the config's project %q",
+			confirmProjectID, cfg.Tracker.ProjectID)
+	}
+	return nil
+}
+
+// Reset archives every issue in the project, returning it to empty.
+//
+// Archive rather than delete: Linear keeps archived issues recoverable,
+// so a reset fired at the wrong moment costs a restore rather than the
+// work. Milestones are left alone — they are reused by name across runs,
+// which is what keeps "the next milestone" ordering stable (DESIGN §10).
+func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmProjectID string, log io.Writer) (int, error) {
+	if err := Guard(cfg, confirmProjectID); err != nil {
+		return 0, err
+	}
+	issues, err := t.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		return 0, err
+	}
+	for _, i := range issues {
+		fmt.Fprintf(log, "  archive %s %s\n", i.Key, i.Title)
+		if err := t.ArchiveIssue(ctx, i.ID); err != nil {
+			return 0, fmt.Errorf("archiving %s: %w", i.Key, err)
+		}
+	}
+	return len(issues), nil
+}
+
+// Seeded maps a scenario ref to the ticket the tracker created for it.
+// Written out by Seed and read by Check, because the check phase runs
+// in a later process and cannot re-derive which key belongs to which ref.
+type Seeded struct {
+	Scenario string            `json:"scenario"`
+	Keys     map[string]string `json:"keys"` // ref -> ticket key
+	IDs      map[string]string `json:"ids"`  // ref -> ticket id
+}
+
+// Seed creates the scenario's milestones and tickets. Milestones are
+// created only if absent; tickets are always created, which is why Seed
+// belongs after Reset rather than instead of it.
+func Seed(ctx context.Context, t tracker.Tracker, cfg *config.Config, s *Scenario, log io.Writer) (*Seeded, error) {
+	states, err := stateIDs(ctx, t, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := t.ListMilestones(ctx, cfg.Tracker.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	milestoneID := map[string]string{}
+	for _, m := range existing {
+		milestoneID[m.Name] = m.ID
+	}
+	for _, m := range s.Milestones {
+		if id, ok := milestoneID[m.Name]; ok {
+			fmt.Fprintf(log, "  milestone %q already exists (%s)\n", m.Name, id)
+			continue
+		}
+		created, err := t.CreateMilestone(ctx, cfg.Tracker.ProjectID, m.Name, m.SortOrder)
+		if err != nil {
+			return nil, fmt.Errorf("creating milestone %q: %w", m.Name, err)
+		}
+		fmt.Fprintf(log, "  created milestone %q\n", m.Name)
+		milestoneID[m.Name] = created.ID
+	}
+
+	out := &Seeded{Scenario: s.Name, Keys: map[string]string{}, IDs: map[string]string{}}
+	for _, tk := range s.Tickets {
+		stateID, ok := states[tk.State]
+		if !ok {
+			return nil, fmt.Errorf("ticket %s: no tracker state for %q — run pipeline setup first", tk.Ref, tk.State)
+		}
+		issue, err := t.CreateIssue(ctx, tracker.NewIssue{
+			TeamID:      cfg.Tracker.TeamID,
+			ProjectID:   cfg.Tracker.ProjectID,
+			MilestoneID: milestoneID[tk.Milestone],
+			Title:       tk.Title,
+			Description: tk.Description,
+			StateID:     stateID,
+			Labels:      tk.Labels,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating ticket %s: %w", tk.Ref, err)
+		}
+		if tk.Priority != 0 {
+			if err := t.UpdateIssuePriority(ctx, issue.ID, tk.Priority); err != nil {
+				return nil, fmt.Errorf("setting priority on %s: %w", issue.Key, err)
+			}
+		}
+		fmt.Fprintf(log, "  created %s (%s) in %s\n", issue.Key, tk.Ref, tk.State)
+		out.Keys[tk.Ref] = issue.Key
+		out.IDs[tk.Ref] = issue.ID
+	}
+	return out, nil
+}
+
+// Failure is one unmet expectation.
+type Failure struct {
+	Ref  string `json:"ref,omitempty"`
+	Key  string `json:"key,omitempty"`
+	Want string `json:"want"`
+	Got  string `json:"got"`
+}
+
+func (f Failure) String() string {
+	who := f.Ref
+	if f.Key != "" {
+		who = fmt.Sprintf("%s (%s)", f.Ref, f.Key)
+	}
+	if who == "" {
+		return fmt.Sprintf("want %s, got %s", f.Want, f.Got)
+	}
+	return fmt.Sprintf("%s: want %s, got %s", who, f.Want, f.Got)
+}
+
+// HasFile reports whether a repository path exists. Supplied by the
+// caller so Check needs no host adapter: in the harness workflow the
+// project is checked out on disk, and asking the filesystem is both
+// simpler and more honest than asking an API about a branch.
+type HasFile func(path string) bool
+
+// Check compares the live project against the scenario's expectations
+// and returns every failure rather than the first, because a rehearsal
+// that reports one problem per run takes as many runs as it has
+// problems.
+func Check(ctx context.Context, t tracker.Tracker, cfg *config.Config, s *Scenario, seeded *Seeded, hasFile HasFile) ([]Failure, error) {
+	issues, err := t.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	byKey := map[string]tracker.Issue{}
+	for _, i := range issues {
+		byKey[i.Key] = i
+	}
+	stateName, err := stateNames(ctx, t, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	var failures []Failure
+	fail := func(f Failure) { failures = append(failures, f) }
+
+	for _, ref := range sortedKeys(s.Expect.FinalStates) {
+		want := s.Expect.FinalStates[ref]
+		key := seeded.Keys[ref]
+		issue, ok := byKey[key]
+		if !ok {
+			// Archived is the ordinary way a ticket leaves the listing,
+			// and the boundary pass archives Done work (DESIGN §10) — so
+			// say which it is rather than guessing.
+			fail(Failure{Ref: ref, Key: key, Want: fmt.Sprintf("state %s", want), Got: "not in the project (archived, or never created)"})
+			continue
+		}
+		if got := stateName[issue.StateID]; got != want {
+			fail(Failure{Ref: ref, Key: key, Want: fmt.Sprintf("state %s", want), Got: fmt.Sprintf("state %s", got)})
+		}
+	}
+
+	for _, ref := range sortedKeys(s.Expect.Markers) {
+		key := seeded.Keys[ref]
+		present := markerKinds(byKey[key])
+		for _, kind := range s.Expect.Markers[ref] {
+			if !present[kind] {
+				fail(Failure{Ref: ref, Key: key, Want: fmt.Sprintf("a %s marker", kind), Got: "no such marker on the ticket"})
+			}
+		}
+	}
+	for _, ref := range sortedKeys(s.Expect.AbsentMarkers) {
+		key := seeded.Keys[ref]
+		present := markerKinds(byKey[key])
+		for _, kind := range s.Expect.AbsentMarkers[ref] {
+			if present[kind] {
+				fail(Failure{Ref: ref, Key: key, Want: fmt.Sprintf("no %s marker", kind), Got: "the ticket carries one"})
+			}
+		}
+	}
+
+	if hasFile != nil {
+		for _, path := range s.Expect.Files {
+			if !hasFile(path) {
+				fail(Failure{Want: fmt.Sprintf("file %s", path), Got: "missing from the repository"})
+			}
+		}
+	}
+	return failures, nil
+}
+
+// markerKinds is the set of pipeline marker kinds on a ticket. A comment
+// that fails to parse as a marker is prose, which is the common case and
+// not an error.
+func markerKinds(i tracker.Issue) map[string]bool {
+	kinds := map[string]bool{}
+	for _, c := range i.Comments {
+		if m, ok, err := marker.Parse(c.Body); ok && err == nil {
+			kinds[string(m.Kind)] = true
+		}
+	}
+	return kinds
+}
+
+func stateIDs(ctx context.Context, t tracker.Tracker, cfg *config.Config) (map[protocol.State]string, error) {
+	states, err := t.ListStates(ctx, cfg.Tracker.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	byName := map[string]string{}
+	for _, s := range states {
+		byName[s.Name] = s.ID
+	}
+	out := map[protocol.State]string{}
+	for _, ps := range protocol.AllStates {
+		if id, ok := byName[cfg.StateName(ps)]; ok {
+			out[ps] = id
+		}
+	}
+	return out, nil
+}
+
+func stateNames(ctx context.Context, t tracker.Tracker, cfg *config.Config) (map[string]protocol.State, error) {
+	ids, err := stateIDs(ctx, t, cfg)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]protocol.State{}
+	for ps, id := range ids {
+		out[id] = ps
+	}
+	return out, nil
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

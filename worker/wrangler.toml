@@ -6,15 +6,30 @@ name = "pipeline-metronome"
 main = "index.ts"
 compatibility_date = "2026-01-01"
 
+# The webhook endpoint needs a URL. Linear posts to
+# https://pipeline-metronome.<your-subdomain>.workers.dev
+workers_dev = true
+
 [triggers]
-# Every 5 minutes, one cron however many projects are listed. This is
-# the polled loop's cadence; the CI hops are event-driven in each
-# project repo and never wait for it (DESIGN §13).
-crons = ["*/5 * * * *"]
+# Hourly, not every five minutes. The tracker hops arrive by webhook and
+# the CI hops are GitHub events on the project stub, so what is left for
+# the cron is the elapsed-time conditions that have nothing to subscribe
+# to — stale claims and deploy timeouts, both past a grace period of
+# tens of minutes (DESIGN §12, §13) — plus catching a dropped webhook.
+crons = ["0 * * * *"]
 
 [vars]
-# One entry per project repo. Adding a project is an edit here plus a
-# redeploy — and adding that repo to DISPATCH_TOKEN's repository list.
+# One entry per project repo. Adding a project is an edit here plus
+# adding that repo to DISPATCH_TOKEN's repository list.
+#
+# trackerProject is the Linear project id, and it is what routes a
+# webhook to one repo. Leave it out and every webhook wakes every
+# project — correct, but it spends a run per project per edit.
 PROJECTS = '''[
-  {"repository": "swaggerallen/orchestration-dummy", "workflow": "pipeline-sweep.yml", "ref": "main"}
+  {
+    "repository": "swaggerallen/orchestration-dummy",
+    "workflow": "pipeline-sweep.yml",
+    "ref": "main",
+    "trackerProject": "eeeb9f30-dba6-412a-b826-e2279fc56215"
+  }
 ]'''

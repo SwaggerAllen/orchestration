@@ -49,6 +49,8 @@ func run(args []string) error {
 		return cmdIDs(args[1:])
 	case "sim":
 		return cmdSim(args[1:])
+	case "scenario":
+		return cmdScenario(args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -76,6 +78,8 @@ commands:
   ids      print the Linear ids a config needs: viewer, teams, projects
            (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)
+  scenario Ring-3 rehearsal against a disposable project: reset, seed,
+           check, validate (requires LINEAR_API_KEY)
   version  print the binary version
 `)
 }

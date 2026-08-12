@@ -4,6 +4,7 @@
     "teamId": "94b1977f-5b88-4aae-9a0e-c4d7d00ebf85",
     "projectId": "eeeb9f30-dba6-412a-b826-e2279fc56215"
   },
+  "disposable": true,
   "states": {
     "backlog": "Backlog",
     "todo": "Todo",

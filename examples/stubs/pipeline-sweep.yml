@@ -2,12 +2,19 @@
 # .github/workflows/.
 #
 # Two triggers, per DESIGN §13:
-#   - workflow_dispatch: the metronome (Cloudflare Worker cron, M7) and
-#     humans. GitHub's own `schedule:` is deliberately not used — its
+#   - workflow_dispatch: the metronome. It fires on a Linear webhook the
+#     moment the tracker changes, and hourly regardless for the
+#     elapsed-time conditions nothing announces — stale claims, deploy
+#     timeouts. GitHub's own `schedule:` is deliberately not used: its
 #     5-15 minute jitter compounds across every hop of a ticket's life.
 #   - workflow_run: the CI hops. When the project's CI completes, a sweep
 #     runs immediately, so Checks -> Reconciling and CI-red -> rework
 #     never wait for the poll.
+#   - deployment_status: the post-deploy check, which is the last hop of
+#     a ticket's life and otherwise the one most likely to sit waiting
+#     on the clock. Only fires where the platform records GitHub
+#     Deployments; a DO-hosted project drops this trigger and lets the
+#     hourly beat find it.
 name: pipeline-sweep
 run-name: "pipeline: sweep"
 
@@ -16,6 +23,7 @@ on:
   workflow_run:
     workflows: [ci]
     types: [completed]
+  deployment_status:
 
 # Declaring this block at all drops every permission not listed to
 # none, so it has to name everything the snapshot reads, not just the

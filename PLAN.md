@@ -91,10 +91,14 @@ only ring where the agents' actual judgment is exercised.
   command that creates/verifies the states, labels, and Triage settings from DESIGN §3/§8 in
   any team it's pointed at. The same command later provisions real projects, so the dummy setup
   path *is* the production setup path.
-- **`pipeline seed` / `pipeline reset`**: seed writes a scenario's tickets into the scratch
-  team and branches into the dummy repo; reset archives/cancels everything and force-restores
-  the dummy repo's default branch. Dry runs must be repeatable from zero, or they stop being
-  run.
+- **`pipeline scenario`** (reset / seed / check / validate), driven by the `rehearse` workflow:
+  reset archives every ticket and force-restores the dummy to its `seed` tag; seed writes a
+  fixture's milestones and tickets; check asserts where they ended up. Dry runs must be
+  repeatable from zero, or they stop being run. Two keys guard the destructive half — the config
+  must declare itself `disposable`, and the project id is confirmed separately — and the harness
+  is absent from `examples/stubs` so it can never be copied into a real project. There is no
+  exercise phase: after seeding, the real metronome, webhooks and agents carry the tickets, which
+  is the whole point of Ring 3.
 - **`--dry-run` on every mutating command**: prints the action list without executing it. The
   first live sweep against any new project is always run this way.
 
@@ -163,7 +167,8 @@ scratch team, including a kill mid-`In progress` and a resume that files no dupl
 proposals.
 
 ### M7 — Metronome, hardening, v1
-Cloudflare Worker cron (staging interval against the dummy first), fine-scoped dispatch token,
+Cloudflare Worker: Linear webhook receiver for the tracker hops plus an hourly cron for the
+elapsed-time conditions that announce nothing (DESIGN §13), fine-scoped dispatch token,
 stale-claim live test (cancel an agent run mid-flight, watch the sweep catch it), failure
 injection day against the dummy, README (setup checklist, secrets inventory, trust-boundary
 note per DESIGN §9), tag `v1` and pin the dummy to it.
@@ -191,4 +196,5 @@ Needed by M0/M2, none blocking the start of M0's local work:
 | Anthropic API key | project repo Actions secrets | agent runs | M3 |
 | Reconcile merge identity | project repo Actions secrets | reconcile merge | M4 |
 | Cloudflare Pages token | project repo Actions secrets | storybook publish | M5 |
-| GitHub dispatch token (workflow_dispatch only) | Cloudflare Worker secret | metronome | M7 |
+| GitHub dispatch token (workflow_dispatch only) | pipeline repo secret, uploaded to the Worker by the deploy | metronome | M7 |
+| Linear webhook signing secret | pipeline repo secret, uploaded to the Worker by the deploy | webhook verification | M7 |
