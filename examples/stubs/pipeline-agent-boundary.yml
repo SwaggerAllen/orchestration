@@ -10,6 +10,14 @@ on:
         required: true
         type: string
 
+# Stated explicitly because a called workflow cannot be granted more
+# than the calling job holds, and a caller with no permissions block
+# inherits the repository default — restrictive on a new repo. When the
+# callee asks for more, the run dies before a runner is allocated:
+# "startup_failure", with no job and no logs to read.
+permissions:
+  contents: write # writes the retro note
+
 jobs:
   boundary:
     uses: SwaggerAllen/orchestration/.github/workflows/agent-boundary.yml@main
