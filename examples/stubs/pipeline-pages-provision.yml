@@ -10,6 +10,14 @@ run-name: "pipeline: provision Pages project"
 on:
   workflow_dispatch:
 
+# Stated explicitly because a called workflow cannot be granted more
+# than the calling job holds, and a caller with no permissions block
+# inherits the repository default — restrictive on a new repo. When the
+# callee asks for more, the run dies before a runner is allocated:
+# "startup_failure", with no job and no logs to read.
+permissions:
+  contents: read # reads the project name out of the config
+
 jobs:
   # The project name comes from the config, the same read the preview
   # and cleanup workflows do, so provisioning cannot create a project

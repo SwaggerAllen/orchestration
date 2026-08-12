@@ -8,6 +8,14 @@ on:
   pull_request:
     types: [closed]
 
+# Stated explicitly because a called workflow cannot be granted more
+# than the calling job holds, and a caller with no permissions block
+# inherits the repository default — restrictive on a new repo. When the
+# callee asks for more, the run dies before a runner is allocated:
+# "startup_failure", with no job and no logs to read.
+permissions:
+  contents: read # reads the project name out of the config
+
 jobs:
   # A reusable-workflow call runs no steps of its own, so reading the
   # project name out of the config takes a job. Worth it: the alternative
