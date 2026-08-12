@@ -66,6 +66,7 @@ jobs:
             --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --out "$RUNNER_TEMP/pipeline" \
             --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/boundary.md" \
+            --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
             --outcome-path "$RUNNER_TEMP/pipeline/proposals.json"
 
       - name: archive pass + retro note

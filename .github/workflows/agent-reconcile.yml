@@ -67,6 +67,7 @@ jobs:
             --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --out "$RUNNER_TEMP/pipeline" \
             --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/reconcile.md" \
+            --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
             --verdict-path "$RUNNER_TEMP/pipeline/verdict.json"
 
       - name: check out the PR branch (read-only inspection)

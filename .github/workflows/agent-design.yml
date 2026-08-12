@@ -67,6 +67,7 @@ jobs:
             --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             --out "$RUNNER_TEMP/pipeline" \
             --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
+            --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
             --outcome-path "$RUNNER_TEMP/pipeline/outcome.json"
 
       - name: check out the ticket branch

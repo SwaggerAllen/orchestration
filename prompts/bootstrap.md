@@ -40,6 +40,19 @@ in the stub — that is a finding for the author, not something to build
 now. No state sections at all: the state list lives in the stories alone
 (DESIGN §4).
 
+**`CLAUDE.md` — what only this repo can say.** Claude Code loads it
+automatically, for agent runs and for humans working here by hand.
+Write the gate commands and what a newcomer cannot infer from the tree
+in five minutes: toolchain, the domain in two or three sentences, the
+seams that are load-bearing, anything the layout convention gets wrong
+here. No tour of the directory tree — that is already visible.
+
+Do **not** restate the pipeline protocol in it: how tickets move, what
+the file maps mean, what an agent must never do. Agent runs are given
+that at run time from `prompts/repo-context.md` in the pipeline repo,
+so a copy here would be a second truth that drifts (DESIGN §1). Open
+with a line saying the repo is pipeline-driven and pointing there.
+
 **The unowned list.** Paths no system claims — the router, manifests,
 config, release files. Put it in `systems/README.md` with one line each
 on why it is unowned. Unowned is a deliberate status (DESIGN §6), not a
