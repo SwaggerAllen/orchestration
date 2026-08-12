@@ -26,6 +26,7 @@
     "storybook/**",
     "screens/*.md",
     "systems/*.md",
+    "non-asks.md",
     "lib/dummy_web/components/**"
   ],
   "qualityGates": [

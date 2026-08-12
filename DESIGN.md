@@ -285,14 +285,21 @@ afternoon is very good at spotting gaps and very bad at judging whether a gap is
 go to Triage; an unasked-for ticket costs a read and a decision nobody wanted, and a backlog
 nobody trusts is worse than one with a hole in it.
 
-**A confirmed non-asks document** on the project records what the design deliberately doesn't
-want, each with its reason. The harness reads it at claim time and puts it in the prompt of
-every pass that proposes — design and boundary — because agents hold no tracker credentials
-(§9) and a document they can't be handed is a document they can't read. The prompt says which
-of three things happened: here it is, the project records none, or the read failed. The last
-two look identical in an empty section and license very different confidence. Proposing a
-recorded non-ask isn't forbidden, but do it knowing you are arguing against a recorded
-decision, and say so in the issue.
+**A confirmed non-asks document** records what the design deliberately doesn't want, each with
+its reason. It is a file in the repo (`non-asks.md` by default) beside the screen and system
+docs it constrains — the rest of the design lives in the repo, and a record of refused
+decisions kept anywhere else is indirection with no reviewer and nobody maintaining it. The
+design agent maintains it like any other design artifact: entries are added and amended in the
+same commit as the artifacts, reviewed in the same Design review sign-off, and never deleted,
+because a refusal that quietly disappears is one the pipeline proposes again next quarter.
+
+The harness inlines it into the prompt of every pass that proposes — design and boundary — for
+the same reason it inlines the scope: a prompt whose most important input is "go read this
+file" is a prompt whose most important input is optional. The section says which of three
+things happened: here it is, the repo records none, or the read failed. The last two look
+identical in an empty section and license very different confidence. Proposing a recorded
+non-ask isn't forbidden, but do it knowing you are arguing against a recorded decision, and
+say so in the issue.
 
 ---
 

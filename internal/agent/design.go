@@ -51,10 +51,9 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	for _, c := range t.Comments {
 		res.Comments = append(res.Comments, c.Body)
 	}
-	// Read before proposing (DESIGN §4). The agent cannot fetch this
-	// itself — the harness owns tracker I/O (DESIGN §9) — so it arrives
-	// as part of the claim or not at all.
-	res.NonAsks = claimNonAsks(ctx, p)
+	// Read before proposing (DESIGN §4), and written back to in the same
+	// artifacts commit when a push-back establishes a new refusal.
+	res.NonAsks = claimNonAsks(p.Config)
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
 		res.Branch = pr.Branch
 		res.PRNumber = pr.Number

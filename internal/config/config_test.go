@@ -181,30 +181,64 @@ func TestDurationRejectsBareNumbers(t *testing.T) {
 }
 
 // Every project written before this field existed omits it, and the
-// pipeline still has to look for the document — a config that predates
-// a feature should get the feature's default, not opt out of it.
-func TestLoadDefaultsTheNonAsksDocumentTitle(t *testing.T) {
+// pipeline still has to look for the file — a config that predates a
+// feature should get the feature's default, not opt out of it.
+func TestLoadDefaultsTheNonAsksPath(t *testing.T) {
 	m := sampleAsMap(t)
-	delete(m, "nonAsksDocument")
+	delete(m, "nonAsksPath")
 	c, err := Load(writeConfig(t, m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.NonAsksDocument != DefaultNonAsksDocument {
-		t.Errorf("nonAsksDocument = %q, want the default %q", c.NonAsksDocument, DefaultNonAsksDocument)
+	if c.NonAsksPath != DefaultNonAsksPath {
+		t.Errorf("nonAsksPath = %q, want the default %q", c.NonAsksPath, DefaultNonAsksPath)
 	}
 }
 
-// An explicit title wins — a project whose document is called something
-// else has said so on purpose.
-func TestLoadKeepsAnExplicitNonAsksDocumentTitle(t *testing.T) {
+// An explicit path wins — a project that keeps the file somewhere else
+// has said so on purpose.
+func TestLoadKeepsAnExplicitNonAsksPath(t *testing.T) {
 	m := sampleAsMap(t)
-	m["nonAsksDocument"] = "Won't do"
+	m["nonAsksPath"] = "docs/wont-do.md"
 	c, err := Load(writeConfig(t, m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.NonAsksDocument != "Won't do" {
-		t.Errorf("nonAsksDocument = %q, want %q", c.NonAsksDocument, "Won't do")
+	if c.NonAsksPath != "docs/wont-do.md" {
+		t.Errorf("nonAsksPath = %q, want %q", c.NonAsksPath, "docs/wont-do.md")
+	}
+}
+
+// An explicit "" is opting out, and it must survive — a defaulting rule
+// that cannot tell "absent" from "deliberately empty" gives the project
+// no way to turn the feature off.
+func TestLoadTreatsAnEmptyNonAsksPathAsOptingOut(t *testing.T) {
+	m := sampleAsMap(t)
+	m["nonAsksPath"] = ""
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NonAsksPath != "" {
+		t.Errorf("nonAsksPath = %q, want it left empty", c.NonAsksPath)
+	}
+}
+
+// The agent commands run with the working directory inside the pipeline
+// checkout, not the project (`go -C .pipeline run ...`). A path read
+// relative to cwd finds nothing on every real run, so paths resolve
+// against the config file's own directory.
+func TestInRootResolvesAgainstTheConfigsDirectory(t *testing.T) {
+	path := writeConfig(t, sampleAsMap(t))
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(filepath.Dir(path), "non-asks.md")
+	if got := c.InRoot("non-asks.md"); got != want {
+		t.Errorf("InRoot() = %q, want %q", got, want)
+	}
+	if got := c.InRoot("/etc/passwd"); got != "/etc/passwd" {
+		t.Errorf("InRoot(absolute) = %q, want it untouched", got)
 	}
 }

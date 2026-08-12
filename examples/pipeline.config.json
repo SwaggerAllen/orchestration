@@ -25,9 +25,10 @@
     "storybook/**",
     "screens/*.md",
     "systems/*.md",
+    "non-asks.md",
     "lib/sample_web/components/**"
   ],
-  "nonAsksDocument": "Confirmed non-asks",
+  "nonAsksPath": "non-asks.md",
   "qualityGates": [
     "mix format --check-formatted",
     "mix compile --warnings-as-errors",

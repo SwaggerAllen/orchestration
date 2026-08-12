@@ -71,7 +71,7 @@ func TestDesignPromptCarriesTheNonAsksDocument(t *testing.T) {
 	got := assembleDesignPrompt("ROLE", &agent.ClaimResult{
 		TicketKey: "DUM-1", Title: "t", Mode: "design", Branch: "b",
 		NonAsks: &agent.NonAsks{
-			Title: "Confirmed non-asks", Found: true,
+			Path: "non-asks.md", Found: true,
 			Body: "- No dark mode: two palettes, one designer.",
 		},
 	}, "/tmp/outcome.json")
@@ -89,8 +89,8 @@ func TestDesignPromptCarriesTheNonAsksDocument(t *testing.T) {
 // section, and they license very different confidence: one says the
 // author recorded no refusals, the other says nobody knows.
 func TestNonAsksSectionSaysWhichOfTheThreeHappened(t *testing.T) {
-	absent := nonAsksSection(&agent.NonAsks{Title: "Confirmed non-asks"}, "proposing")
-	failed := nonAsksSection(&agent.NonAsks{Title: "Confirmed non-asks", Err: "linear: 403"}, "proposing")
+	absent := nonAsksSection(&agent.NonAsks{Path: "non-asks.md"}, "proposing", false)
+	failed := nonAsksSection(&agent.NonAsks{Path: "non-asks.md", Err: "permission denied"}, "proposing", false)
 
 	if absent == "" || failed == "" {
 		t.Fatal("a section went missing; silence is exactly the ambiguity this removes")
@@ -98,7 +98,7 @@ func TestNonAsksSectionSaysWhichOfTheThreeHappened(t *testing.T) {
 	if !strings.Contains(absent, "has no") {
 		t.Errorf("absent section does not say the project has none:\n%s", absent)
 	}
-	if !strings.Contains(failed, "could not be read") || !strings.Contains(failed, "linear: 403") {
+	if !strings.Contains(failed, "could not be read") || !strings.Contains(failed, "permission denied") {
 		t.Errorf("failed section does not say the read failed, or hides why:\n%s", failed)
 	}
 	if absent == failed {
@@ -110,10 +110,10 @@ func TestNonAsksSectionSaysWhichOfTheThreeHappened(t *testing.T) {
 // heading: a project that has opted out shouldn't get a section telling
 // the model about a document nobody asked for.
 func TestNonAsksSectionIsEmptyWhenUnconfigured(t *testing.T) {
-	if got := nonAsksSection(nil, "proposing"); got != "" {
+	if got := nonAsksSection(nil, "proposing", false); got != "" {
 		t.Errorf("nonAsksSection(nil) = %q, want empty", got)
 	}
-	if got := nonAsksSection(&agent.NonAsks{}, "proposing"); got != "" {
+	if got := nonAsksSection(&agent.NonAsks{}, "proposing", false); got != "" {
 		t.Errorf("nonAsksSection(untitled) = %q, want empty", got)
 	}
 }

@@ -37,10 +37,14 @@ narrative/system docs get committed. Scratch HTML is never committed.
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
   in as many words in your summary — CI fails unannounced ones.
-- **Read the confirmed non-asks** below before proposing anything. The
-  harness fetches the document for you — you have no tracker access, so
-  what is in this prompt is all there is, and the section says outright
-  whether the project has one. Arguing against a recorded decision is
+- **Read the confirmed non-asks** below before proposing anything, and
+  **maintain the file** as you would a system doc. It sits in the repo
+  beside `screens/` and `systems/`, the section below inlines it, and
+  the path to write to is named there. When a pass settles that
+  something is deliberately not wanted — the author pushed back, or you
+  ruled an approach out for a reason the next pass would re-litigate —
+  add an entry with its reason, in the same commit as your artifacts.
+  Add and amend; never delete. Arguing against a recorded decision is
   allowed, silently contradicting it is not.
 - **Declare every screen and system you touched.** Your outcome's
   `screens` and `systems` lists become the mutex labels (DESIGN §6), and

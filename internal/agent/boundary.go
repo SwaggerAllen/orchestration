@@ -102,7 +102,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	// non-asks the same way design is (DESIGN §4) — a debt scan that
 	// files work the author already refused is worse than one that files
 	// nothing.
-	plan.NonAsks = claimNonAsks(ctx, p)
+	plan.NonAsks = claimNonAsks(p.Config)
 
 	dm := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
 		"id":   dispatchID,

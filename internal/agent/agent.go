@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -47,20 +48,23 @@ type ClaimResult struct {
 	// Comments is the ticket's comment history, reconcile mode only —
 	// comments carry the deltas the diff is measured against (DESIGN §2.3).
 	Comments []string `json:",omitempty"`
-	// NonAsks is the confirmed non-asks document (DESIGN §4), fetched by
-	// the harness because the agent has no tracker access of its own.
-	// Design and boundary only: they are the passes that propose.
+	// NonAsks is the confirmed non-asks document (DESIGN §4), read out of
+	// the project checkout at claim time. Design and boundary only: they
+	// are the passes that propose.
 	NonAsks *NonAsks `json:",omitempty"`
 }
 
-// NonAsks is the confirmed non-asks document as the harness found it.
-// Three outcomes, all distinct and none collapsible: the document exists
-// and here it is, the project records no non-asks, or the read failed.
-// The last two look identical in an empty section, and they are not the
-// same fact to an agent deciding whether it is about to contradict the
-// author — so the prompt states which one happened, in as many words.
+// NonAsks is the confirmed non-asks document as the claim found it.
+// Three outcomes, all distinct and none collapsible: the file exists and
+// here it is, the project records no non-asks, or the read failed. The
+// last two look identical in an empty section, and they are not the same
+// fact to an agent deciding whether it is about to contradict the author
+// — so the prompt states which one happened, in as many words.
 type NonAsks struct {
-	Title string
+	// Path is project-relative, and it is what the design agent writes
+	// back to: the doc is maintained alongside the screen and system
+	// docs, in the same artifacts commit, reviewed in the same sign-off.
+	Path  string
 	Found bool
 	Body  string
 	// Err is the read failure, if any. A string rather than an error so
@@ -69,18 +73,29 @@ type NonAsks struct {
 }
 
 // claimNonAsks reads the confirmed non-asks document for a pass that
-// proposes. A tracker that cannot answer is not a reason to fail the
-// claim — the pass still has work to do — so the failure travels to the
-// prompt instead of ending the run.
-func claimNonAsks(ctx context.Context, p *plane.Plane) *NonAsks {
-	n := &NonAsks{Title: p.Config.NonAsksDocument}
-	body, found, err := p.NonAsks(ctx)
-	if err != nil {
-		n.Err = err.Error()
-		fmt.Fprintf(os.Stderr, "warning: could not read the %q document: %v\n", n.Title, err)
+// proposes. It lives in the project repo, which the calling job has
+// already checked out — but cwd on a real run is the pipeline checkout,
+// not the project, so the path resolves against the config's directory
+// rather than against here.
+//
+// An unreadable file is not a reason to fail the claim — the pass still
+// has work to do — so the failure travels to the prompt instead of
+// ending the run.
+func claimNonAsks(cfg *config.Config) *NonAsks {
+	n := &NonAsks{Path: cfg.NonAsksPath}
+	if n.Path == "" {
 		return n
 	}
-	n.Found, n.Body = found, body
+	body, err := os.ReadFile(cfg.InRoot(n.Path))
+	switch {
+	case os.IsNotExist(err):
+		return n // the project records none, which is an answer
+	case err != nil:
+		n.Err = err.Error()
+		fmt.Fprintf(os.Stderr, "warning: could not read %s: %v\n", n.Path, err)
+		return n
+	}
+	n.Found, n.Body = true, string(body)
 	return n
 }
 
