@@ -257,16 +257,29 @@ later add them to the protocol set — today they are ignored.
 
 ## 7. Cloudflare — Worker metronome (after the loop works)
 
-One Worker serves every project: `PROJECTS` in `wrangler.toml` is a
-JSON array of `{repository, workflow, ref}`, one entry per project
+One Worker serves every project: `PROJECTS` in `worker/wrangler.toml`
+is a JSON array of `{repository, workflow, ref}`, one entry per project
 repo, and one cron fires them all.
 
-```sh
-cd worker
-# list every project repo in wrangler.toml's PROJECTS
-npx wrangler deploy
-npx wrangler secret put DISPATCH_TOKEN   # paste the step-2 token
-```
+**Deployed from this repo, not from a laptop.** Three secrets here
+(Settings → Secrets and variables → Actions), then Actions →
+**worker-deploy** → Run workflow:
+
+| Secret | What |
+| --- | --- |
+| `CLOUDFLARE_WORKERS_TOKEN` | A **second** Cloudflare token, from the *Edit Cloudflare Workers* template. Deliberately not the project repos' `CLOUDFLARE_API_TOKEN`, which edits Pages and nothing else — so no project repo can redeploy the control plane's metronome. |
+| `CLOUDFLARE_ACCOUNT_ID` | Same account id as everywhere else. |
+| `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The deploy uploads it as the Worker's secret, so it is never typed into a `wrangler secret put` prompt and cannot drift from the value here. |
+
+After that it is automatic: any push to `main` touching `worker/`
+redeploys. That is the point — the realistic failure is not a bad
+deploy but a forgotten one. Adding a project to `PROJECTS` without
+redeploying leaves that repo with no beat, and nothing reports it; the
+sweep simply never runs.
+
+From a laptop, `cd worker && npx wrangler deploy` does the same thing —
+but then `DISPATCH_TOKEN` has to be set separately with
+`npx wrangler secret put DISPATCH_TOKEN`.
 
 Cron fires every 5 minutes and calls `workflow_dispatch` on each sweep
 stub — punctual where GitHub's own `schedule:` jitters. A failing
@@ -305,8 +318,11 @@ step 5 already covered them.
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
-6. Metronome: add the repo to `PROJECTS`, add it to `DISPATCH_TOKEN`'s
-   repository list, redeploy the Worker.
+6. Metronome: add the repo to `PROJECTS` in `worker/wrangler.toml` and
+   to `DISPATCH_TOKEN`'s repository list. Merging the `PROJECTS` edit
+   redeploys the Worker on its own — but widening the token is a
+   separate act in GitHub's settings, and a beat that dispatches with
+   a token that cannot reach the repo just logs a 404 every tick.
 
 Note: labels are never per-project either, so `screen:`/`system:` labels from
 both projects appear in one list. That is cosmetic only — the queue and
@@ -317,6 +333,11 @@ project never collides with a `screen:home` in the other.
 
 | Where | Name |
 |---|---|
-| dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
-| pipeline repo Actions secrets | `LINEAR_API_KEY` |
-| Cloudflare Worker secret | `DISPATCH_TOKEN` |
+| dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
+| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN` |
+| Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
+
+The two Cloudflare tokens are separate on purpose: project repos can
+edit Pages and nothing else, and only this repo can deploy the
+metronome. `DISPATCH_TOKEN` sits here as a repo secret because the
+deploy pushes it into the Worker.

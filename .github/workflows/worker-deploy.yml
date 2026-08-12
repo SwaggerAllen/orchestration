@@ -1,0 +1,64 @@
+# Deploy the metronome Worker (PLAN M7, SETUP §7).
+#
+# On every push that touches worker/, plus by hand. Automatic because
+# the realistic failure is not a bad deploy, it is a forgotten one:
+# adding a project to PROJECTS and never redeploying leaves that repo
+# with no beat, and nothing reports it — the sweep simply never runs.
+# Deploying from the repo also keeps the deployed script identical to
+# the reviewed one, which pasting into the dashboard editor does not.
+#
+# The token here is NOT the project repos' Cloudflare token. Theirs
+# edits Pages and nothing else; this one edits Workers and lives only
+# here, so a project repo can never deploy the control plane's
+# metronome.
+name: worker-deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - worker/**
+      - .github/workflows/worker-deploy.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check the dispatch token is present
+        env:
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+        run: |
+          # wrangler would deploy happily with an empty secret and the
+          # metronome would then 401 against GitHub every five minutes,
+          # in logs nobody is reading.
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::error::DISPATCH_TOKEN is not set on this repository — the metronome would deploy and then fail every tick"
+            exit 1
+          fi
+
+      - name: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          # Uploaded on every deploy, so the secret is never set by hand
+          # and never drifts from the value in this repo's settings.
+          secrets: |
+            DISPATCH_TOKEN
+        env:
+          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+
+      - name: what was deployed
+        run: |
+          echo "PROJECTS the metronome will now fire each tick:"
+          sed -n '/^PROJECTS/,/'"'''"'$/p' worker/wrangler.toml
