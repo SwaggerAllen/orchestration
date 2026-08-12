@@ -20,7 +20,7 @@ func world(t *testing.T) (*tracker.Memory, *config.Config) {
 	cfg.Disposable = true
 	ctx := context.Background()
 	for _, ps := range protocol.AllStates {
-		if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, cfg.StateName(ps), protocol.Categories[ps]); err != nil {
+		if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: cfg.StateName(ps), Category: protocol.Categories[ps], Color: protocol.Colors[ps]}); err != nil {
 			t.Fatal(err)
 		}
 	}

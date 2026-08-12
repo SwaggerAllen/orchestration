@@ -87,6 +87,41 @@ var Categories = map[State]Category{
 	Canceled:       CategoryCanceled,
 }
 
+// Colors are the hex colors the pipeline's states are created with.
+//
+// Keyed by state rather than by category, because nine of these states
+// share the `started` category — a category-keyed palette paints most of
+// the board one colour and the board then tells you nothing.
+//
+// The families encode who has the ball (§3), which is the question a
+// glance at the board should answer:
+//
+//	grey    queued, nobody's ball
+//	violet, indigo, cyan   an agent is working
+//	orange  waiting on the author
+//	red     stuck, and the author's to unstick
+//	green   finished
+//
+// Nothing reads these back; they exist so the author can see the queue
+// without reading it.
+var Colors = map[State]string{
+	Backlog:        "#bec2c8", // grey — not scheduled
+	Todo:           "#e2e2e2", // light grey — queued
+	Designing:      "#9b8fd4", // violet — design agent
+	DesignReview:   "#f2994a", // orange — YOUR sign-off
+	ReadyForDev:    "#e2e2e2", // light grey — queued
+	InProgress:     "#5e6ad2", // indigo — dev agent
+	Checks:         "#4ea7fc", // blue — CI
+	Reconciling:    "#26b5ce", // cyan — reconcile agent
+	ReadyForRework: "#e2e2e2", // light grey — queued
+	Reworking:      "#5e6ad2", // indigo — dev agent again
+	Merged:         "#00b8a9", // teal — in flight to deploy
+	BoundaryReview: "#f2994a", // orange — YOUR pass
+	Blocked:        "#eb5757", // red — needs you
+	Done:           "#4cb782", // green
+	Canceled:       "#95a2b3", // grey
+}
+
 // Labels is the fixed label set every project team carries (DESIGN §8).
 // screen:<name> labels are created per screen as work discovers them, so
 // they are a prefix rather than a member of this set.

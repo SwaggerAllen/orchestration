@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
 // fakeLinear pins the wire shape: it asserts auth and content-type on every
@@ -79,18 +80,20 @@ func TestCreateStateSendsCategoryAndColor(t *testing.T) {
 		if input["teamId"] != "team_1" || input["name"] != "Reconciling" || input["type"] != "started" {
 			t.Errorf("input = %v", input)
 		}
-		if input["color"] == "" || input["color"] == nil {
-			t.Error("color missing: Linear requires one at creation")
+		// Per state, not per category: nine states share `started`, and
+		// one colour across all nine makes the board unreadable.
+		if got, want := input["color"], protocol.Colors[protocol.Reconciling]; got != want {
+			t.Errorf("color = %v, want %v (the state's own colour)", got, want)
 		}
 		return map[string]any{"workflowStateCreate": map[string]any{
 			"success":       true,
-			"workflowState": map[string]any{"id": "s9", "name": "Reconciling", "type": "started"},
+			"workflowState": map[string]any{"id": "s9", "name": "Reconciling", "type": "started", "color": protocol.Colors[protocol.Reconciling]},
 		}}, nil
 	})
 	defer srv.Close()
 
 	c := New("lin_api_test", WithEndpoint(srv.URL))
-	s, err := c.CreateState(context.Background(), "team_1", "Reconciling", protocol.CategoryStarted)
+	s, err := c.CreateState(context.Background(), "team_1", tracker.NewState{Name: "Reconciling", Category: protocol.CategoryStarted, Color: protocol.Colors[protocol.Reconciling]})
 	if err != nil {
 		t.Fatal(err)
 	}

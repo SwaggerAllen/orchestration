@@ -86,7 +86,7 @@ func TestBuildFailsOnUnmappedState(t *testing.T) {
 	ctx := context.Background()
 	tr, cfg, p := world(t)
 
-	rogue, err := tr.CreateState(ctx, cfg.Tracker.TeamID, "Triage Later", protocol.CategoryStarted)
+	rogue, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Triage Later", Category: protocol.CategoryStarted})
 	if err != nil {
 		t.Fatal(err)
 	}

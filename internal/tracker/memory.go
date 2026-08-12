@@ -60,9 +60,10 @@ func (m *Memory) ListStates(_ context.Context, teamID string) ([]StateInfo, erro
 	return out, nil
 }
 
-func (m *Memory) CreateState(_ context.Context, teamID, name string, category protocol.Category) (StateInfo, error) {
+func (m *Memory) CreateState(_ context.Context, teamID string, ns NewState) (StateInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	name, category := ns.Name, ns.Category
 	if name == "" {
 		return StateInfo{}, fmt.Errorf("memory tracker: state name is required")
 	}
@@ -77,7 +78,7 @@ func (m *Memory) CreateState(_ context.Context, teamID, name string, category pr
 			return StateInfo{}, fmt.Errorf("memory tracker: state %q already exists in team %s", name, teamID)
 		}
 	}
-	s := StateInfo{ID: m.id("state"), Name: name, Category: category}
+	s := StateInfo{ID: m.id("state"), Name: name, Category: category, Color: ns.Color}
 	m.states[teamID] = append(m.states[teamID], s)
 	return s, nil
 }

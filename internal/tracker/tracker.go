@@ -18,6 +18,20 @@ type StateInfo struct {
 	ID       string
 	Name     string
 	Category protocol.Category
+	// Color is cosmetic and nothing in the pipeline branches on it. It
+	// is carried so setup can create states the author can read at a
+	// glance, and so a test can assert it did.
+	Color string
+}
+
+// NewState is a state to create. Name and Category are separate from the
+// protocol state on purpose: setup also meets states that are not the
+// pipeline's, and the port has no business assuming otherwise.
+type NewState struct {
+	Name     string
+	Category protocol.Category
+	// Color may be empty, which leaves the choice to the adapter.
+	Color string
 }
 
 // Label is one team label.
@@ -93,7 +107,7 @@ type NewIssue struct {
 // wider than its scope.
 type Tracker interface {
 	ListStates(ctx context.Context, teamID string) ([]StateInfo, error)
-	CreateState(ctx context.Context, teamID, name string, category protocol.Category) (StateInfo, error)
+	CreateState(ctx context.Context, teamID string, s NewState) (StateInfo, error)
 	ListLabels(ctx context.Context, teamID string) ([]Label, error)
 	CreateLabel(ctx context.Context, teamID, name string) (Label, error)
 

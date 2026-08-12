@@ -110,10 +110,12 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	return nil
 }
 
-// stateColors are the hex colors given to created states, keyed by
-// category. Linear requires a color at creation; these approximate its own
-// defaults, and nothing in the pipeline reads them back.
-var stateColors = map[protocol.Category]string{
+// fallbackColors are used only when the caller names no color — a state
+// that is not one of the pipeline's, which setup meets but does not own.
+// The pipeline's own states are coloured per state (protocol.Colors),
+// because nine of them share the `started` category and one colour for
+// all nine makes the board unreadable.
+var fallbackColors = map[protocol.Category]string{
 	protocol.CategoryBacklog:   "#bec2c8",
 	protocol.CategoryUnstarted: "#e2e2e2",
 	protocol.CategoryStarted:   "#f2c94c",
@@ -128,16 +130,17 @@ const labelColor = "#8b5cf6"
 func (c *Client) ListStates(ctx context.Context, teamID string) ([]tracker.StateInfo, error) {
 	const q = `query States($teamId: ID!, $first: Int!) {
 	  workflowStates(filter: {team: {id: {eq: $teamId}}}, first: $first) {
-	    nodes { id name type }
+	    nodes { id name type color }
 	    pageInfo { hasNextPage }
 	  }
 	}`
 	var data struct {
 		WorkflowStates struct {
 			Nodes []struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-				Type string `json:"type"`
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Type  string `json:"type"`
+				Color string `json:"color"`
 			} `json:"nodes"`
 			PageInfo struct {
 				HasNextPage bool `json:"hasNextPage"`
@@ -152,29 +155,34 @@ func (c *Client) ListStates(ctx context.Context, teamID string) ([]tracker.State
 	}
 	out := make([]tracker.StateInfo, 0, len(data.WorkflowStates.Nodes))
 	for _, n := range data.WorkflowStates.Nodes {
-		out = append(out, tracker.StateInfo{ID: n.ID, Name: n.Name, Category: protocol.Category(n.Type)})
+		out = append(out, tracker.StateInfo{ID: n.ID, Name: n.Name, Category: protocol.Category(n.Type), Color: n.Color})
 	}
 	return out, nil
 }
 
-func (c *Client) CreateState(ctx context.Context, teamID, name string, category protocol.Category) (tracker.StateInfo, error) {
+func (c *Client) CreateState(ctx context.Context, teamID string, ns tracker.NewState) (tracker.StateInfo, error) {
 	const q = `mutation CreateState($input: WorkflowStateCreateInput!) {
 	  workflowStateCreate(input: $input) {
 	    success
-	    workflowState { id name type }
+	    workflowState { id name type color }
 	  }
 	}`
-	color, ok := stateColors[category]
-	if !ok {
-		return tracker.StateInfo{}, fmt.Errorf("linear: no color for category %q", category)
+	name, category := ns.Name, ns.Category
+	color := ns.Color
+	if color == "" {
+		var ok bool
+		if color, ok = fallbackColors[category]; !ok {
+			return tracker.StateInfo{}, fmt.Errorf("linear: no color for category %q and none given", category)
+		}
 	}
 	var data struct {
 		WorkflowStateCreate struct {
 			Success       bool `json:"success"`
 			WorkflowState struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-				Type string `json:"type"`
+				ID    string `json:"id"`
+				Name  string `json:"name"`
+				Type  string `json:"type"`
+				Color string `json:"color"`
 			} `json:"workflowState"`
 		} `json:"workflowStateCreate"`
 	}
@@ -191,7 +199,7 @@ func (c *Client) CreateState(ctx context.Context, teamID, name string, category 
 		return tracker.StateInfo{}, fmt.Errorf("linear: workflowStateCreate(%q) reported failure", name)
 	}
 	s := data.WorkflowStateCreate.WorkflowState
-	return tracker.StateInfo{ID: s.ID, Name: s.Name, Category: protocol.Category(s.Type)}, nil
+	return tracker.StateInfo{ID: s.ID, Name: s.Name, Category: protocol.Category(s.Type), Color: s.Color}, nil
 }
 
 // ListLabels returns every label the team can apply: its own, plus the

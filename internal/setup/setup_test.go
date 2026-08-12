@@ -58,7 +58,7 @@ func TestPlanCreatesOnlyWhatIsMissing(t *testing.T) {
 	cfg := config.Sample()
 
 	// Linear teams come with defaults; simulate a few pre-existing pieces.
-	if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, "Backlog", protocol.CategoryBacklog); err != nil {
+	if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Backlog", Category: protocol.CategoryBacklog}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tr.CreateLabel(ctx, cfg.Tracker.TeamID, "bug"); err != nil {
@@ -141,7 +141,7 @@ func TestPlanRefusesCategoryConflict(t *testing.T) {
 
 	// "Merged" exists but as a completed state — a live conflict the
 	// command must surface, not repair.
-	if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, "Merged", protocol.CategoryCompleted); err != nil {
+	if _, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Merged", Category: protocol.CategoryCompleted}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -167,5 +167,49 @@ func TestDryRunChangesNothing(t *testing.T) {
 	labels, _ := tr.ListLabels(ctx, cfg.Tracker.TeamID)
 	if len(states) != 0 || len(labels) != 0 {
 		t.Errorf("dry run mutated the tracker: %d states, %d labels", len(states), len(labels))
+	}
+}
+
+// The palette exists to answer one question at a glance: is anything
+// waiting on me? A missing entry means a state created with no colour,
+// and a palette keyed by category — which is what this replaced — paints
+// nine of the fifteen states identically and answers nothing.
+func TestEveryStateHasItsOwnMeaningfulColour(t *testing.T) {
+	for _, ps := range protocol.AllStates {
+		if protocol.Colors[ps] == "" {
+			t.Errorf("state %q has no colour", ps)
+		}
+	}
+	// The three the author acts on must not look like the agent's work.
+	agent := protocol.Colors[protocol.Designing]
+	for _, mine := range []protocol.State{protocol.DesignReview, protocol.BoundaryReview, protocol.Blocked} {
+		if protocol.Colors[mine] == agent {
+			t.Errorf("%q is coloured like agent work; the board should show it needs the author", mine)
+		}
+	}
+	if protocol.Colors[protocol.Blocked] == protocol.Colors[protocol.DesignReview] {
+		t.Error("Blocked should not look like an ordinary review — one is stuck, the other is queued for you")
+	}
+}
+
+// Setup must carry the colour through to the tracker, or the palette is
+// decoration in a file nobody reads.
+func TestApplyCreatesStatesWithTheirColour(t *testing.T) {
+	ctx := context.Background()
+	tr := tracker.NewMemory()
+	cfg := config.Sample()
+
+	if _, err := Run(ctx, tr, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	states, _ := tr.ListStates(ctx, cfg.Tracker.TeamID)
+	byName := map[string]tracker.StateInfo{}
+	for _, s := range states {
+		byName[s.Name] = s
+	}
+	for _, ps := range protocol.AllStates {
+		if got := byName[cfg.StateName(ps)].Color; got != protocol.Colors[ps] {
+			t.Errorf("%s created with colour %q, want %q", ps, got, protocol.Colors[ps])
+		}
 	}
 }
