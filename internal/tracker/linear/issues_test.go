@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
@@ -221,4 +222,88 @@ func TestCreateIssueSendsMilestoneAndLabels(t *testing.T) {
 	if i.Key != "PIPE-99" {
 		t.Errorf("issue = %+v", i)
 	}
+}
+
+// StateSince decides whether a ticket looks stuck, and getting it wrong
+// in the old direction escalated a healthy ticket to Blocked. Linear can
+// report a new state before its history entry is readable, so a ticket
+// moved twice in quick succession comes back as state=designing with the
+// newest history entry still ->todo. Taking only the newest entry then
+// found no match and fell back to the issue's creation time, which made
+// a just-moved ticket look hours old.
+func TestStateSinceSurvivesHistoryLaggingTheState(t *testing.T) {
+	created := time.Date(2026, 8, 12, 16, 50, 0, 0, time.UTC)
+	toDesigning := time.Date(2026, 8, 12, 19, 10, 0, 0, time.UTC)
+	toTodo := time.Date(2026, 8, 12, 19, 11, 0, 0, time.UTC)
+
+	issue := func(history []map[string]any) map[string]any {
+		return map[string]any{
+			"id": "i1", "identifier": "ORC-1", "title": "t", "description": "",
+			"priority": 0, "createdAt": created,
+			"state":            map[string]any{"id": "s_designing"},
+			"labels":           conn(nil),
+			"comments":         conn(nil),
+			"history":          conn(history),
+			"relations":        conn(nil),
+			"inverseRelations": conn(nil),
+		}
+	}
+
+	t.Run("history's newest entry is for a state the issue has already left", func(t *testing.T) {
+		// The ->designing entry is present but not newest. Before the fix
+		// this fell through to createdAt.
+		got := oneIssue(t, issue([]map[string]any{
+			{"createdAt": toDesigning, "fromState": map[string]any{"id": "s_todo"}, "toState": map[string]any{"id": "s_designing"}},
+			{"createdAt": toTodo, "fromState": map[string]any{"id": "s_blocked"}, "toState": map[string]any{"id": "s_todo"}},
+		}))
+		if !got.StateSince.Equal(toDesigning) {
+			t.Errorf("StateSince = %v, want the entry into the current state (%v)", got.StateSince, toDesigning)
+		}
+	})
+
+	t.Run("no entry for the current state at all", func(t *testing.T) {
+		// The move is not in our view yet. Creation time would claim the
+		// ticket had sat here for hours; the newest change we can see is
+		// a floor, and errs toward waiting rather than escalating.
+		got := oneIssue(t, issue([]map[string]any{
+			{"createdAt": toTodo, "fromState": map[string]any{"id": "s_blocked"}, "toState": map[string]any{"id": "s_todo"}},
+		}))
+		if !got.StateSince.Equal(toTodo) {
+			t.Errorf("StateSince = %v, want the newest visible change (%v), not the creation time", got.StateSince, toTodo)
+		}
+	})
+
+	t.Run("no state history at all keeps the creation time", func(t *testing.T) {
+		got := oneIssue(t, issue(nil))
+		if !got.StateSince.Equal(created) {
+			t.Errorf("StateSince = %v, want createdAt (%v)", got.StateSince, created)
+		}
+	})
+}
+
+func conn(nodes []map[string]any) map[string]any {
+	if nodes == nil {
+		nodes = []map[string]any{}
+	}
+	return map[string]any{"nodes": nodes, "pageInfo": map[string]any{"hasNextPage": false}}
+}
+
+func oneIssue(t *testing.T, node map[string]any) tracker.Issue {
+	t.Helper()
+	srv := fakeLinear(t, func(string, map[string]any) (any, []gqlError) {
+		return map[string]any{"issues": map[string]any{
+			"nodes":    []map[string]any{node},
+			"pageInfo": map[string]any{"hasNextPage": false},
+		}}, nil
+	})
+	defer srv.Close()
+	issues, err := New("lin_api_test", WithEndpoint(srv.URL)).
+		ListIssues(context.Background(), "team_1", "proj_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues", len(issues))
+	}
+	return issues[0]
 }

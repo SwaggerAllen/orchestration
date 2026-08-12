@@ -171,6 +171,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 					Body: cm.Body, ActorID: actorID(cm.User, cm.BotActor), CreatedAt: cm.CreatedAt,
 				})
 			}
+			var newestEntry, newestChange time.Time
 			for _, h := range n.History.Nodes {
 				if h.ToState == nil {
 					continue // not a state change
@@ -185,9 +186,28 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 					lc := sc
 					issue.LastChange = &lc
 				}
+				// Track entry into the *current* state separately. The
+				// newest change overall is not always it: Linear can
+				// report a new state before its history entry is
+				// readable, so a ticket moved twice in quick succession
+				// shows state=B with the newest entry still ->A.
+				if sc.ToStateID == issue.StateID && sc.At.After(newestEntry) {
+					newestEntry = sc.At
+				}
+				if sc.At.After(newestChange) {
+					newestChange = sc.At
+				}
 			}
-			if issue.LastChange != nil && issue.LastChange.ToStateID == issue.StateID {
-				issue.StateSince = issue.LastChange.At
+			switch {
+			case !newestEntry.IsZero():
+				issue.StateSince = newestEntry
+			case !newestChange.IsZero():
+				// The state moved after the history we can see. Its entry
+				// is at least as recent as the newest change we do see —
+				// far closer to the truth than the creation time, and in
+				// the safe direction: too-old here escalates a healthy
+				// ticket to Blocked, while too-recent only waits a beat.
+				issue.StateSince = newestChange
 			}
 			for _, r := range n.Relations.Nodes {
 				if r.Type == "blocks" {

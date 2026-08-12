@@ -32,11 +32,12 @@ type Action struct {
 	Op       Op
 	Name     string
 	Category protocol.Category // states only
+	Color    string            // states only; cosmetic (protocol.Colors)
 }
 
 func (a Action) String() string {
 	if a.Op == CreateState {
-		return fmt.Sprintf("%s %q (%s)", a.Op, a.Name, a.Category)
+		return fmt.Sprintf("%s %q (%s, %s)", a.Op, a.Name, a.Category, a.Color)
 	}
 	return fmt.Sprintf("%s %q", a.Op, a.Name)
 }
@@ -63,7 +64,7 @@ func Plan(ctx context.Context, t tracker.Tracker, cfg *config.Config) ([]Action,
 		want := protocol.Categories[ps]
 		have, ok := byName[name]
 		if !ok {
-			actions = append(actions, Action{Op: CreateState, Name: name, Category: want})
+			actions = append(actions, Action{Op: CreateState, Name: name, Category: want, Color: protocol.Colors[ps]})
 			continue
 		}
 		if have.Category != want {
@@ -107,7 +108,7 @@ func Apply(ctx context.Context, t tracker.Tracker, cfg *config.Config, actions [
 		var err error
 		switch a.Op {
 		case CreateState:
-			_, err = t.CreateState(ctx, teamID, a.Name, a.Category)
+			_, err = t.CreateState(ctx, teamID, tracker.NewState{Name: a.Name, Category: a.Category, Color: a.Color})
 		case CreateLabel:
 			_, err = t.CreateLabel(ctx, teamID, a.Name)
 		default:
