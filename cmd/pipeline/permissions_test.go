@@ -98,3 +98,54 @@ func rank(level string) int {
 	}
 	panic(fmt.Sprintf("unknown permission level %q", level))
 }
+
+// Every plane command builds a snapshot before doing anything, and the
+// snapshot reads a fixed set: the agent run list, the open PRs, each
+// PR head's CI verdict, and commit ancestry. A workflow that runs the
+// binary but names only the scopes its *writes* need gets an HTTP 403
+// partway through the claim — after the run looks healthy, and with the
+// ticket already dispatched.
+func TestWorkflowsRunningThePipelineCanReadTheSnapshot(t *testing.T) {
+	snapshotReads := map[string]string{
+		"actions":       "read", // ListAgentRuns
+		"pull-requests": "read", // ListOpenPRs
+		"checks":        "read", // ChecksFor
+		"contents":      "read", // IsAncestor, via compare
+	}
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubs, _ := filepath.Glob(filepath.Join(root, "examples", "stubs", "*.yml"))
+	files = append(files, stubs...)
+
+	checked := 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		runsPipeline := strings.Contains(body, "pipeline agent ") || strings.Contains(body, "pipeline sweep")
+		// The host is wired only when GITHUB_TOKEN is in the environment,
+		// and without a host the snapshot skips every call above. That is
+		// not a loophole — verify-live sweeps the tracker alone on
+		// purpose — so the read-set is required exactly of the workflows
+		// that will actually make the calls.
+		if !runsPipeline || !strings.Contains(body, "GITHUB_TOKEN:") {
+			continue
+		}
+		checked++
+		have := permissionsOf(body)
+		for scope, want := range snapshotReads {
+			if rank(have[scope]) < rank(want) {
+				t.Errorf("%s runs the pipeline but grants %s %q — the snapshot read will 403 mid-claim",
+					filepath.Base(f), scope, have[scope])
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("matched no pipeline-running workflows — the detection has drifted")
+	}
+}

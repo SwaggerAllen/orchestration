@@ -16,8 +16,10 @@ on:
 # callee asks for more, the run dies before a runner is allocated:
 # "startup_failure", with no job and no logs to read.
 permissions:
-  contents: write # merges the ticket's PR
+  contents: write # merges the PR, and reads ancestry
   pull-requests: write # reads and merges it
+  actions: read # the snapshot's agent run list
+  checks: read # CI verdict per PR head
 
 jobs:
   reconcile:
