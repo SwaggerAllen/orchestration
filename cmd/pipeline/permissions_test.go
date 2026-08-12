@@ -127,13 +127,21 @@ func TestWorkflowsRunningThePipelineCanReadTheSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := string(raw)
+		// Two ways a workflow ends up making these calls: it runs the
+		// binary itself (the sweep), or it uses one of this repo's
+		// composite actions that does. The second is the common case
+		// since the agents became actions, and missing it is how this
+		// test would quietly stop covering the stubs.
 		runsPipeline := strings.Contains(body, "pipeline agent ") || strings.Contains(body, "pipeline sweep")
-		// The host is wired only when GITHUB_TOKEN is in the environment,
-		// and without a host the snapshot skips every call above. That is
-		// not a loophole — verify-live sweeps the tracker alone on
-		// purpose — so the read-set is required exactly of the workflows
-		// that will actually make the calls.
-		if !runsPipeline || !strings.Contains(body, "GITHUB_TOKEN:") {
+		// The host is wired only when GITHUB_TOKEN reaches the binary,
+		// and without a host the snapshot skips every call above. Not a
+		// loophole — verify-live sweeps the tracker alone on purpose —
+		// so the read-set is required exactly of the callers that will
+		// actually make the calls.
+		if runsPipeline && !strings.Contains(body, "GITHUB_TOKEN:") {
+			continue
+		}
+		if !runsPipeline && !usesPipelineAction(t, root, body) {
 			continue
 		}
 		checked++
@@ -148,4 +156,24 @@ func TestWorkflowsRunningThePipelineCanReadTheSnapshot(t *testing.T) {
 	if checked == 0 {
 		t.Error("matched no pipeline-running workflows — the detection has drifted")
 	}
+}
+
+// usesPipelineAction reports whether a workflow calls one of this repo's
+// composite actions that runs the pipeline binary. Read from the action
+// itself rather than from a list here, so a new action is covered the
+// day it is written rather than the day someone remembers this test.
+func usesPipelineAction(t *testing.T, root, body string) bool {
+	t.Helper()
+	uses := regexp.MustCompile(`uses:\s*SwaggerAllen/orchestration/\.github/actions/([\w-]+)@`)
+	for _, m := range uses.FindAllStringSubmatch(body, -1) {
+		raw, err := os.ReadFile(filepath.Join(root, ".github", "actions", m[1], "action.yml"))
+		if err != nil {
+			t.Errorf("workflow uses action %q, which is not in this repo: %v", m[1], err)
+			continue
+		}
+		if strings.Contains(string(raw), "pipeline agent ") {
+			return true
+		}
+	}
+	return false
 }

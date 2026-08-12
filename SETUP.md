@@ -71,12 +71,18 @@ the metronome stops dispatching with only Worker logs to say so. Pick a
 year and put the date somewhere you'll see it.
 
 **The in-workflow `GITHUB_TOKEN` is separate and already handled.**
-Every reusable workflow declares its own `permissions:` block — dev,
-design and reconcile take `contents: write` + `pull-requests: write`
-(commit, open, un-draft and merge PRs), boundary takes `contents:
-write` (the retro note), the sweep stub takes `actions: write`
-(dispatching agents), record-deploy takes `deployments: write`. Nothing
-to configure; it is declared per-workflow in the YAML.
+Every stub declares its own `permissions:` block, and each one names
+both what it writes and the snapshot's read-set — `actions`,
+`pull-requests`, `checks`, `contents` — because every pipeline command
+reads the world before changing it. Nothing to configure; it is
+declared per-workflow in the YAML, and a test in the pipeline repo
+asserts each stub grants what its action needs.
+
+**One permission is not grantable from a workflow file at all.**
+Opening a pull request also needs Settings → Actions → General →
+**Allow GitHub Actions to create and approve pull requests**. Without
+it the design agent runs to completion and then fails at its draft PR,
+with `pull-requests: write` correctly in place.
 
 One consequence worth knowing: `GITHUB_TOKEN` may never modify files
 under `.github/workflows/`, whatever permissions it holds. A ticket
@@ -111,7 +117,7 @@ planning and dispatch (DESIGN §13); delete or set `false` to resume.
   project repos' `CLOUDFLARE_API_TOKEN` — see step 4.
 - Settings → Actions → General → **Access** →
   ✅ *Accessible from repositories owned by SwaggerAllen* — required for
-  the dummy's `uses:` calls against this repo's reusable workflows
+  the dummy's `uses:` calls against this repo's composite actions
   while it is private
 
 ## 4. Cloudflare — Pages (previews)
@@ -415,6 +421,15 @@ step 5 already covered them.
    `pipeline.config.json` with that project's `projectId` (same
    `teamId`), its own `designOwnedPaths`, gates, deploy provider
    (`digitalocean` for a real DO app) and preview project.
+
+   **Then replace the toolchain block in each agent stub.** The stubs
+   ship an Elixir setup because the dummy is Elixir; a Node project
+   swaps in `actions/setup-node`, a Python one `actions/setup-python`.
+   This is the one part of a stub that is genuinely per-project: the
+   agents run the project's own quality gates, so they need the
+   project's own language present. An agent without it does not fail
+   loudly — it finishes, having skipped the gates, and CI catches the
+   problem one state later.
 3. Bootstrap the docs: run `prompts/bootstrap.md` with Claude Code,
    attended, to split the existing architecture doc into
    `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), and

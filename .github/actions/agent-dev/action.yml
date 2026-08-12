@@ -1,0 +1,128 @@
+# Dev-agent run (PLAN M3). The harness brackets the model: claim does
+# the pickup assertions and the state-transition-as-claim, the model
+# works, finish posts the hand-back and flips the PR out of draft.
+# Every protocol obligation is Go code under test; the model only does
+# the work in between.
+#
+# A composite action rather than a reusable workflow, because the calling
+# job must be able to run its own steps first: a project's toolchain is
+# project-specific and no reusable workflow can accept `uses:` steps as
+# an input. The caller checks out the project, sets up its language, then
+# calls this — see examples/stubs/pipeline-agent-dev.yml.
+#
+# The caller's checkout needs fetch-depth: 0; the branch work below
+# fetches and switches refs.
+name: pipeline dev agent
+description: Claim a ticket, implement it, hand back
+
+inputs:
+  ticket:
+    description: Ticket key, e.g. PIPE-12
+    required: true
+  linear_api_key:
+    description: Linear API key
+    required: true
+  github_token:
+    description: Token for the project repo; pass ${{ github.token }}
+    required: true
+  pipeline_repo_token:
+    description: >-
+      Contents:read PAT for the pipeline repo while it is private.
+      Falls back to github_token, which suffices once it is public.
+    required: false
+    default: ""
+  pipeline_ref:
+    description: Pipeline repo ref to run the harness from
+    required: false
+    default: main
+  anthropic_api_key:
+    description: Model key for the agent run
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: checkout pipeline
+      uses: actions/checkout@v4
+      with:
+        repository: SwaggerAllen/orchestration
+        ref: ${{ inputs.pipeline_ref }}
+        path: .pipeline
+        token: ${{ inputs.pipeline_repo_token || github.token }}
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: .pipeline/go.mod
+
+    - name: claim
+      id: claim
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent claim \
+          --kind dev \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --ticket "${{ inputs.ticket }}" \
+          --dispatch-id "${{ github.run_id }}" \
+          --dispatch-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/dev.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --handback-path "$RUNNER_TEMP/pipeline/handback.md"
+
+    - name: check out the ticket branch
+      shell: bash
+      run: |
+        git config user.name "pipeline-dev-agent"
+        git config user.email "pipeline@invalid"
+        BRANCH="${{ steps.claim.outputs.branch }}"
+        git fetch origin
+        git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
+        # The pipeline checkout must not ride along in the project branch.
+        echo ".pipeline/" >> .git/info/exclude
+
+    - name: run the dev agent
+      shell: bash
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+      run: |
+        npx --yes @anthropic-ai/claude-code@latest \
+          -p "$(cat "$RUNNER_TEMP/pipeline/prompt.md")" \
+          --dangerously-skip-permissions
+
+    - name: push
+      shell: bash
+      run: |
+        # The prompt tells the model to commit; anything it left behind
+        # still belongs to the run rather than the runner's disk.
+        if ! git diff --quiet || ! git diff --cached --quiet; then
+          git add -A ':!.pipeline'
+          git commit -m "wip: uncommitted changes at end of agent run"
+        fi
+        git push -u origin "${{ steps.claim.outputs.branch }}"
+
+    - name: finish
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent finish \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json" \
+          --handback "$RUNNER_TEMP/pipeline/handback.md"
+
+    - name: abort on failure
+      if: failure() && steps.claim.outcome == 'success'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent abort \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json" \
+          --reason failed \
+          --message "Dev agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

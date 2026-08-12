@@ -37,24 +37,24 @@ func TestComposeBaseWithoutContextIsUnchanged(t *testing.T) {
 	}
 }
 
-// The orientation only reaches a run if the workflow passes it, and
-// that flag is exactly what a fifth agent workflow would be written
-// without. The file the flag names must exist for the same reason:
-// claim fails hard on an unreadable path, mid-run.
-func TestEveryAgentWorkflowInjectsRepoContext(t *testing.T) {
+// The orientation only reaches a run if the action passes it, and that
+// flag is exactly what a fifth agent would be written without. The file
+// the flag names must exist for the same reason: claim fails hard on an
+// unreadable path, mid-run.
+func TestEveryAgentActionInjectsRepoContext(t *testing.T) {
 	const flag = "--repo-context"
 	root := filepath.Join("..", "..")
-	workflows, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "agent-*.yml"))
-	if err != nil || len(workflows) == 0 {
-		t.Fatalf("found no agent workflows to check: %v", err)
+	actions, err := filepath.Glob(filepath.Join(root, ".github", "actions", "agent-*", "action.yml"))
+	if err != nil || len(actions) == 0 {
+		t.Fatalf("found no agent actions to check: %v", err)
 	}
-	for _, w := range workflows {
+	for _, w := range actions {
 		body, err := os.ReadFile(w)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(body), flag) {
-			t.Errorf("%s runs an agent without %s — that run would not know what repo it is in", filepath.Base(w), flag)
+			t.Errorf("%s runs an agent without %s — that run would not know what repo it is in", filepath.Dir(w), flag)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "prompts", "repo-context.md")); err != nil {
