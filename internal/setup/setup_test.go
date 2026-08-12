@@ -171,24 +171,35 @@ func TestDryRunChangesNothing(t *testing.T) {
 }
 
 // The palette exists to answer one question at a glance: is anything
-// waiting on me? A missing entry means a state created with no colour,
-// and a palette keyed by category — which is what this replaced — paints
-// nine of the fifteen states identically and answers nothing.
-func TestEveryStateHasItsOwnMeaningfulColour(t *testing.T) {
+// waiting on me? Colours are shared on purpose — In Progress and
+// Reworking are both the dev agent, Done and Canceled are both terminal
+// — so the property worth pinning is not uniqueness. It is that nothing
+// the author must act on looks like anything they need not.
+func TestNothingNeedingTheAuthorLooksLikeAnythingElse(t *testing.T) {
 	for _, ps := range protocol.AllStates {
 		if protocol.Colors[ps] == "" {
 			t.Errorf("state %q has no colour", ps)
 		}
 	}
-	// The three the author acts on must not look like the agent's work.
-	agent := protocol.Colors[protocol.Designing]
-	for _, mine := range []protocol.State{protocol.DesignReview, protocol.BoundaryReview, protocol.Blocked} {
-		if protocol.Colors[mine] == agent {
-			t.Errorf("%q is coloured like agent work; the board should show it needs the author", mine)
+
+	mine := map[protocol.State]bool{
+		protocol.DesignReview:   true,
+		protocol.BoundaryReview: true,
+		protocol.Blocked:        true,
+	}
+	for ps := range mine {
+		for _, other := range protocol.AllStates {
+			if mine[other] {
+				continue
+			}
+			if protocol.Colors[ps] == protocol.Colors[other] {
+				t.Errorf("%q (needs the author) is the same colour as %q — the board stops answering the only question it is for", ps, other)
+			}
 		}
 	}
+	// And within the author's own set, stuck must not read as queued.
 	if protocol.Colors[protocol.Blocked] == protocol.Colors[protocol.DesignReview] {
-		t.Error("Blocked should not look like an ordinary review — one is stuck, the other is queued for you")
+		t.Error("Blocked should not look like an ordinary review — one is stuck, the other is waiting its turn")
 	}
 }
 

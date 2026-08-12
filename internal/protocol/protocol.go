@@ -93,14 +93,18 @@ var Categories = map[State]Category{
 // share the `started` category — a category-keyed palette paints most of
 // the board one colour and the board then tells you nothing.
 //
-// The families encode who has the ball (§3), which is the question a
-// glance at the board should answer:
+// The families answer "what is happening to this, and is any of it
+// mine?" at a glance:
 //
-//	grey    queued, nobody's ball
-//	violet, indigo, cyan   an agent is working
+//	grey    nothing is happening — queued at one end, finished at the
+//	        other. Done is grey with the other terminal states on
+//	        purpose: finished work is out of mind, so green is spent on
+//	        work in flight instead.
+//	violet, cyan   a design or reconcile agent is working
+//	green   the dev agent is producing something
+//	yellow  machinery is verifying or shipping it — CI, then deploy
 //	orange  waiting on the author
 //	red     stuck, and the author's to unstick
-//	green   finished
 //
 // Nothing reads these back; they exist so the author can see the queue
 // without reading it.
@@ -110,16 +114,16 @@ var Colors = map[State]string{
 	Designing:      "#9b8fd4", // violet — design agent
 	DesignReview:   "#f2994a", // orange — YOUR sign-off
 	ReadyForDev:    "#e2e2e2", // light grey — queued
-	InProgress:     "#5e6ad2", // indigo — dev agent
-	Checks:         "#4ea7fc", // blue — CI
+	InProgress:     "#4cb782", // green — dev agent building
+	Checks:         "#f2c94c", // yellow — CI verifying
 	Reconciling:    "#26b5ce", // cyan — reconcile agent
 	ReadyForRework: "#e2e2e2", // light grey — queued
-	Reworking:      "#5e6ad2", // indigo — dev agent again
-	Merged:         "#00b8a9", // teal — in flight to deploy
+	Reworking:      "#4cb782", // green — dev agent again
+	Merged:         "#f2c94c", // yellow — waiting on the deploy
 	BoundaryReview: "#f2994a", // orange — YOUR pass
 	Blocked:        "#eb5757", // red — needs you
-	Done:           "#4cb782", // green
-	Canceled:       "#95a2b3", // grey
+	Done:           "#95a2b3", // dark grey — terminal, out of mind
+	Canceled:       "#95a2b3", // dark grey — terminal
 }
 
 // Labels is the fixed label set every project team carries (DESIGN §8).
