@@ -21,7 +21,10 @@ inputs:
     description: Linear API key
     required: true
   github_token:
-    description: Token for the project repo; pass ${{ github.token }}
+    # Described in prose, not as an expression: an action's metadata is
+    # templated and the github context does not exist there, so an
+    # expression here fails the whole file to load before any step runs.
+    description: Token for the project repo. Pass the caller's github.token.
     required: true
   pipeline_repo_token:
     description: >-

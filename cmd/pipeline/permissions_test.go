@@ -177,3 +177,31 @@ func usesPipelineAction(t *testing.T, root, body string) bool {
 	}
 	return false
 }
+
+// An action's metadata — everything above `runs:` — is templated, but
+// only a few contexts exist there; `github` is not among them. An
+// expression in a name, description or default fails the entire file to
+// load, before a single step runs, and the error names a line and
+// column in a file the caller never opened.
+func TestActionMetadataHasNoExpressions(t *testing.T) {
+	actions, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "*", "action.yml"))
+	if err != nil || len(actions) == 0 {
+		t.Fatalf("found no actions to check: %v", err)
+	}
+	for _, a := range actions {
+		raw, err := os.ReadFile(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(line, "runs:") {
+				break // steps may use expressions freely
+			}
+			code, _, _ := strings.Cut(line, "#") // comments are not templated
+			if strings.Contains(code, "${{") {
+				t.Errorf("%s:%d has an expression in its metadata: %s",
+					filepath.Base(filepath.Dir(a)), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
