@@ -96,6 +96,7 @@ func cmdAgentClaim(args []string) error {
 	dispatchURL := fs.String("dispatch-url", "", "workflow run URL")
 	outDir := fs.String("out", "", "directory for claim.json, scope.md and prompt.md")
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file to assemble prompt.md from")
+	repoContext := fs.String("repo-context", "", "shared repo orientation to inject after the role prompt (prompts/repo-context.md)")
 	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
 	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
 	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
@@ -152,16 +153,24 @@ func cmdAgentClaim(args []string) error {
 		if err != nil {
 			return err
 		}
+		var ctx []byte
+		if *repoContext != "" {
+			ctx, err = os.ReadFile(*repoContext)
+			if err != nil {
+				return err
+			}
+		}
+		base := composeBase(string(tpl), string(ctx))
 		var prompt string
 		switch *kind {
 		case "reconcile":
-			prompt = assembleReconcilePrompt(string(tpl), res, *verdictPath)
+			prompt = assembleReconcilePrompt(base, res, *verdictPath)
 		case "design":
-			prompt = assembleDesignPrompt(string(tpl), res, *outcomePath)
+			prompt = assembleDesignPrompt(base, res, *outcomePath)
 		case "boundary":
-			prompt = assembleBoundaryPrompt(string(tpl), plan, *outcomePath)
+			prompt = assembleBoundaryPrompt(base, plan, *outcomePath)
 		default:
-			prompt = assemblePrompt(string(tpl), res, *handbackPath)
+			prompt = assemblePrompt(base, res, *handbackPath)
 		}
 		if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 			return err
@@ -181,6 +190,23 @@ func cmdAgentClaim(args []string) error {
 	}
 	fmt.Printf("claimed %s (%s): branch %s, PR #%d\n", res.TicketKey, res.Mode, res.Branch, res.PRNumber)
 	return nil
+}
+
+// composeBase joins the role prompt with the shared repo orientation.
+//
+// The orientation rides in from the pipeline checkout rather than from a
+// copy in each project repo, so editing prompts/repo-context.md reaches
+// every project on its next run with nothing to sync — the same reason
+// the architecture docs refuse a second copy (DESIGN §1).
+//
+// Order is the point: role prompt first, orientation second, ticket
+// last. The orientation says where you are, not what to do, and a run
+// that reads them in the wrong order weighs them in the wrong order.
+func composeBase(rolePrompt, repoContext string) string {
+	if repoContext == "" {
+		return rolePrompt
+	}
+	return rolePrompt + "\n\n---\n\n" + repoContext
 }
 
 // assemblePrompt joins the base prompt with the ticket context. The

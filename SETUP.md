@@ -295,9 +295,10 @@ step 5 already covered them.
 3. Bootstrap the docs: run `prompts/bootstrap.md` with Claude Code,
    attended, to split the existing architecture doc into
    `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), and
-   a root `CLAUDE.md` from `examples/stubs/CLAUDE.template.md` — the
-   orientation every later agent run on that repo is dropped into.
-   Without it an agent knows its role but not its surroundings.
+   a root `CLAUDE.md` holding that repo's own specifics — toolchain,
+   gates, domain. The protocol half needs no copying: agent runs are
+   given `prompts/repo-context.md` from the pipeline checkout at claim
+   time, so editing it here reaches every project on its next run.
 4. Secrets on that repo: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
    grants read on the pipeline repo), Cloudflare pair,
