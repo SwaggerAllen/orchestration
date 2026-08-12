@@ -21,6 +21,7 @@ type Memory struct {
 
 	issues     []*Issue
 	milestones map[string][]Milestone // projectID -> milestones
+	documents  map[string][]Document  // projectID -> documents
 	issueTeam  map[string]string      // issueID -> teamID
 	issueProj  map[string]string      // issueID -> projectID
 	archived   map[string]bool        // issueID -> archived
@@ -39,6 +40,7 @@ func NewMemory() *Memory {
 		states:     map[string][]StateInfo{},
 		labels:     map[string][]Label{},
 		milestones: map[string][]Milestone{},
+		documents:  map[string][]Document{},
 		issueTeam:  map[string]string{},
 		issueProj:  map[string]string{},
 		archived:   map[string]bool{},
@@ -170,6 +172,24 @@ func (m *Memory) ListMilestones(_ context.Context, projectID string) ([]Mileston
 	defer m.mu.Unlock()
 	out := make([]Milestone, len(m.milestones[projectID]))
 	copy(out, m.milestones[projectID])
+	return out, nil
+}
+
+// AddDocument is a test helper: documents are author-written, so the
+// port has no write for them.
+func (m *Memory) AddDocument(projectID, title, content string) Document {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d := Document{ID: m.id("doc"), Title: title, Content: content}
+	m.documents[projectID] = append(m.documents[projectID], d)
+	return d
+}
+
+func (m *Memory) ListProjectDocuments(_ context.Context, projectID string) ([]Document, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Document, len(m.documents[projectID]))
+	copy(out, m.documents[projectID])
 	return out, nil
 }
 

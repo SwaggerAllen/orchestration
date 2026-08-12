@@ -48,6 +48,17 @@ type Milestone struct {
 	SortOrder float64
 }
 
+// Document is one project document. Content is the body as the tracker
+// stores it — markdown, in Linear's case. The pipeline reads documents
+// and never writes them: they are the author's voice, and an agent
+// editing the record of what the author refused would be the pipeline
+// arguing with itself.
+type Document struct {
+	ID      string
+	Title   string
+	Content string
+}
+
 // IssueComment is one comment, with the actor's tracker identity — the
 // snapshot builder resolves identities to roles via config, so raw ids
 // stop at the adapter boundary.
@@ -113,6 +124,11 @@ type Tracker interface {
 
 	ListIssues(ctx context.Context, teamID, projectID string) ([]Issue, error)
 	ListMilestones(ctx context.Context, projectID string) ([]Milestone, error)
+	// ListProjectDocuments backs the confirmed non-asks lookup (DESIGN §4).
+	// The agents have no tracker credentials of their own — the harness
+	// owns every tracker read and write (DESIGN §9) — so anything a
+	// prompt must contain has to be fetched here first.
+	ListProjectDocuments(ctx context.Context, projectID string) ([]Document, error)
 	// CreateMilestone exists for the scenario harness, which must stand a
 	// rehearsal project up from nothing. The pipeline itself never creates
 	// one: assigning a milestone commits the work, and that is the

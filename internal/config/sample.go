@@ -40,6 +40,7 @@ func Sample() *Config {
 			"systems/*.md",
 			"lib/sample_web/components/**",
 		},
+		NonAsksDocument: DefaultNonAsksDocument,
 		QualityGates: []string{
 			"mix format --check-formatted",
 			"mix compile --warnings-as-errors",

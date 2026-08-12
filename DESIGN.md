@@ -286,8 +286,13 @@ go to Triage; an unasked-for ticket costs a read and a decision nobody wanted, a
 nobody trusts is worse than one with a hole in it.
 
 **A confirmed non-asks document** on the project records what the design deliberately doesn't
-want, each with its reason. Read it before proposing. Proposing one of those isn't forbidden,
-but do it knowing you are arguing against a recorded decision, and say so in the issue.
+want, each with its reason. The harness reads it at claim time and puts it in the prompt of
+every pass that proposes — design and boundary — because agents hold no tracker credentials
+(§9) and a document they can't be handed is a document they can't read. The prompt says which
+of three things happened: here it is, the project records none, or the read failed. The last
+two look identical in an empty section and license very different confidence. Proposing a
+recorded non-ask isn't forbidden, but do it knowing you are arguing against a recorded
+decision, and say so in the issue.
 
 ---
 

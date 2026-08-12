@@ -43,6 +43,15 @@ type Config struct {
 	// DesignOwnedPaths are the glob patterns of DESIGN §5's ownership table.
 	DesignOwnedPaths []string `json:"designOwnedPaths"`
 
+	// NonAsksDocument is the title of the project's confirmed non-asks
+	// document (DESIGN §4) — what the design deliberately does not want,
+	// each with its reason. The harness reads it and puts it in the
+	// design and boundary prompts, because the agents have no tracker
+	// access of their own and are not getting any: the harness owns
+	// every tracker read and write (DESIGN §9). Defaults to
+	// DefaultNonAsksDocument.
+	NonAsksDocument string `json:"nonAsksDocument"`
+
 	// QualityGates are the blocking CI commands (DESIGN §9), run in order.
 	QualityGates []string `json:"qualityGates"`
 
@@ -84,6 +93,13 @@ var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile"
 func sharedAuthorControlplane(a, b string) bool {
 	return (a == "author" && b == "controlplane") || (a == "controlplane" && b == "author")
 }
+
+// DefaultNonAsksDocument is the title looked for when a config names
+// none. A project with no such document is not an error — the prompt
+// says so in as many words, because "nothing is recorded" and "I could
+// not see what was recorded" are different facts to an agent deciding
+// whether it is contradicting the author.
+const DefaultNonAsksDocument = "Confirmed non-asks"
 
 // Tracker identifies the Linear team and project. Both are required on
 // every pickup: the state is the queue, the project is the scope (DESIGN §2).
@@ -156,6 +172,9 @@ func Load(path string) (*Config, error) {
 	var c Config
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if c.NonAsksDocument == "" {
+		c.NonAsksDocument = DefaultNonAsksDocument
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)

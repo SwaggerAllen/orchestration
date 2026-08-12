@@ -8,6 +8,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -46,6 +47,41 @@ type ClaimResult struct {
 	// Comments is the ticket's comment history, reconcile mode only —
 	// comments carry the deltas the diff is measured against (DESIGN §2.3).
 	Comments []string `json:",omitempty"`
+	// NonAsks is the confirmed non-asks document (DESIGN §4), fetched by
+	// the harness because the agent has no tracker access of its own.
+	// Design and boundary only: they are the passes that propose.
+	NonAsks *NonAsks `json:",omitempty"`
+}
+
+// NonAsks is the confirmed non-asks document as the harness found it.
+// Three outcomes, all distinct and none collapsible: the document exists
+// and here it is, the project records no non-asks, or the read failed.
+// The last two look identical in an empty section, and they are not the
+// same fact to an agent deciding whether it is about to contradict the
+// author — so the prompt states which one happened, in as many words.
+type NonAsks struct {
+	Title string
+	Found bool
+	Body  string
+	// Err is the read failure, if any. A string rather than an error so
+	// the claim file round-trips through JSON.
+	Err string `json:",omitempty"`
+}
+
+// claimNonAsks reads the confirmed non-asks document for a pass that
+// proposes. A tracker that cannot answer is not a reason to fail the
+// claim — the pass still has work to do — so the failure travels to the
+// prompt instead of ending the run.
+func claimNonAsks(ctx context.Context, p *plane.Plane) *NonAsks {
+	n := &NonAsks{Title: p.Config.NonAsksDocument}
+	body, found, err := p.NonAsks(ctx)
+	if err != nil {
+		n.Err = err.Error()
+		fmt.Fprintf(os.Stderr, "warning: could not read the %q document: %v\n", n.Title, err)
+		return n
+	}
+	n.Found, n.Body = found, body
+	return n
 }
 
 // Claim performs pickup: assertions, state-transition-as-claim, and the

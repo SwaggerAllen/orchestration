@@ -264,6 +264,46 @@ func (c *Client) ListMilestones(ctx context.Context, projectID string) ([]tracke
 	return out, nil
 }
 
+// ListProjectDocuments fetches the project's documents with their
+// bodies. Documents are few and short — this is the confirmed non-asks
+// and its neighbours, not a wiki — so the content comes down with the
+// list rather than in a second round trip per title.
+func (c *Client) ListProjectDocuments(ctx context.Context, projectID string) ([]tracker.Document, error) {
+	const q = `query ProjectDocuments($projectId: String!, $first: Int!) {
+	  project(id: $projectId) {
+	    documents(first: $first) {
+	      nodes { id title content }
+	      pageInfo { hasNextPage }
+	    }
+	  }
+	}`
+	var data struct {
+		Project struct {
+			Documents struct {
+				Nodes []struct {
+					ID      string `json:"id"`
+					Title   string `json:"title"`
+					Content string `json:"content"`
+				} `json:"nodes"`
+				PageInfo struct {
+					HasNextPage bool `json:"hasNextPage"`
+				} `json:"pageInfo"`
+			} `json:"documents"`
+		} `json:"project"`
+	}
+	if err := c.do(ctx, q, map[string]any{"projectId": projectID, "first": pageSize}, &data); err != nil {
+		return nil, err
+	}
+	if data.Project.Documents.PageInfo.HasNextPage {
+		return nil, fmt.Errorf("linear: project %s has over %d documents, which the pipeline does not expect", projectID, pageSize)
+	}
+	out := make([]tracker.Document, 0, len(data.Project.Documents.Nodes))
+	for _, n := range data.Project.Documents.Nodes {
+		out = append(out, tracker.Document{ID: n.ID, Title: n.Title, Content: n.Content})
+	}
+	return out, nil
+}
+
 // CreateMilestone is used only by the scenario harness standing a
 // rehearsal project up from nothing (PLAN §2). The pipeline proper never
 // calls it: assigning work to a milestone commits it, and that is the

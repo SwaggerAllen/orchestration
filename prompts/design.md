@@ -37,9 +37,11 @@ narrative/system docs get committed. Scratch HTML is never committed.
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
   in as many words in your summary — CI fails unannounced ones.
-- **Read the confirmed non-asks document** on the project before
-  proposing anything. Arguing against a recorded decision is allowed,
-  silently contradicting it is not.
+- **Read the confirmed non-asks** below before proposing anything. The
+  harness fetches the document for you — you have no tracker access, so
+  what is in this prompt is all there is, and the section says outright
+  whether the project has one. Arguing against a recorded decision is
+  allowed, silently contradicting it is not.
 - **Declare every screen and system you touched.** Your outcome's
   `screens` and `systems` lists become the mutex labels (DESIGN §6), and
   CI audits the eventual diff against the docs' file maps — a touch you

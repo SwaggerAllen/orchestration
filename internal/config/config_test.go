@@ -179,3 +179,32 @@ func TestDurationRejectsBareNumbers(t *testing.T) {
 		t.Errorf("want duration-string error, got %v", err)
 	}
 }
+
+// Every project written before this field existed omits it, and the
+// pipeline still has to look for the document — a config that predates
+// a feature should get the feature's default, not opt out of it.
+func TestLoadDefaultsTheNonAsksDocumentTitle(t *testing.T) {
+	m := sampleAsMap(t)
+	delete(m, "nonAsksDocument")
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NonAsksDocument != DefaultNonAsksDocument {
+		t.Errorf("nonAsksDocument = %q, want the default %q", c.NonAsksDocument, DefaultNonAsksDocument)
+	}
+}
+
+// An explicit title wins — a project whose document is called something
+// else has said so on purpose.
+func TestLoadKeepsAnExplicitNonAsksDocumentTitle(t *testing.T) {
+	m := sampleAsMap(t)
+	m["nonAsksDocument"] = "Won't do"
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.NonAsksDocument != "Won't do" {
+		t.Errorf("nonAsksDocument = %q, want %q", c.NonAsksDocument, "Won't do")
+	}
+}

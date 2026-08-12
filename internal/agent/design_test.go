@@ -158,3 +158,43 @@ func TestLoadDesignOutcomeValidation(t *testing.T) {
 		t.Errorf("artifacts without summary should load, got %v %v", o, err)
 	}
 }
+
+// The claim is the only place the non-asks can enter a design run: the
+// model has no tracker credentials and is not getting any (DESIGN §9).
+// If this stops happening the run doesn't fail — it quietly proposes
+// against decisions the author already made.
+func TestDesignClaimCarriesTheNonAsksDocument(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	tr.AddDocument(cfg.Tracker.ProjectID, cfg.NonAsksDocument, "- No dark mode: two palettes, one designer.")
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_54", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.NonAsks == nil {
+		t.Fatal("claim carries no non-asks at all")
+	}
+	if !res.NonAsks.Found || !strings.Contains(res.NonAsks.Body, "No dark mode") {
+		t.Errorf("non-asks = %+v, want the project's document", res.NonAsks)
+	}
+}
+
+// A project without the document still claims, and the result says so
+// explicitly rather than arriving nil — the prompt distinguishes "none
+// recorded" from "could not read", and it can only do that if the claim
+// reports which one it was.
+func TestDesignClaimReportsAnAbsentNonAsksDocument(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_55", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.NonAsks == nil || res.NonAsks.Found || res.NonAsks.Title != cfg.NonAsksDocument {
+		t.Errorf("non-asks = %+v, want a not-found record naming %q", res.NonAsks, cfg.NonAsksDocument)
+	}
+}

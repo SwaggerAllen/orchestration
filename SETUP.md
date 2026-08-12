@@ -19,6 +19,17 @@ scratch environment (ORC team → `orchestration-dummy`).
   it. Nothing to configure — the pipeline queries the project's
   milestones and reads their order from the tracker; the boundary agent
   gets that list verbatim, so name them however reads best.
+- ☐ **The confirmed non-asks document** (optional, DESIGN §4). In the
+  project → Documents, create one titled **Confirmed non-asks** and
+  list what the design deliberately doesn't want, each with its reason.
+  The harness reads it at claim time and puts it in the design and
+  boundary prompts — the agents have no Linear access of their own and
+  aren't getting any, so a document they can't be handed is one they
+  can't read. No document is fine: the prompt then says the project
+  records none, which is a different thing from silence. Rename the
+  title via `nonAsksDocument` in the project config if you prefer
+  another; two documents sharing the title is an error rather than a
+  coin flip.
 - States and labels are **not** created by hand — step 5 provisions
   them idempotently.
 
