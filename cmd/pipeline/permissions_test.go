@@ -387,3 +387,65 @@ func TestNoActionFetchesARemoteTrackingName(t *testing.T) {
 		}
 	}
 }
+
+// Every agent's model pass goes through run-agent-model, which is the
+// only place that decides which credential pays for it. An action that
+// shells out to the CLI directly would silently opt that agent out of
+// the subscription-first ordering — and out of the failover, so an
+// exhausted allowance would abort the ticket rather than cost a retry.
+func TestEveryAgentActionRunsTheModelThroughTheSharedRunner(t *testing.T) {
+	actions, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*", "action.yml"))
+	if err != nil || len(actions) == 0 {
+		t.Fatalf("found no agent actions to check: %v", err)
+	}
+	for _, a := range actions {
+		raw, err := os.ReadFile(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		name := filepath.Base(filepath.Dir(a))
+		if !strings.Contains(body, "actions/run-agent-model@") {
+			t.Errorf("%s never calls run-agent-model — its model pass has its own credential policy", name)
+		}
+		if strings.Contains(body, "@anthropic-ai/claude-code") {
+			t.Errorf("%s invokes the CLI itself; the credential choice belongs in run-agent-model", name)
+		}
+	}
+}
+
+// Claude Code resolves credentials in a fixed order and ANTHROPIC_API_KEY
+// beats the subscription token, so a step holding both in its own env
+// runs every "subscription" pass on the API key and reports success.
+// The failover would be untestable and the bill would be the only tell.
+// run-agent-model therefore carries the secrets under neutral names and
+// exports the real one per attempt, on the child process.
+func TestTheModelRunnerNeverShadowsTheSubscriptionCredential(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	for _, line := range strings.Split(body, "\n") {
+		// A step-level `env:` entry is `NAME: <value>` at indent; the
+		// per-attempt exports are `env -u X NAME="$VAR"` inside run:.
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "env -u ") {
+			continue
+		}
+		for _, read := range []string{"ANTHROPIC_API_KEY:", "CLAUDE_CODE_OAUTH_TOKEN:"} {
+			if strings.HasPrefix(trimmed, read) {
+				t.Errorf("run-agent-model puts %s in a step env: %s", strings.TrimSuffix(read, ":"), trimmed)
+			}
+		}
+	}
+	// And each attempt must unset the other, not merely set its own.
+	for _, want := range []string{
+		`env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN=`,
+		`env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY=`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run-agent-model has no attempt of the form %q — the unset is what stops the shadowing", want)
+		}
+	}
+}

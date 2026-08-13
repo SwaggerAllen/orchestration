@@ -32,7 +32,8 @@ workflows and carry thin stubs (DESIGN §5).
 ## Setting up a project
 
 See `examples/stubs/README.md` for the checklist: config file, stubs,
-secrets (`LINEAR_API_KEY`, `ANTHROPIC_API_KEY`), a `ci` workflow, branch
+secrets (`LINEAR_API_KEY`, and a model credential — `CLAUDE_CODE_OAUTH_TOKEN`
+or `ANTHROPIC_API_KEY`), a `ci` workflow, branch
 protection, and the metronome. `pipeline setup` provisions the Linear
 team; `pipeline ids` prints the ids the config needs; `configs/README.md`
 covers the scratch/dry-run environment.
@@ -42,7 +43,8 @@ covers the scratch/dry-run environment.
 | Secret | Lives in | Grants |
 |---|---|---|
 | `LINEAR_API_KEY` | project + pipeline repo Actions secrets | tracker read/write |
-| `ANTHROPIC_API_KEY` | project repo Actions secrets | agent model runs |
+| `CLAUDE_CODE_OAUTH_TOKEN` | project repo Actions secrets | agent model runs, billed to a Claude subscription; tried first |
+| `ANTHROPIC_API_KEY` | project repo Actions secrets | agent model runs, billed to API credits; the failover |
 | `CLOUDFLARE_API_TOKEN` | project repo Actions secrets | Pages preview publish |
 | `CLOUDFLARE_ACCOUNT_ID` | project repo Actions secrets | Pages preview publish (not sensitive, kept with its token) |
 | `DIGITALOCEAN_TOKEN` | project repo Actions secrets (DO-deployed projects) | deploy detection |

@@ -1,0 +1,108 @@
+# The one place an agent's model pass is actually invoked.
+#
+# Two credentials can pay for that pass and they are not interchangeable:
+#
+#   - a Claude Code OAuth token (`claude setup-token`), which bills a
+#     Claude subscription and is understood by the Claude Code CLI only —
+#     the Messages API rejects it;
+#   - a Console API key, which bills API credits.
+#
+# The subscription is tried first and the key is the failover, so the
+# subscription's allowance is spent before anything is billed, and an
+# exhausted allowance costs a retry rather than the ticket. Factored out
+# of the four agent actions rather than copied into each: the ordering
+# below is a policy, and four copies of a policy is three chances to
+# change it in one place.
+name: pipeline agent model run
+description: Run an agent's model pass on the subscription credential, failing over to the API key
+
+inputs:
+  prompt_path:
+    description: File holding the assembled prompt
+    required: true
+  claude_code_oauth_token:
+    description: >-
+      Long-lived Claude Code token from `claude setup-token`, billed
+      against a Claude subscription. Tried first when set.
+    required: false
+    default: ""
+  anthropic_api_key:
+    description: >-
+      Console API key, billed against API credits. Used directly when no
+      subscription token is set, and as the failover when a subscription
+      run does not complete.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: run the agent
+      shell: bash
+      # Deliberately NOT named ANTHROPIC_API_KEY and
+      # CLAUDE_CODE_OAUTH_TOKEN here. Claude Code resolves credentials in
+      # order and ANTHROPIC_API_KEY wins, so a step that exported both
+      # would run every "subscription" pass on the API key and report
+      # success — the failover would be untestable and the bill would be
+      # the tell. Each attempt below names exactly one, on the child
+      # process, and unsets the other.
+      env:
+        SUBSCRIPTION_TOKEN: ${{ inputs.claude_code_oauth_token }}
+        API_KEY: ${{ inputs.anthropic_api_key }}
+        PROMPT_PATH: ${{ inputs.prompt_path }}
+      run: |
+        set -uo pipefail
+
+        if [ -z "$SUBSCRIPTION_TOKEN" ] && [ -z "$API_KEY" ]; then
+          echo "::error::no model credential — set claude_code_oauth_token (from \`claude setup-token\`) or anthropic_api_key" >&2
+          exit 1
+        fi
+        PROMPT="$(cat "$PROMPT_PATH")"
+
+        attempt() {
+          case "$1" in
+          subscription)
+            env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN="$SUBSCRIPTION_TOKEN" \
+              npx --yes @anthropic-ai/claude-code@latest \
+                -p "$PROMPT" \
+                --dangerously-skip-permissions
+            ;;
+          api)
+            env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY="$API_KEY" \
+              npx --yes @anthropic-ai/claude-code@latest \
+                -p "$PROMPT" \
+                --dangerously-skip-permissions
+            ;;
+          esac
+        }
+
+        if [ -z "$SUBSCRIPTION_TOKEN" ]; then
+          echo "model credential: API key (no subscription token configured)"
+          attempt api
+          exit $?
+        fi
+
+        echo "model credential: subscription"
+        status=0
+        attempt subscription || status=$?
+        if [ "$status" -eq 0 ]; then
+          exit 0
+        fi
+
+        if [ -z "$API_KEY" ]; then
+          echo "::error::the subscription run exited $status and no anthropic_api_key is set to fail over to" >&2
+          exit "$status"
+        fi
+
+        # Any non-zero exit fails over, not just an exhausted allowance:
+        # the alternative is matching strings in someone else's error
+        # output and deciding the ticket's fate on the match. One retry,
+        # so a genuinely broken prompt costs two runs rather than looping.
+        #
+        # The retry is not a clean slate — whatever the first attempt
+        # wrote to the working tree is still there, and the second reads
+        # it as prior state. That is the same tree a resumed pass would
+        # see, and discarding it would throw away real work when the
+        # exhaustion lands near the end of a pass.
+        echo "::warning::the subscription run exited $status — retrying once on the API key"
+        attempt api

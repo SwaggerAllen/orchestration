@@ -136,7 +136,13 @@ the files that define what the agents may do.
 Actions → Secrets):
 
 - `LINEAR_API_KEY`
-- `ANTHROPIC_API_KEY`
+- `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY` — at least one.
+  The agents run the Claude Code CLI, which takes either a subscription
+  token from `claude setup-token` or a Console API key. Set both and
+  every pass runs on the subscription, falling over to the key when a
+  run does not complete — the allowance is spent before anything is
+  billed. Set one and that one is used. Set neither and the model step
+  fails with a message saying so, before the model is called.
 - `PIPELINE_REPO_TOKEN`
 - `AGENT_GITHUB_TOKEN`
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (from step 4)
@@ -563,7 +569,8 @@ step 5 already covered them.
    toolchain, gates, domain. The protocol half needs no copying: agent runs are
    given `prompts/repo-context.md` from the pipeline checkout at claim
    time, so editing it here reaches every project on its next run.
-4. Secrets on that repo: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,
+4. Secrets on that repo: `LINEAR_API_KEY`, the model credential
+   (`CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`),
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
    grants read on the pipeline repo), `AGENT_GITHUB_TOKEN` (add this
    repo to its access list), Cloudflare pair,
@@ -598,7 +605,7 @@ project never collides with a `screen:home` in the other.
 
 | Where | Name |
 |---|---|
-| dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
+| dummy repo Actions secrets | `LINEAR_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
 | pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
 
