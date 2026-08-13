@@ -186,6 +186,42 @@ export async function verifyGitHubSignature(
 }
 
 /**
+ * Names why a signature failed, without printing anything that would
+ * help forge one. The digest prefixes are derived from the secret but
+ * do not reveal it, and the lengths are what actually catch the common
+ * causes: a secret that arrived with a newline on it, or a body that is
+ * not the bytes GitHub signed.
+ *
+ * Worth the surface area. "Bad signature" is true of every one of these
+ * and useless for all of them — it sends you to re-read two secrets you
+ * cannot see, which is exactly the dead end this cost us.
+ */
+export async function signatureDiagnosis(
+  rawBody: string,
+  header: string | null,
+  secret: string,
+): Promise<string> {
+  if (!secret) return "the Worker has no WEBHOOK_SECRET set";
+  if (!header) return "the request carried no x-hub-signature-256 header (the webhook has no secret set)";
+  const [scheme, digest] = header.trim().split("=");
+  if (scheme !== "sha256") return `signature scheme ${scheme}, want sha256`;
+  if (!digest) return "signature header has no digest after sha256=";
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const trimmed = secret.trim();
+  const whitespace =
+    trimmed === secret ? "" : `; the Worker's secret has leading or trailing whitespace (${secret.length} chars, ${trimmed.length} trimmed) — a settings box that keeps a stray newline is the usual cause`;
+  return `digest mismatch: got ${digest.slice(0, 10)}…, computed ${hex.slice(0, 10)}… over ${rawBody.length} chars with a ${secret.length}-char secret${whitespace}`;
+}
+
+/**
  * Chooses which projects a GitHub webhook wakes, and — more to the
  * point — which it must not.
  *
@@ -286,9 +322,21 @@ export default {
     // nothing is dispatched until that sender's own signature passes.
     const ghEvent = request.headers.get("x-github-event");
     if (ghEvent) {
-      if (!(await verifyGitHubSignature(raw, request.headers.get("x-hub-signature-256"), env.WEBHOOK_SECRET))) {
-        console.error("metronome: rejected a GitHub webhook with a bad or missing signature");
-        return new Response("bad signature\n", { status: 401 });
+      const ghSig = request.headers.get("x-hub-signature-256");
+      if (!(await verifyGitHubSignature(raw, ghSig, env.WEBHOOK_SECRET))) {
+        // Say which failure it was, in the log and in the body. "Bad
+        // signature" alone sends you to compare two secrets you cannot
+        // see, and the answer is usually neither of them: a body that
+        // was not the bytes GitHub signed, or a secret that picked up
+        // whitespace on the way into a settings box.
+        console.error(
+          `metronome: rejected a GitHub webhook — ${await signatureDiagnosis(raw, ghSig, env.WEBHOOK_SECRET)}` +
+            ` (event=${ghEvent} bodyBytes=${new TextEncoder().encode(raw).length}` +
+            ` contentType=${request.headers.get("content-type")})`,
+        );
+        return new Response(`bad signature: ${await signatureDiagnosis(raw, ghSig, env.WEBHOOK_SECRET)}\n`, {
+          status: 401,
+        });
       }
       let payload: any;
       try {

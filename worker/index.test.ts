@@ -20,6 +20,7 @@ import {
   verifyGitHubSignature,
   verifySignature,
   githubTargets,
+  signatureDiagnosis,
 } from "./index.ts";
 
 const SECRET = "linear-signing-secret";
@@ -258,4 +259,35 @@ test("repository matching survives the two sides disagreeing on case", () => {
     githubTargets(projects, "workflow_run", payload).map((p) => p.repository),
     ["swaggerallen/orchestration-dummy"],
   );
+});
+
+// "Bad signature" is true of every failure below and useless for all of
+// them: it sends you to compare two secrets you cannot see. Each cause
+// gets named instead, which is the difference between a diagnosis and
+// an afternoon.
+test("a failed signature says which failure it was", async (t) => {
+  const body = JSON.stringify(runEvent("acme/app", "ci"));
+
+  await t.test("the Worker has no secret", async () => {
+    assert.match(await signatureDiagnosis(body, await ghSign(body), ""), /no WEBHOOK_SECRET/);
+  });
+  await t.test("the sender set no secret, so signed nothing", async () => {
+    assert.match(await signatureDiagnosis(body, null, GH_SECRET), /no x-hub-signature-256/);
+  });
+  await t.test("wrong scheme", async () => {
+    assert.match(await signatureDiagnosis(body, "sha1=abc", GH_SECRET), /scheme sha1/);
+  });
+  await t.test("a real mismatch reports both digests and neither secret", async () => {
+    const got = await signatureDiagnosis(body, await ghSign(body, "the-other-secret"), GH_SECRET);
+    assert.match(got, /digest mismatch/);
+    assert.ok(!got.includes(GH_SECRET), "the diagnosis must never print the secret");
+    assert.ok(!got.includes("the-other-secret"), "nor the one that was tried");
+  });
+  // The cause I would bet on: a secret pasted into a settings box with a
+  // newline riding along. It compares equal to the eye and to nothing
+  // else, and GitHub's own Secret field cannot hold one to match it.
+  await t.test("whitespace on the secret is called out by name", async () => {
+    const got = await signatureDiagnosis(body, await ghSign(body, GH_SECRET), GH_SECRET + "\n");
+    assert.match(got, /leading or trailing whitespace/);
+  });
 });
