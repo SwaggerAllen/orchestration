@@ -258,6 +258,14 @@ production deployment is never touched — a rule the cleanup enforces explicitl
 relying on the branch filter, since deleting production would be the one unrecoverable
 mistake in an otherwise janitorial job.
 
+**The preview URL goes on the ticket, from the publisher.** A ticket arriving in `Design
+review` is a ticket asking to be looked at, so it says where — the design pass posts a `preview`
+marker carrying the URL wrangler reported, in the same breath as the transition. Reported rather
+than derived: Cloudflare's branch-alias slugging is its own rule, truncation and hashing
+included, so building the URL from a branch name and a project name would be guessing at
+someone else's algorithm and handing the author the guess as a link. A project with no preview
+wired posts nothing, which is silence rather than a dead link.
+
 **The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
 machinery of ours — per-branch previews are the platform's own feature, and glue code we don't
 write is glue code that can't silently break. The alternatives all cost more than they look:

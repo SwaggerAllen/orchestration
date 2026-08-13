@@ -67,6 +67,13 @@ const (
 	// ticket — the once-per-milestone real-network check the author's
 	// pass reads (DESIGN §10). Fields: result=pass|fail, run=<url>.
 	LiveSuite Kind = "live-suite"
+	// Preview records where this design pass's storybook export was
+	// published. Design review is the author reading the rendered
+	// states (DESIGN §4), and until this existed the ticket asking for
+	// that review never said where to find them — the URL had to be
+	// reconstructed from a branch name and a Pages project. Field:
+	// url=<the published preview>.
+	Preview Kind = "preview"
 )
 
 // Marker is one parsed or to-be-formatted marker line.

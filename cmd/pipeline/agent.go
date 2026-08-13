@@ -458,6 +458,7 @@ func cmdAgentFinish(args []string) error {
 	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
 	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
 	outcome := fs.String("outcome", "", "outcome.json written by the model (design)")
+	previewURL := fs.String("preview-url", "", "where this pass's storybook export was published (design)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -496,7 +497,7 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL); err != nil {
 			return err
 		}
 		fmt.Printf("design %s: %s\n", res.TicketKey, o.Outcome)

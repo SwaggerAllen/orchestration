@@ -51,6 +51,10 @@ narrative/system docs get committed. Scratch HTML is never committed.
   add an entry with its reason, in the same commit as your artifacts.
   Add and amend; never delete. Arguing against a recorded decision is
   allowed, silently contradicting it is not.
+- **The preview link is posted for you.** The harness publishes this
+  branch's storybook export and puts the URL on the ticket when it asks
+  for review, so your summary does not need to say where to look — say
+  what to look *at*, and why it is drawn that way.
 - **Declare every screen and system you touched.** Your outcome's
   `screens` and `systems` lists become the mutex labels (DESIGN §6), and
   CI audits the eventual diff against the docs' file maps — a touch you
