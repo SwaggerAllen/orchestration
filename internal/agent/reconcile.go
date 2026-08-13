@@ -143,8 +143,28 @@ func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *Clai
 		// sweep arriving the instant it lands already has something to
 		// read. Ordering matters more than it looks: the ticket entering
 		// Merged is what starts the deploy timeout (DESIGN §12).
+		//
+		// Never fatal, though. Past the merge there is no way back: the
+		// PR is closed, so ClaimReconcile refuses ("no open PR carries
+		// this ticket's key"), and the writer matrix reverts any hand
+		// move to Merged or Done. An error returned here would abort the
+		// run to Blocked and strand the ticket there permanently, with
+		// its work already on main — which is exactly what happened to
+		// ORC-1 on the first real merge this pipeline made.
+		//
+		// So it degrades instead: the ticket still reaches Merged, the
+		// failure is on the ticket in words, and the deploy timeout
+		// surfaces it as an ordinary Blocked later if nothing deploys.
+		// A slow honest failure beats a fast unrecoverable one.
 		if err := recordStandInDeploy(ctx, p, h, sha); err != nil {
-			return err
+			note := fmt.Sprintf("Merged, but recording the stand-in deployment failed: %v\n\n"+
+				"The merge is done and this ticket is moving to Merged regardless — reconciliation cannot re-run "+
+				"once the PR is closed, so failing here would strand it. If nothing records a deployment, the "+
+				"post-deploy check has nothing to read and the deploy timeout will Block this ticket (DESIGN §12).", err)
+			if cErr := p.CommentTicket(ctx, res.TicketID, note); cErr != nil {
+				return fmt.Errorf("%w (and the note about it failed too: %v)", err, cErr)
+			}
+			fmt.Fprintln(os.Stderr, "warning: "+note)
 		}
 		return p.TransitionTicket(ctx, res.TicketID, protocol.Merged)
 	}
