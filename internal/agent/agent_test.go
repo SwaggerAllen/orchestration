@@ -301,3 +301,52 @@ func findIssue(t *testing.T, tr *tracker.Memory, cfg *config.Config, id string) 
 	t.Fatalf("no issue %s", id)
 	return tracker.Issue{}
 }
+
+// A rework claim reads the failing build so the agent doesn't have to.
+// It cannot: it holds no GitHub credential by design (DESIGN §9), and
+// the failure comment that is its whole scope links a run rather than
+// quoting one.
+func TestReworkClaimReadsTheFailingBuild(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "Original argument", protocol.ReadyForRework)
+	if err := tr.CommentOnIssue(ctx, i.ID, "CI failed.\n\nFailing: gates."); err != nil {
+		t.Fatal(err)
+	}
+	branch := strings.ToLower(i.Key) + "-cap-screen"
+	h.PRs = append(h.PRs, host.PR{Number: 4, Branch: branch, HeadSHA: "deadbee"})
+	h.CheckState["deadbee"] = host.Checks{Status: host.ChecksRed, RunURL: "https://gh/run/9", FailedJobs: []string{"gates"}}
+	h.JobLogs["deadbee"] = []host.JobLog{{Name: "gates", Log: "** (CompileError) undefined function farwell/1"}}
+
+	res, err := Claim(ctx, p, i.Key, "run_9", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CIFailure == nil {
+		t.Fatal("no CI failure on the claim — the agent gets a link it cannot open and nothing else")
+	}
+	if len(res.CIFailure.Jobs) != 1 || !strings.Contains(res.CIFailure.Jobs[0].Log, "farwell/1") {
+		t.Errorf("the failing job's output did not travel: %+v", res.CIFailure.Jobs)
+	}
+}
+
+// A dev claim on a fresh ticket has no failing build behind it, and must
+// not go looking for one — green checks on the design commit are not a
+// failure, and a section about a build that didn't fail is noise in the
+// prompt at exactly the moment the agent is deciding what to build.
+func TestFreshClaimHasNoFailingBuild(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "Original argument", protocol.ReadyForDev)
+	branch := strings.ToLower(i.Key) + "-cap-screen"
+	h.PRs = append(h.PRs, host.PR{Number: 4, Branch: branch, HeadSHA: "deadbee"})
+	h.CheckState["deadbee"] = host.Checks{Status: host.ChecksRed, RunURL: "https://gh/run/9"}
+
+	res, err := Claim(ctx, p, i.Key, "run_9", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CIFailure != nil {
+		t.Errorf("a fresh dev claim carries a CI failure: %+v", res.CIFailure)
+	}
+}

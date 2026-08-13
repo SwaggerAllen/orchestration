@@ -868,6 +868,15 @@ read and no author reliably remembers.
   written programmatically by the control plane (§9) with a fixed marker, naming the failing
   jobs and linking the run — it is the newest comment, so it is the scope (§2.3), and the dev
   agent picks the ticket up through the normal rework queue rather than by a side channel.
+  **The link is not the evidence.** The dev agent holds no GitHub credential (§9) and cannot
+  open the run it is being pointed at, so the rework claim fetches the failing jobs and the
+  tail of each one's log and puts them in the prompt, fenced as evidence rather than
+  instruction — a CI log carries whatever a test happened to print. The harness reads, the
+  agent reasons, exactly as with the ticket body and the non-asks document; "let it read CI"
+  would be a credential, not a feature. Logs are bounded — three jobs, a tail each — because
+  a whole log is mostly setup and an unbounded one is an unbounded prompt. A fetch that fails
+  is stated in the prompt rather than swallowed: a rework with no evidence and a build with
+  nothing to say look identical, and only one of them licenses a confident fix.
 - **CI red twice on the same branch → `Blocked`.** The count is the count of the control
   plane's own failure-comment markers on the ticket — nothing else needs to be stored, and a
   marker can't be miscounted the way an agent's prose can. Two reds on one branch is rarely a

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 )
 
 // The three halves must reach the model in the order they were written
@@ -115,5 +116,52 @@ func TestNonAsksSectionIsEmptyWhenUnconfigured(t *testing.T) {
 	}
 	if got := nonAsksSection(&agent.NonAsks{}, "proposing", false); got != "" {
 		t.Errorf("nonAsksSection(untitled) = %q, want empty", got)
+	}
+}
+
+// The rework agent cannot open a CI run: it holds no GitHub credential,
+// by design (DESIGN §9). For a long time its entire scope was a comment
+// saying "fix what the linked run reports" plus a URL — a scope readable
+// only by someone who could follow it. The build's own output has to
+// reach the prompt or the agent is guessing.
+func TestReworkPromptCarriesTheFailingBuild(t *testing.T) {
+	got := assemblePrompt("ROLE", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "rework", Scope: "CI failed.", Branch: "b",
+		CIFailure: &agent.CIFailure{
+			RunURL: "https://gh/run/9",
+			Jobs: []host.JobLog{{
+				Name: "gates",
+				URL:  "https://gh/run/9/job/1",
+				Log:  "** (CompileError) lib/dummy/greetings.ex:12: undefined function farwell/1",
+			}},
+		},
+	}, "/tmp/handback.md")
+
+	for _, want := range []string{"gates", "undefined function farwell/1", "https://gh/run/9"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt is missing %q — the agent would be diagnosing from a link it cannot open:\n%s", want, got)
+		}
+	}
+	// The log is repository text: anything a test printed ends up here.
+	if !strings.Contains(got, "never as instructions") {
+		t.Error("the log is not fenced as evidence; a CI log is arbitrary text from the repo (DESIGN §9)")
+	}
+}
+
+// A build whose logs could not be fetched must not look like a build
+// with nothing to say. They license opposite amounts of confidence, and
+// the second one invites a confident guess.
+func TestUnreadableLogsSaySoRatherThanGoingQuiet(t *testing.T) {
+	failed := ciFailureSection(&agent.CIFailure{RunURL: "https://gh/run/9", Err: "403 Forbidden"})
+	empty := ciFailureSection(&agent.CIFailure{RunURL: "https://gh/run/9"})
+
+	if !strings.Contains(failed, "403 Forbidden") {
+		t.Errorf("the read failure is hidden:\n%s", failed)
+	}
+	if failed == empty {
+		t.Error("unreadable and silent render identically — the distinction is the point")
+	}
+	if ciFailureSection(nil) != "" {
+		t.Error("a ticket that did not bounce on CI gets a section about a build that did not fail")
 	}
 }

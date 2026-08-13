@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -310,9 +311,18 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 				"Second CI failure on this branch. Two reds is rarely a flake — the author decides whether this is scope, design, or infrastructure (DESIGN §12).",
 				"CI red twice on the same branch")
 		}
+		prose := "CI failed. This comment is the newest, so it is the scope (DESIGN §2.3)."
+		if len(t.CI.FailedJobs) > 0 {
+			// Named, not just linked. The agent picking this up cannot
+			// open the run — it holds no GitHub credential (DESIGN §9) —
+			// so a bare link is a scope it can read and not act on. The
+			// failing logs reach it separately, at claim.
+			prose += "\n\nFailing: " + strings.Join(t.CI.FailedJobs, ", ") + "."
+			m.Fields["jobs"] = strings.Join(t.CI.FailedJobs, ",")
+		}
 		return []Action{{
 			Kind: ActTransition, TicketID: t.ID, To: protocol.ReadyForRework, Marker: m,
-			Prose:  "CI failed. This comment is the newest, so it is the scope (DESIGN §2.3): fix what the linked run reports.",
+			Prose:  prose,
 			Reason: "CI red, first failure on this branch",
 		}}
 	}

@@ -58,6 +58,51 @@ type ClaimResult struct {
 	// the project checkout at claim time. Design and boundary only: they
 	// are the passes that propose.
 	NonAsks *NonAsks `json:",omitempty"`
+	// CIFailure is the failing build this rework is answering, read by
+	// the harness at claim. Rework mode only, and absent when the branch
+	// bounced for a reason other than red checks.
+	CIFailure *CIFailure `json:",omitempty"`
+}
+
+// CIFailure is the evidence behind a rework. The failure comment is the
+// scope (DESIGN §2.3), and until this existed that comment said "fix
+// what the linked run reports" and gave a URL the agent could not open:
+// it holds no GitHub credential, by design (DESIGN §9), and reading CI
+// is not a reason to give it one. The harness reads and hands over the
+// text, the same division as the ticket body and the non-asks document.
+type CIFailure struct {
+	RunURL string
+	Jobs   []host.JobLog
+	// Err is the read failure, if any. Stated rather than swallowed: a
+	// rework that silently got no logs looks identical to a build with
+	// nothing to say, and the agent would guess in exactly the case
+	// where guessing is worst.
+	Err string `json:",omitempty"`
+}
+
+// claimCIFailure fetches the failing jobs behind a rework. Failure to
+// read them is recorded, never fatal — a rework run that could not fetch
+// logs is still a rework run, and the alternative is refusing to work on
+// a ticket because the evidence server was briefly unavailable.
+func claimCIFailure(ctx context.Context, h host.Host, headSHA string) *CIFailure {
+	if h == nil || headSHA == "" {
+		return nil
+	}
+	checks, err := h.ChecksFor(ctx, headSHA)
+	if err != nil {
+		return &CIFailure{Err: err.Error()}
+	}
+	if checks.Status != host.ChecksRed {
+		return nil
+	}
+	f := &CIFailure{RunURL: checks.RunURL}
+	jobs, err := h.FailedJobLogs(ctx, headSHA)
+	if err != nil {
+		f.Err = err.Error()
+		return f
+	}
+	f.Jobs = jobs
+	return f
 }
 
 // NonAsks is the confirmed non-asks document as the claim found it.
@@ -155,6 +200,9 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
 		res.Branch = pr.Branch
 		res.PRNumber = pr.Number
+		if res.Mode == "rework" {
+			res.CIFailure = claimCIFailure(ctx, p.Host, pr.HeadSHA)
+		}
 	} else {
 		res.Branch = deriveBranch(t.Key, t.Title)
 	}
