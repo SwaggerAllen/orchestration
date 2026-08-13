@@ -76,6 +76,7 @@ func cmdScenarioReset(args []string) error {
 	fs := flag.NewFlagSet("scenario reset", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	confirm := fs.String("confirm", "", "the tracker project id, repeated back — reset archives every ticket in it")
+	mergedOut := fs.String("merged-out", "", "write the archived tickets' merge commits here, for the repo half of the reset")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -88,15 +89,28 @@ func cmdScenarioReset(args []string) error {
 	if err := scenario.Guard(cfg, *confirm); err != nil {
 		return err
 	}
-	n, err := scenario.Reset(context.Background(), t, cfg, *confirm, os.Stdout)
+	res, err := scenario.Reset(context.Background(), t, cfg, *confirm, os.Stdout)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	// Written even when empty. The repo step distinguishes "this
+	// rehearsal merged nothing" from "the tracker step never ran", and
+	// it can only do that if the file exists either way.
+	if *mergedOut != "" {
+		raw, err := json.MarshalIndent(res.Merges, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*mergedOut, append(raw, '\n'), 0o644); err != nil {
+			return err
+		}
+	}
+	if res.Archived == 0 {
 		fmt.Println("nothing to do: the project is already empty")
 		return nil
 	}
-	fmt.Printf("archived %d ticket(s); milestones left in place\n", n)
+	fmt.Printf("archived %d ticket(s) with %d merge commit(s) to revert; milestones left in place\n",
+		res.Archived, len(res.Merges))
 	return nil
 }
 

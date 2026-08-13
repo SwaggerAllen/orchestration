@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
@@ -99,12 +100,12 @@ func TestSeedThenResetReturnsTheProjectToEmpty(t *testing.T) {
 		t.Errorf("seeded issue lost its milestone or priority: %+v", issues[0])
 	}
 
-	n, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &log)
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("reset archived %d, want 1", n)
+	if res.Archived != 1 {
+		t.Errorf("reset archived %d, want 1", res.Archived)
 	}
 	issues, _ = tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
 	if len(issues) != 0 {
@@ -285,4 +286,78 @@ func asErr[T error](err error, target *T) bool {
 		return true
 	}
 	return false
+}
+
+// The repo half of a rehearsal reset has to know which commits the last
+// run landed, and this is the only moment that answer exists: archiving
+// drops an issue out of Linear's listings, so a later pass cannot ask.
+// Collected from the ticket's own merged marker rather than guessed
+// later from commit subjects or branch names.
+func TestResetReportsWhatTheTicketsMergedBeforeArchivingThem(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg := world(t)
+
+	i, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Landed one", StateID: doneState(t, tr, cfg),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := marker.Marker{Kind: marker.Merged, Fields: map[string]string{"sha": "abc123def456", "pr": "6"}}
+	if err := tr.CommentOnIssue(ctx, i.ID, m.Comment("Reconciled and merged.")); err != nil {
+		t.Fatal(err)
+	}
+	// A ticket that never merged contributes nothing — most of them.
+	if _, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Never landed", StateID: doneState(t, tr, cfg),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Archived != 2 {
+		t.Errorf("archived = %d, want 2", res.Archived)
+	}
+	if len(res.Merges) != 1 {
+		t.Fatalf("merges = %+v, want exactly the one that landed", res.Merges)
+	}
+	if res.Merges[0].SHA != "abc123def456" || res.Merges[0].Key != i.Key || res.Merges[0].PR != "6" {
+		t.Errorf("merge = %+v, want the marker's sha, the ticket's key and its PR", res.Merges[0])
+	}
+}
+
+// A rehearsal that merged nothing must report an empty list rather than
+// an error: the repo step tells "this run landed nothing" from "the
+// tracker step never ran", and it can only do that if empty is a legal
+// answer.
+func TestResetOnAProjectThatMergedNothingReportsNoMerges(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg := world(t)
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Merges) != 0 {
+		t.Errorf("merges = %+v, want none", res.Merges)
+	}
+}
+
+func doneState(t *testing.T, tr tracker.Tracker, cfg *config.Config) string {
+	t.Helper()
+	states, err := tr.ListStates(context.Background(), cfg.Tracker.TeamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range states {
+		if s.Name == cfg.StateName(protocol.Done) {
+			return s.ID
+		}
+	}
+	t.Fatal("no done state")
+	return ""
 }

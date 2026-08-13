@@ -40,27 +40,78 @@ func Guard(cfg *config.Config, confirmProjectID string) error {
 	return nil
 }
 
-// Reset archives every issue in the project, returning it to empty.
+// Merged is one ticket's landed commit, read off its merged marker.
+type Merged struct {
+	Key string `json:"key"`
+	SHA string `json:"sha"`
+	PR  string `json:"pr,omitempty"`
+}
+
+// ResetResult is what a reset found and did. Merges is the list the
+// repo half of a rehearsal reset needs.
+type ResetResult struct {
+	Archived int      `json:"archived"`
+	Merges   []Merged `json:"merges"`
+}
+
+// Reset archives every issue in the project, returning it to empty, and
+// reports the commits those issues merged.
 //
 // Archive rather than delete: Linear keeps archived issues recoverable,
 // so a reset fired at the wrong moment costs a restore rather than the
 // work. Milestones are left alone — they are reused by name across runs,
 // which is what keeps "the next milestone" ordering stable (DESIGN §10).
-func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmProjectID string, log io.Writer) (int, error) {
+//
+// The merge list is collected here, before anything is archived, because
+// this is the only moment it exists: an archived issue drops out of
+// Linear's listings, so a later pass cannot ask what a previous
+// rehearsal landed. It comes from each ticket's `merged` marker, which
+// reconcile writes with the squash commit's sha — the harness's own
+// record of what it merged, rather than a guess made later from commit
+// subjects or branch names.
+func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmProjectID string, log io.Writer) (*ResetResult, error) {
 	if err := Guard(cfg, confirmProjectID); err != nil {
-		return 0, err
+		return nil, err
 	}
 	issues, err := t.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
 	if err != nil {
-		return 0, err
+		return nil, err
+	}
+	res := &ResetResult{}
+	for _, i := range issues {
+		for _, m := range mergedMarkers(i) {
+			m.Key = i.Key
+			res.Merges = append(res.Merges, m)
+			fmt.Fprintf(log, "  merged   %s %s\n", i.Key, m.SHA)
+		}
 	}
 	for _, i := range issues {
 		fmt.Fprintf(log, "  archive %s %s\n", i.Key, i.Title)
 		if err := t.ArchiveIssue(ctx, i.ID); err != nil {
-			return 0, fmt.Errorf("archiving %s: %w", i.Key, err)
+			return nil, fmt.Errorf("archiving %s: %w", i.Key, err)
 		}
 	}
-	return len(issues), nil
+	res.Archived = len(issues)
+	return res, nil
+}
+
+// mergedMarkers reads a ticket's merged markers, oldest first — the
+// order the comments are in, which is the order the commits landed.
+// More than one is possible in principle (a ticket merged, reverted by
+// hand, and merged again), and all of them are reported: a reset that
+// silently dropped the older one would leave half a ticket on main.
+func mergedMarkers(i tracker.Issue) []Merged {
+	var out []Merged
+	for _, c := range i.Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok || m.Kind != marker.Merged {
+			continue
+		}
+		if sha := m.Fields["sha"]; sha != "" {
+			out = append(out, Merged{SHA: sha, PR: m.Fields["pr"]})
+		}
+	}
+	return out
 }
 
 // Seeded maps a scenario ref to the ticket the tracker created for it.
