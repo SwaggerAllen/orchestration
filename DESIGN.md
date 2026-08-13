@@ -1005,7 +1005,11 @@ them.
   time in the `needs-review` case. Deliberate, and sound only while there is one author. Note
   that `needs-setup` is the flavor most likely to want alerting later: it is the one where the
   wait is not the author reviewing at their own pace but the author not yet knowing they were
-  asked.
+  asked. A timeout was considered and deliberately not built: the only thing a timeout could
+  *do* is move the ticket, and the only honest destination is `Todo` — which discards the
+  claim, the branch context and the reason, to buy a nudge. Until someone is waiting on the
+  author who isn't the author, the assumption is that they are prompt. Revisit this at the
+  same time as alerting, not before; they are the same feature seen from two ends.
 - **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
   System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
   what remains uncovered is files owned by no system — the router, the manifests — which are
