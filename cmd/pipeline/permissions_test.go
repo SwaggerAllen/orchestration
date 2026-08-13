@@ -350,3 +350,40 @@ func TestNoStubWaitsForAnEventTheAgentsCannotCause(t *testing.T) {
 		}
 	}
 }
+
+// `git fetch <remote> <ref>` names refs as the REMOTE has them, so a
+// remote-tracking name like origin/main is never a valid argument —
+// it exists only locally. The reconcile action shipped
+// `git fetch origin "$BRANCH" origin/main`, which reads as ordinary git
+// and dies with "couldn't find remote ref origin/main". It survived
+// review and every test until the first time reconcile actually ran,
+// at which point it aborted the run and Blocked the ticket.
+func TestNoActionFetchesARemoteTrackingName(t *testing.T) {
+	actions, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "*", "action.yml"))
+	if err != nil || len(actions) == 0 {
+		t.Fatalf("found no actions to check: %v", err)
+	}
+	stubs, _ := filepath.Glob(filepath.Join("..", "..", "examples", "stubs", "*.yml"))
+	// A fetch argument of the form origin/x, but not inside a refspec
+	// (which legitimately contains refs/remotes/origin/...).
+	fetches := regexp.MustCompile(`git fetch [^\n]*?(^|\s)origin/\S+`)
+	for _, f := range append(actions, stubs...) {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Join backslash continuations first. The fix for this very bug
+		// spread the fetch over several lines, and a line-at-a-time scan
+		// would have stopped seeing the arguments it exists to check.
+		joined := strings.ReplaceAll(stripComments(string(raw)), "\\\n", " ")
+		for i, line := range strings.Split(joined, "\n") {
+			if !strings.Contains(line, "git fetch ") {
+				continue
+			}
+			if fetches.MatchString(line) {
+				t.Errorf("%s:%d fetches a remote-tracking name, which exists on no remote: %s",
+					filepath.Base(filepath.Dir(f)), i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}

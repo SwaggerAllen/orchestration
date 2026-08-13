@@ -74,8 +74,24 @@ runs:
     - name: check out the PR branch (read-only inspection)
       shell: bash
       run: |
-        git fetch origin "${{ steps.claim.outputs.branch }}" origin/main
-        git checkout "${{ steps.claim.outputs.branch }}"
+        set -euo pipefail
+        # Explicit refspecs, for two reasons. `git fetch origin
+        # origin/main` is the bug this replaces: fetch takes ref names
+        # as the REMOTE has them, and `origin/main` is a local
+        # remote-tracking name that exists on no remote, so it failed
+        # with "couldn't find remote ref origin/main" — the first time
+        # reconcile ever ran, having passed review as plausible-looking
+        # git. And writing the destinations out guarantees
+        # refs/remotes/origin/main exists locally afterwards, which is
+        # what the prompt means when it says to diff against
+        # origin/main; a bare `git fetch origin main` leaves that to
+        # git's opportunistic ref updating and the configured refspec,
+        # which actions/checkout narrows to the one branch it cloned.
+        BRANCH="${{ steps.claim.outputs.branch }}"
+        git fetch origin \
+          "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" \
+          "+refs/heads/main:refs/remotes/origin/main"
+        git checkout "$BRANCH"
 
     - name: run the reconcile agent
       shell: bash
