@@ -126,6 +126,30 @@ func pathOnly(path string) string {
 	return path
 }
 
+// ActingLogin reports the login this token acts as, or "" when it is
+// an Actions token rather than a user's.
+//
+// The distinction is not cosmetic. A GITHUB_TOKEN cannot read /user at
+// all — GitHub answers "Resource not accessible by integration" — and
+// that same not-a-user status is why events it creates start no
+// workflow runs and why PRs it opens need a human's approval. So the
+// call that fails is a direct test of the property that matters, not a
+// proxy for it.
+func (c *Client) ActingLogin(ctx context.Context) (string, error) {
+	var data struct {
+		Login string `json:"login"`
+	}
+	if err := c.rest(ctx, http.MethodGet, "/user", nil, &data); err != nil {
+		// Forbidden here means "this is an Actions token", which is an
+		// answer rather than a failure. Anything else is a real error.
+		if strings.Contains(err.Error(), "HTTP 403") {
+			return "", nil
+		}
+		return "", err
+	}
+	return data.Login, nil
+}
+
 func (c *Client) DispatchWorkflow(ctx context.Context, workflowFile string, inputs map[string]string) error {
 	path := fmt.Sprintf("/repos/%s/%s/actions/workflows/%s/dispatches", c.owner, c.repo, url.PathEscape(workflowFile))
 	return c.rest(ctx, http.MethodPost, path, map[string]any{"ref": c.ref, "inputs": inputs}, nil)

@@ -107,10 +107,11 @@ func cmdAgentClaim(args []string) error {
 	if *ticket == "" || *outDir == "" || *dispatchID == "" {
 		return fmt.Errorf("agent claim: --ticket, --dispatch-id and --out are required")
 	}
-	p, _, err := agentDeps(*cfgPath)
+	p, h, err := agentDeps(*cfgPath)
 	if err != nil {
 		return err
 	}
+	warnIfActionsToken(context.Background(), h)
 
 	var res *agent.ClaimResult
 	var plan *agent.BoundaryPlan
@@ -541,4 +542,37 @@ func cmdAgentAbort(args []string) error {
 	}
 	fmt.Printf("aborted %s (%s)\n", res.TicketKey, *reason)
 	return nil
+}
+
+// warnIfActionsToken says so when the agents are running as
+// GITHUB_TOKEN rather than as a user.
+//
+// Everything still appears to work: pushes land, PRs open, merges
+// happen. What silently does not happen is every event those actions
+// should raise — GitHub starts no workflow run from an event created
+// with GITHUB_TOKEN — so CI never runs on the branch, previews never
+// build, the deploy is never recorded, and each PR waits on a human's
+// approval instead. That combination cost this project a day of
+// diagnosis, each symptom looking like its own unrelated bug.
+//
+// A warning rather than a refusal: a project may genuinely not have
+// wired the token yet, and a claim that dies here would be worse than
+// one that runs slowly. But it must not be silent.
+func warnIfActionsToken(ctx context.Context, h host.Host) {
+	type actingUser interface {
+		ActingLogin(context.Context) (string, error)
+	}
+	u, ok := h.(actingUser)
+	if !ok {
+		return
+	}
+	login, err := u.ActingLogin(ctx)
+	if err != nil || login != "" {
+		return
+	}
+	fmt.Fprintln(os.Stderr,
+		"warning: acting as GITHUB_TOKEN, not as a user. Pushes and PRs will work, but GitHub raises no "+
+			"workflow run from an event this token creates — CI will not run on the branch, previews will "+
+			"not build, and the deploy will not be recorded — and PRs it opens need a human to approve "+
+			"their checks. Set AGENT_GITHUB_TOKEN on this repository (SETUP 2).")
 }

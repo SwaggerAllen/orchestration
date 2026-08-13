@@ -31,7 +31,7 @@ scratch environment (ORC team → `orchestration-dummy`).
 
 ## 2. GitHub tokens
 
-Two fine-grained PATs: github.com → Settings → Developer settings →
+Three fine-grained PATs: github.com → Settings → Developer settings →
 Personal access tokens → **Fine-grained tokens** → Generate new token.
 Fine-grained tokens have no blanket scope — every permission is picked
 individually under **Repository permissions**, so each token ends up
@@ -46,6 +46,39 @@ able to do exactly one job and nothing else.
 - What it does: lets `actions/checkout` clone the private pipeline repo
   into `.pipeline/` from the project's workflows. Read-only is
   sufficient — the workflows never write to this repo.
+
+**`AGENT_GITHUB_TOKEN`** — the identity the agents act as
+
+- Resource owner: `SwaggerAllen` · Repository access: **Only select
+  repositories** → every project repo the agents work in
+- Repository permissions: **Contents → Read and write**, **Pull
+  requests → Read and write**, **Actions → Read and write**,
+  **Deployments → Read and write**. Leave **Workflows** unset — that is
+  what keeps agents unable to edit `.github/workflows/`, the same blast
+  radius the in-workflow `GITHUB_TOKEN` has.
+- Named without a `GITHUB_` prefix because Actions reserves it.
+
+**Why this exists, and why the default token is not enough.** Every
+agent could run on the in-workflow `GITHUB_TOKEN`, and everything it
+does appears to work — pushes land, PRs open, merges happen. What
+silently does not happen is every *event* those actions should raise.
+**GitHub does not start a workflow run from an event created with
+`GITHUB_TOKEN`** (`workflow_dispatch` and `repository_dispatch`
+excepted), so on agent activity:
+
+- `ci` never runs on the branch, so the ticket sits in `Checks`
+- the preview never builds, so `Design review` has nothing to review
+- the deploy is never recorded, so the ticket never reaches `Done`
+
+And separately: a PR opened by `github-actions[bot]` is treated as
+coming from an outside contributor, so **its checks wait for a human to
+approve them** — on every ticket, which is a fourth touchpoint the
+design does not want. All four symptoms have the same cause and look
+like four unrelated bugs; each one cost a debugging round here.
+
+Without the secret the stubs fall back to `GITHUB_TOKEN` and the
+pipeline still runs, degraded exactly as above. The claim prints a
+warning naming all of it, so the degradation is at least loud.
 
 **`DISPATCH_TOKEN`** (step 7; skip until the loop works)
 
@@ -105,6 +138,7 @@ Actions → Secrets):
 - `LINEAR_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `PIPELINE_REPO_TOKEN`
+- `AGENT_GITHUB_TOKEN`
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` (from step 4)
 
 Settings → Actions → General:
@@ -517,7 +551,8 @@ step 5 already covered them.
    time, so editing it here reaches every project on its next run.
 4. Secrets on that repo: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
-   grants read on the pipeline repo), Cloudflare pair,
+   grants read on the pipeline repo), `AGENT_GITHUB_TOKEN` (add this
+   repo to its access list), Cloudflare pair,
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.

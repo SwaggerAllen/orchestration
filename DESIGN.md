@@ -942,7 +942,15 @@ claims and deploy timeouts are elapsed-time judgments. Both sit behind grace per
 minutes (§12), so an hourly beat finds them well within tolerance, and it doubles as the backstop
 for any webhook that is dropped.
 
-**The GitHub-side hops arrive by webhook too, and cannot arrive any other way.** CI green and
+**The agents act as a user, not as Actions.** Everything an agent does with the in-workflow
+`GITHUB_TOKEN` appears to work, and silently raises no events: GitHub starts no workflow run from
+an event that token created. CI never runs on the branch, the preview never builds, the deploy is
+never recorded — and a PR opened by `github-actions[bot]` additionally holds its checks for a
+human's approval, a touchpoint §0 does not budget for. Four symptoms, one cause, each looking
+like its own bug. So the project stubs hand the agents a scoped user token instead, and the
+harness warns when they are running without one.
+
+**The GitHub-side hops arrive by webhook too, and are a backstop rather than the mechanism.** CI green and
 deploy detection were originally left to `workflow_run` and `deployment_status` triggers on the
 project stub. Those do not fire for the pipeline: GitHub will not start a workflow run from an
 event created with `GITHUB_TOKEN` — `workflow_dispatch` and `repository_dispatch` are the only
