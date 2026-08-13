@@ -26,9 +26,19 @@ A project also needs:
   Claude subscription, tried first), an `ANTHROPIC_API_KEY` (billed to
   API credits), or both, in which case the key is the failover
 - A `ci` workflow (name matters — the sweep stub triggers on its
-  completion) running the quality gates from the config, plus
-  `pipeline audit` — one command for all three of DESIGN §9's checks
-  (mutex, doc lint, class):
+  completion) triggered on `pull_request: branches: [main]` and
+  nothing else. A `push` trigger alongside it runs the same tree a
+  second time for the same verdict, and required checks read the PR
+  run. Dropping `push: [main]` costs one post-merge sweep wake, which
+  nothing needs: reconcile records the stand-in deployment itself, and
+  that raises a `deployment_status` the metronome routes to a sweep.
+  Read the branch from `github.head_ref` — under `pull_request` the ref
+  is `refs/pull/N/merge`, so anything parsing the ticket key out of
+  `GITHUB_REF_NAME` gets `N/merge` and silently audits nothing.
+
+  It runs the quality gates from the config, plus `pipeline audit` —
+  one command for all three of DESIGN §9's checks (mutex, doc lint,
+  class):
 
   ```sh
   BASE="origin/main...HEAD"

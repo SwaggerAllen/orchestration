@@ -2,10 +2,16 @@
 # pipeline will demand of project repos: format, vet, build, test.
 name: ci
 
+# PRs into main only. `push: ["**"]` alongside a bare `pull_request` ran
+# every commit twice — once for the branch push and once for the PR
+# event, on the same tree, for the same verdict. Branch protection reads
+# the PR run, so the push run was paying for a second opinion nobody
+# asked. Main itself gets no post-merge run of its own; the PR that
+# merged into it is the run, and required checks are what make that a
+# guarantee rather than a habit.
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
