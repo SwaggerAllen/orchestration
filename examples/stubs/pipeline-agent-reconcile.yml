@@ -43,8 +43,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 — the verdict compares the PR branch to main.
+      # Checked out with the agent token so the push carries it. The
+      # default GITHUB_TOKEN works for the push itself, but GitHub does
+      # not start a workflow run from an event it created — so CI never
+      # ran, previews never built, deploys were never recorded — and a
+      # PR it opens is authored by github-actions[bot], which GitHub
+      # gates behind a manual approval on every ticket. See SETUP 2.
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.AGENT_GITHUB_TOKEN || github.token }}
           fetch-depth: 0
 
       # ---- this project's toolchain, before the agent runs --------------
@@ -66,5 +73,5 @@ jobs:
           ticket: ${{ inputs.ticket }}
           linear_api_key: ${{ secrets.LINEAR_API_KEY }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
+          github_token: ${{ secrets.AGENT_GITHUB_TOKEN || github.token }}
           pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
