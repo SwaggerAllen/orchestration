@@ -21,7 +21,10 @@ A project also needs:
   architecture doc into `systems/*.md` with file maps and stub the
   `screens/*.md` docs (DESIGN §4)
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
-- Actions secrets: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`
+- Actions secrets: `LINEAR_API_KEY`, and a model credential — a
+  `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (billed to a
+  Claude subscription, tried first), an `ANTHROPIC_API_KEY` (billed to
+  API credits), or both, in which case the key is the failover
 - A `ci` workflow (name matters — the sweep stub triggers on its
   completion) running the quality gates from the config, plus
   `pipeline audit` — one command for all three of DESIGN §9's checks

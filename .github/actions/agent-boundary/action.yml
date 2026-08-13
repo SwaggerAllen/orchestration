@@ -27,8 +27,18 @@ inputs:
     description: Token for the project repo. Pass the caller's github.token.
     required: true
   anthropic_api_key:
-    description: Model key for the scan and grooming pass
-    required: true
+    description: >-
+      Console API key for the agent run, billed against API credits.
+      Optional when a subscription token is set, where it is the
+      failover rather than the first choice.
+    required: false
+    default: ""
+  claude_code_oauth_token:
+    description: >-
+      Long-lived Claude Code token from `claude setup-token`, billed
+      against a Claude subscription. Tried before anthropic_api_key.
+    required: false
+    default: ""
   pipeline_repo_token:
     description: >-
       Contents:read PAT for the pipeline repo while it is private.
@@ -83,13 +93,11 @@ runs:
 
     - name: debt scan + grooming
       if: steps.claim.outputs.scan_done != 'true'
-      shell: bash
-      env:
-        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
-      run: |
-        npx --yes @anthropic-ai/claude-code@latest \
-          -p "$(cat "$RUNNER_TEMP/pipeline/prompt.md")" \
-          --dangerously-skip-permissions
+      uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
+      with:
+        prompt_path: ${{ runner.temp }}/pipeline/prompt.md
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
 
     - name: file proposals and hand back
       shell: bash
