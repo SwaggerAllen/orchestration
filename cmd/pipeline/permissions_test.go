@@ -70,7 +70,15 @@ func permissionsOf(body string) map[string]string {
 			return out // explicitly nothing
 		}
 		for _, l := range lines[i+1:] {
-			if strings.TrimSpace(l) == "" || !strings.HasPrefix(l, " ") {
+			// A blank line inside the block is legal YAML, and comes for
+			// free once stripComments has blanked a comment line. Ending
+			// the block there silently hid every scope after the first
+			// comment — which is how a test asserting a permission was
+			// granted passed while reading none of it.
+			if strings.TrimSpace(l) == "" {
+				continue
+			}
+			if !strings.HasPrefix(l, " ") {
 				break // dedented: the block ended
 			}
 			k, v, found := strings.Cut(strings.TrimSpace(l), ":")
@@ -311,5 +319,34 @@ func TestEverythingInvokingThePipelineSetsItUpFirst(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Error("matched nothing that invokes the pipeline — the pattern has drifted")
+	}
+}
+
+// Reconcile records the stand-in deployment itself, right after the
+// merge, because the workflow that used to do it on `push: main` cannot
+// fire — GitHub does not start a run from an event created with
+// GITHUB_TOKEN, and the merge is made with exactly that. The API call
+// needs deployments: write, and a missing scope here surfaces as a 403
+// after the PR is already merged, with the ticket mid-transition.
+func TestTheReconcileStubCanRecordADeployment(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "stubs", "pipeline-agent-reconcile.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := permissionsOf(stripComments(string(raw)))["deployments"]; rank(got) < rank("write") {
+		t.Errorf("the reconcile stub grants deployments %q — the post-deploy check would never get a deployment to read", got)
+	}
+}
+
+// The event-driven stubs that GitHub's recursion guard makes dead must
+// not come back. Each one listened for an event the pipeline itself
+// creates with GITHUB_TOKEN, so each fired for a human's activity and
+// never for an agent's — the shape that looks healthy and is not.
+func TestNoStubWaitsForAnEventTheAgentsCannotCause(t *testing.T) {
+	for _, gone := range []string{"pipeline-record-deploy.yml"} {
+		path := filepath.Join("..", "..", "examples", "stubs", gone)
+		if _, err := os.Stat(path); err == nil {
+			t.Errorf("%s is back — it triggers on an event GITHUB_TOKEN cannot raise; the work belongs in the harness", gone)
+		}
 	}
 }

@@ -139,7 +139,37 @@ func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *Clai
 		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
 			return err
 		}
+		// Record the stand-in deployment before the ticket moves, so a
+		// sweep arriving the instant it lands already has something to
+		// read. Ordering matters more than it looks: the ticket entering
+		// Merged is what starts the deploy timeout (DESIGN §12).
+		if err := recordStandInDeploy(ctx, p, h, sha); err != nil {
+			return err
+		}
 		return p.TransitionTicket(ctx, res.TicketID, protocol.Merged)
 	}
 	return fmt.Errorf("reconcile %s: unknown outcome %q", res.TicketKey, v.Outcome)
+}
+
+// recordStandInDeploy creates the deployment the post-deploy check will
+// read, for projects whose platform is GitHub Deployments — the dummy's
+// stand-in for a real host (PLAN M4). A real provider deploys itself and
+// this does nothing: DigitalOcean rolls out on push and the sweep polls
+// it, which is the path the stand-in exists to imitate.
+//
+// This was a project workflow on `push: main`, and it could never have
+// worked. GitHub does not start a workflow run from an event created
+// with GITHUB_TOKEN, and reconcile merges with exactly that, so no
+// deployment was recorded for any agent merge — every ticket would have
+// sat in Merged until the deploy timeout moved it to Blocked. Doing it
+// here also puts the decision where the rest of the protocol lives,
+// rather than in a trigger whose firing depends on who pushed.
+func recordStandInDeploy(ctx context.Context, p *plane.Plane, h host.Host, sha string) error {
+	if p.Config.Deploy.Provider != "github" {
+		return nil
+	}
+	if err := h.RecordDeployment(ctx, sha, p.Config.Deploy.Endpoint); err != nil {
+		return fmt.Errorf("recording the stand-in deployment for %s: %w", sha, err)
+	}
+	return nil
 }

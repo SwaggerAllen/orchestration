@@ -19,8 +19,16 @@ type Memory struct {
 	// Identical SHAs are always ancestors, as in git.
 	Ancestry map[string]bool
 	// Files holds PutFileIfAbsent writes: path -> content.
-	Files  map[string]string
-	nextPR int
+	Files map[string]string
+	// Deployments records RecordDeployment calls, in order.
+	Deployments []Deployment
+	nextPR      int
+}
+
+// Deployment is one recorded deployment.
+type Deployment struct {
+	SHA         string
+	Environment string
 }
 
 // Dispatch records one DispatchWorkflow call.
@@ -116,6 +124,15 @@ func (m *Memory) IsAncestor(_ context.Context, ancestor, descendant string) (boo
 		return true, nil
 	}
 	return m.Ancestry[ancestor+".."+descendant], nil
+}
+
+// RecordDeployment records what a real host would create, so a Ring-1
+// test can assert reconcile did it.
+func (m *Memory) RecordDeployment(_ context.Context, sha, environment string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Deployments = append(m.Deployments, Deployment{SHA: sha, Environment: environment})
+	return nil
 }
 
 func (m *Memory) PutFileIfAbsent(_ context.Context, path, content, _ string) (bool, error) {

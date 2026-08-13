@@ -62,6 +62,18 @@ type Host interface {
 	// IsAncestor reports whether ancestor is reachable from descendant:
 	// the real meaning of the design's `>=` (DESIGN §13).
 	IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error)
+	// RecordDeployment creates a successful GitHub Deployment for a
+	// commit. It exists only for projects whose deploy provider is
+	// "github" — the dummy's stand-in for a real platform (PLAN M4) —
+	// and reconcile calls it straight after merging.
+	//
+	// It used to be a project workflow triggered by the push to main.
+	// That trigger cannot fire for the pipeline: GitHub does not start a
+	// workflow run from an event created with GITHUB_TOKEN, and
+	// reconcile merges with exactly that, so no deployment was ever
+	// recorded for an agent merge and every ticket sat in Merged until
+	// the deploy timeout moved it to Blocked.
+	RecordDeployment(ctx context.Context, sha, environment string) error
 	// PutFileIfAbsent commits one file to the default branch unless it
 	// already exists, reporting whether it was created. The boundary's
 	// retro note uses it: re-run safety demands the existence check

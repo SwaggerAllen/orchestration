@@ -14,7 +14,6 @@ bindings live.
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
 | `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass |
-| `pipeline-record-deploy.yml` | Dummy project only: records a GitHub Deployment per merge so deploy detection has real data (config `deploy.provider: "github"`) |
 
 A project also needs:
 
