@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -222,5 +223,38 @@ func TestForbiddenOnReadingPRsKeepsTheOrdinaryHint(t *testing.T) {
 	_, err := client(t, srv).ListOpenPRs(context.Background())
 	if err == nil || strings.Contains(err.Error(), "create and approve") {
 		t.Errorf("a read 403 should point at the permissions block, got %v", err)
+	}
+}
+
+func TestTailBoundsByLinesAndBytes(t *testing.T) {
+	var lines []string
+	for i := 0; i < 500; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	got := tail(strings.Join(lines, "\n"), 10, 1<<20)
+	if n := len(strings.Split(got, "\n")); n != 10 {
+		t.Errorf("line bound: got %d lines, want 10", n)
+	}
+	// The tail, not the head: a runner puts setup at the top and the
+	// failure at the bottom, and the failure is the point.
+	if !strings.HasSuffix(got, "line 499") {
+		t.Errorf("kept the wrong end:\n%s", got)
+	}
+	// A byte cut lands mid-line; that fragment is dropped rather than
+	// presented as a line of output.
+	byByte := tail("aaaaaaaaaa\nbbbb\ncccc", 100, 12)
+	if strings.Contains(byByte, "a") {
+		t.Errorf("a truncated line survived: %q", byByte)
+	}
+}
+
+func TestJobIDComesFromTheCheckRunURL(t *testing.T) {
+	if got := jobID("https://github.com/o/r/actions/runs/123/job/456"); got != "456" {
+		t.Errorf("jobID = %q, want 456", got)
+	}
+	// A third-party check is not an Actions job and has no log to fetch;
+	// it is still named, so "failed and unreadable" never reads as "passed".
+	if got := jobID("https://example.com/some-other-check"); got != "" {
+		t.Errorf("jobID on a non-Actions check = %q, want empty", got)
 	}
 }

@@ -95,6 +95,12 @@ type Comment struct {
 type CIInfo struct {
 	Status CIStatus
 	RunURL string
+	// FailedJobs names what is red, so the failure comment can say so.
+	// The comment is the rework scope (DESIGN §2.3), and a scope that
+	// says only "fix what the linked run reports" is a scope for whoever
+	// can open the run — which the dev agent, holding no GitHub
+	// credential by design, cannot.
+	FailedJobs []string
 }
 
 // Ticket is one issue as the sweep sees it.

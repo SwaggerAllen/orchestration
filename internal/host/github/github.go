@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -212,22 +213,16 @@ func (c *Client) ListOpenPRs(ctx context.Context) ([]host.PR, error) {
 }
 
 func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, error) {
-	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", c.owner, c.repo, headSHA)
-	var data struct {
-		CheckRuns []struct {
-			Status     string `json:"status"`
-			Conclusion string `json:"conclusion"`
-			HTMLURL    string `json:"html_url"`
-		} `json:"check_runs"`
-	}
-	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+	runs, err := c.checkRuns(ctx, headSHA)
+	if err != nil {
 		return host.Checks{}, err
 	}
-	if len(data.CheckRuns) == 0 {
+	if len(runs) == 0 {
 		return host.Checks{Status: host.ChecksNone}, nil
 	}
 	agg := host.Checks{Status: host.ChecksGreen}
-	for _, r := range data.CheckRuns {
+	red := host.Checks{Status: host.ChecksRed}
+	for _, r := range runs {
 		if r.Status != "completed" {
 			if agg.Status == host.ChecksGreen {
 				agg.Status = host.ChecksPending
@@ -238,11 +233,140 @@ func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, er
 		case "success", "neutral", "skipped":
 		default:
 			// failure, timed_out, cancelled, action_required: the branch
-			// is not green, and the failing run is the one to link.
-			return host.Checks{Status: host.ChecksRed, RunURL: r.HTMLURL}, nil
+			// is not green. Every failing check is named, not just the
+			// first — a build that broke three jobs is a different fact
+			// from one that broke one, and the agent reading this is
+			// deciding what to fix. The link stays the first one, which
+			// is what the marker has always carried.
+			if red.RunURL == "" {
+				red.RunURL = r.HTMLURL
+			}
+			red.FailedJobs = append(red.FailedJobs, r.Name)
 		}
 	}
+	if red.RunURL != "" {
+		return red, nil
+	}
 	return agg, nil
+}
+
+// checkRun is one check run as both ChecksFor and FailedJobLogs read it.
+type checkRun struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+}
+
+func (c *Client) checkRuns(ctx context.Context, headSHA string) ([]checkRun, error) {
+	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", c.owner, c.repo, headSHA)
+	var data struct {
+		CheckRuns []checkRun `json:"check_runs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return nil, err
+	}
+	return data.CheckRuns, nil
+}
+
+// Bounds on what a failing build may put in a prompt. Three jobs and a
+// tail each, because the tail is where a runner puts the failure and the
+// head is where it puts the setup — and because an unbounded log is an
+// unbounded prompt, which fails the run in a way that looks like the
+// model's fault.
+const (
+	maxFailedJobs   = 3
+	maxLogTailLines = 150
+	maxLogTailBytes = 20000
+)
+
+func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobLog, error) {
+	runs, err := c.checkRuns(ctx, headSHA)
+	if err != nil {
+		return nil, err
+	}
+	var out []host.JobLog
+	for _, r := range runs {
+		if r.Status != "completed" {
+			continue
+		}
+		switch r.Conclusion {
+		case "success", "neutral", "skipped":
+			continue
+		}
+		if len(out) >= maxFailedJobs {
+			break
+		}
+		j := host.JobLog{Name: r.Name, URL: r.HTMLURL}
+		// A check run that is not an Actions job — a third-party check —
+		// has no log to fetch here. Named without one rather than
+		// dropped: "this check failed and I could not read it" is a fact
+		// the agent needs, and silence would read as "it passed".
+		if id := jobID(r.HTMLURL); id != "" {
+			log, err := c.jobLog(ctx, id)
+			if err != nil {
+				j.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
+			} else {
+				j.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+			}
+		}
+		out = append(out, j)
+	}
+	return out, nil
+}
+
+// jobIDRe pulls the Actions job id out of a check run's html_url, which
+// looks like .../actions/runs/<run>/job/<job>.
+var jobIDRe = regexp.MustCompile(`/job/(\d+)`)
+
+func jobID(htmlURL string) string {
+	if m := jobIDRe.FindStringSubmatch(htmlURL); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// jobLog fetches one job's log. The endpoint answers with a redirect to
+// plain text rather than JSON, so it does not go through rest().
+func (c *Client) jobLog(ctx context.Context, jobID string) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/actions/jobs/%s/logs", c.baseURL, c.owner, c.repo, jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", fmt.Errorf("job log %s: %s", jobID, resp.Status)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+// tail returns the last lines of s, under both a line and a byte bound.
+func tail(s string, lines, bytes int) string {
+	if len(s) > bytes {
+		s = s[len(s)-bytes:]
+		// The first line is now cut mid-way; drop it rather than present
+		// a fragment as a line.
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	split := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(split) > lines {
+		split = split[len(split)-lines:]
+	}
+	return strings.Join(split, "\n")
 }
 
 func (c *Client) CreatePR(ctx context.Context, branch, title, body string, draft bool) (host.PR, error) {

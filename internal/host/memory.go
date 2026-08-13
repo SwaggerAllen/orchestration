@@ -13,6 +13,8 @@ type Memory struct {
 	Runs       []AgentRun
 	PRs        []PR
 	CheckState map[string]Checks // headSHA -> checks
+	// JobLogs scripts FailedJobLogs: headSHA -> failing jobs and their tails.
+	JobLogs map[string][]JobLog
 	// Merged records merged PRs: number -> merge SHA.
 	Merged map[int]string
 	// Ancestry scripts IsAncestor: "ancestor..descendant" -> true.
@@ -45,6 +47,7 @@ var _ Host = (*Memory)(nil)
 func NewMemory() *Memory {
 	return &Memory{
 		CheckState: map[string]Checks{},
+		JobLogs:    map[string][]JobLog{},
 		Merged:     map[int]string{},
 		Ancestry:   map[string]bool{},
 		Files:      map[string]string{},
@@ -78,6 +81,12 @@ func (m *Memory) ChecksFor(_ context.Context, headSHA string) (Checks, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.CheckState[headSHA], nil
+}
+
+func (m *Memory) FailedJobLogs(_ context.Context, headSHA string) ([]JobLog, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.JobLogs[headSHA], nil
 }
 
 func (m *Memory) CreatePR(_ context.Context, branch, title, _ string, draft bool) (PR, error) {

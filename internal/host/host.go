@@ -46,6 +46,27 @@ const (
 type Checks struct {
 	Status CheckStatus
 	RunURL string
+	// FailedJobs names the checks that are not green, so the failure
+	// comment can say what broke. DESIGN §12 always described the comment
+	// as "naming the failing jobs and linking the run"; for a long time it
+	// only linked, and the link is the half an agent cannot follow.
+	FailedJobs []string
+}
+
+// JobLog is one failing CI job with the tail of its output. The dev
+// agent's rework scope is the failure comment, and a comment that says
+// "fix what the linked run reports" is only a scope to a reader who can
+// open the run. The agent cannot: it holds no GitHub credential by
+// design, and reading CI is not a reason to give it one. So the harness
+// reads and the agent is handed the text — the same division as the
+// non-asks document (DESIGN §4) and the ticket body itself.
+type JobLog struct {
+	Name string
+	URL  string
+	// Log is a bounded tail, not the whole job. Whole logs are mostly
+	// setup and are long enough to crowd out the argument they are
+	// evidence for.
+	Log string
 }
 
 // Host is the port.
@@ -54,6 +75,11 @@ type Host interface {
 	ListAgentRuns(ctx context.Context) ([]AgentRun, error)
 	ListOpenPRs(ctx context.Context) ([]PR, error)
 	ChecksFor(ctx context.Context, headSHA string) (Checks, error)
+	// FailedJobLogs returns the failing jobs for a head SHA with the tail
+	// of each one's log. Separate from ChecksFor because every sweep calls
+	// that one for every open PR, and logs are fetched for exactly one
+	// ticket at the moment a rework run picks it up.
+	FailedJobLogs(ctx context.Context, headSHA string) ([]JobLog, error)
 	CreatePR(ctx context.Context, branch, title, body string, draft bool) (PR, error)
 	MarkPRReady(ctx context.Context, number int) error
 	// MergePR squash-merges and returns the merge commit SHA — the value

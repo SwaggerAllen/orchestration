@@ -491,3 +491,25 @@ func TestOnlyBlockConstructsATransitionIntoBlocked(t *testing.T) {
 		t.Errorf("sweep.go builds a Blocked transition at lines %v; block() must be the only one, or the origin is optional again", lines)
 	}
 }
+
+// The failure comment is the rework scope (DESIGN §2.3), and DESIGN §12
+// has always described it as naming the failing jobs and linking the
+// run. For a long time it only linked — and the link is precisely the
+// half the dev agent cannot follow.
+func TestCIRedCommentNamesTheFailingJobs(t *testing.T) {
+	red := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/9", FailedJobs: []string{"gates", "mutex-audit"}}
+	})
+	a := find(Sweep(snap(red)), ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForRework {
+		t.Fatalf("want a bounce to rework, got %v", a)
+	}
+	for _, want := range []string{"gates", "mutex-audit"} {
+		if !strings.Contains(a.Prose, want) {
+			t.Errorf("the comment does not name %q, so the scope says only \"look at the link\":\n%s", want, a.Prose)
+		}
+	}
+	if got := a.Marker.Fields["jobs"]; got != "gates,mutex-audit" {
+		t.Errorf("marker jobs = %q, want the failing set — a later pass reads markers, not prose", got)
+	}
+}
