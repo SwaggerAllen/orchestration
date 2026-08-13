@@ -343,7 +343,7 @@ func TestTheReconcileStubCanRecordADeployment(t *testing.T) {
 // creates with GITHUB_TOKEN, so each fired for a human's activity and
 // never for an agent's — the shape that looks healthy and is not.
 func TestNoStubWaitsForAnEventTheAgentsCannotCause(t *testing.T) {
-	for _, gone := range []string{"pipeline-record-deploy.yml"} {
+	for _, gone := range []string{"pipeline-record-deploy.yml", "pipeline-preview.yml"} {
 		path := filepath.Join("..", "..", "examples", "stubs", gone)
 		if _, err := os.Stat(path); err == nil {
 			t.Errorf("%s is back — it triggers on an event GITHUB_TOKEN cannot raise; the work belongs in the harness", gone)

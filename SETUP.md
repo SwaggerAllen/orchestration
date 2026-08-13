@@ -179,18 +179,31 @@ Everything happens in the one account that already holds your domains.
    - **Access Policy off** for now — see item 5.
 
    The Pages name need not match the repo name, but the only name that
-   has to agree is that repo's config `preview.pagesProject` — both the
-   preview and cleanup workflows read it from there rather than
-   carrying their own copy, so the config is the one place to set it.
+   has to agree is that repo's config `preview.pagesProject` — the
+   agent actions and the cleanup workflow read it from there rather
+   than carrying their own copy, so the config is the one place to set
+   it.
 
    Branch previews then appear at
-   `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
-   push — that's the whole preview feature; we build no machinery.
+   `<branch-slug>.orchestration-dummy.pages.dev`, updated whenever an
+   agent pushes — that's the whole preview feature; we build no
+   machinery.
+
+   **Published by the agent runs, not by a push trigger.** It was a
+   workflow on `push`, and it never fired for the pipeline: GitHub does
+   not start a workflow run from an event created with `GITHUB_TOKEN`,
+   which is what the agents push with. So previews built for your
+   branches and never for an agent's — missing from the exact sign-off
+   they exist for. The design and dev actions now build and publish
+   after pushing, which is also why those stubs pass
+   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` through. Drop
+   those two lines to run a project without previews; the steps skip
+   and say so.
 
    The project's own `.pages.dev` root stays at the placeholder,
-   because the preview stub deliberately skips `main`: design review
-   reads branch previews, and publishing main would spend a deployment
-   on a URL nothing in the protocol consults.
+   because nothing publishes `main`: design review reads branch
+   previews, and publishing main would spend a deployment on a URL
+   nothing in the protocol consults.
 
    **Not shared between repos**: both repos deploy their `main` as the
    production deployment, so one Pages project serving two repos would
@@ -220,14 +233,19 @@ Everything happens in the one account that already holds your domains.
    code runs. Adding Workers:Edit to it would let any of them redeploy
    the metronome that drives all of them. Two tokens keeps the
    control plane's credential out of reach of the projects it drives.
-4. **Watch the deployment allowance.** Every push to every branch
-   publishes a preview, and Cloudflare's free tier caps deployments per
-   month. The `pipeline-preview-cleanup.yml` stub deletes a branch's
-   previews when its PR closes, which keeps the steady state small; a
-   heavy testing day can still hit the ceiling, and the symptom is a
-   stale `Design review` link rather than an obvious failure. The fix is
-   deleting old deployments in the dashboard or pausing the preview stub
-   on the dummy.
+4. **Watch the deployment allowance.** Every agent push publishes a
+   preview, and Cloudflare's free tier caps deployments per month. The
+   `pipeline-preview-cleanup.yml` stub deletes a branch's previews when
+   its PR closes, which keeps the steady state small — but only for a
+   PR **you** close. An agent merge closes the PR with `GITHUB_TOKEN`,
+   which raises no workflow run, so those previews are left behind
+   until something else prunes them. Janitorial rather than protocol
+   (the cleanup workflow says so in its own header), and the failure
+   mode is clutter; a heavy testing day can still hit the ceiling, and
+   the symptom is a stale `Design review` link rather than an obvious
+   failure. The fix is deleting old deployments in the dashboard, or
+   dropping the Cloudflare inputs from the agent stubs to pause
+   previews on the dummy.
 5. Preview URLs are unauthenticated (obscure subdomains). Fine at one
    author (DESIGN §4); **Cloudflare Access** (Zero Trust → Access →
    Applications, free ≤50 users) is the upgrade path if that stops
