@@ -130,6 +130,16 @@ jobs:
             exit 1
           fi
 
+          # Shape-checked rather than tolerated. `jq '.[]?'` would treat
+          # a malformed file as an empty one and quietly revert nothing,
+          # which is the failure this step exists to prevent — so an
+          # array is required and anything else stops the run.
+          if ! jq -e 'type == "array"' "$MERGES" >/dev/null; then
+            echo "::error::$MERGES is not a JSON array — refusing to guess what to revert"
+            cat "$MERGES"
+            exit 1
+          fi
+
           # Newest first: reverting in reverse landing order is the only
           # order that applies cleanly when two tickets touched the same
           # file.
