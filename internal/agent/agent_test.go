@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
@@ -207,10 +209,10 @@ func TestAbortRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Abort(ctx, p, res.TicketID, "pushback", ""); err == nil {
+	if err := Abort(ctx, p, res, "pushback", ""); err == nil {
 		t.Error("push-back without its argument must be refused")
 	}
-	if err := Abort(ctx, p, res.TicketID, "pushback", "The design assumes a socket the static export cannot have."); err != nil {
+	if err := Abort(ctx, p, res, "pushback", "The design assumes a socket the static export cannot have."); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
@@ -222,10 +224,80 @@ func TestAbortRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Abort(ctx, p, res2.TicketID, "failed", ""); err != nil {
+	if err := Abort(ctx, p, res2, "failed", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, j.ID); got != protocol.Blocked {
 		t.Errorf("state = %q, want blocked", got)
 	}
+	// The origin rides on the comment: only the author moves a ticket out
+	// of Blocked and they pick the state, so "In progress" is the whole
+	// answer to the question they are being asked.
+	if got := blockedFrom(t, tr, cfg, j.ID); got != string(protocol.InProgress) {
+		t.Errorf("blocked marker from = %q, want %q", got, protocol.InProgress)
+	}
+}
+
+// needs-setup is Blocked's third flavor: nothing failed, nothing is owed
+// a judgment, a human has to do something the run cannot. It has to be
+// distinguishable from a crash on the ticket itself, or the Blocked
+// column stops answering "what is broken".
+func TestAbortNeedsSetupIsNotAFailure(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Needs a secret", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Abort(ctx, p, res, "needs-setup", ""); err == nil {
+		t.Error("needs-setup without saying what to set up must be refused — nobody could unblock it")
+	}
+	if err := Abort(ctx, p, res, "needs-setup", "STRIPE_WEBHOOK_SECRET has to exist in the deploy environment."); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	found := false
+	for _, l := range issue.Labels {
+		if l == core.LabelNeedsSetup {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("labels = %v, want needs-setup — otherwise this reads as a crash", issue.Labels)
+	}
+	if got := blockedFrom(t, tr, cfg, i.ID); got != string(protocol.InProgress) {
+		t.Errorf("blocked marker from = %q, want %q", got, protocol.InProgress)
+	}
+}
+
+// blockedFrom reads the `from` field off the newest blocked marker.
+func blockedFrom(t *testing.T, tr *tracker.Memory, cfg *config.Config, id string) string {
+	t.Helper()
+	var from string
+	for _, c := range findIssue(t, tr, cfg, id).Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err == nil && ok && m.Kind == marker.Blocked {
+			from = m.Fields["from"]
+		}
+	}
+	return from
+}
+
+func findIssue(t *testing.T, tr *tracker.Memory, cfg *config.Config, id string) tracker.Issue {
+	t.Helper()
+	issues, err := tr.ListIssues(context.Background(), cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range issues {
+		if i.ID == id {
+			return i
+		}
+	}
+	t.Fatalf("no issue %s", id)
+	return tracker.Issue{}
 }

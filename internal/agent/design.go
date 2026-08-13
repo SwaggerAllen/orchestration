@@ -45,6 +45,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Mode:        mode,
+		State:       t.State,
 		Scope:       t.Description,
 		Description: t.Description,
 	}

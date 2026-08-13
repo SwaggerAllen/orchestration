@@ -44,6 +44,15 @@ the diff.
   as drawn goes back with the argument why — never a silently worse
   version, never a silent third thing. The harness command for this is
   an abort with reason `pushback`; write the argument.
+- **Work only a human can do has its own channel too.** A secret that has
+  to exist in an environment, an API to enable, an account to create —
+  nothing failed and nothing is owed a judgment, but you cannot finish
+  and neither can the next run. Abort with reason `needs-setup` and say
+  exactly what has to be done; the harness parks the ticket with a label
+  saying it is waiting rather than broken. Do not use it for work you
+  could do and would rather not, and do not report it as a failure —
+  a Blocked column where waiting and broken look the same stops telling
+  anyone anything.
 - **Run the quality gates** (`pipeline.config.json` → `qualityGates`)
   before you finish. Green gates are the next state's entry condition;
   finishing red just bounces the ticket back to you with a marker.

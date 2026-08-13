@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -411,5 +412,82 @@ func TestLiveSuiteNotDispatchedPastTodo(t *testing.T) {
 		if a.Kind == ActDispatch && a.Agent == AgentLiveSuite {
 			t.Fatalf("live suite dispatches only in Todo, got %v", a)
 		}
+	}
+}
+
+// Every arrival in Blocked says where it came from. Only the author
+// moves a ticket out and they choose the state (DESIGN §12), so the
+// origin is the answer to the question they are being asked — and it
+// used to live only in the tracker's history, where no tool could read
+// it and the author had to remember. Asserted over the real sweep paths
+// rather than over the helper, so a rule that grew its own transition
+// would be caught here.
+func TestEveryBlockedArrivalRecordsWhereItCameFrom(t *testing.T) {
+	cases := []struct {
+		name string
+		snap *Snapshot
+	}{
+		{"stale claim", snap(tk("T1", protocol.InProgress, func(t *Ticket) {
+			t.StateSince = t0.Add(-time.Hour)
+			t.Run = &Run{ID: "r1", Kind: AgentDev, Live: false, EndedAt: t0.Add(-30 * time.Minute)}
+		}))},
+		{"CI red twice", snap(tk("T1", protocol.Checks,
+			withComment(marker.CIRed, map[string]string{"run": "https://ci/1", "attempt": "1"}),
+			func(t *Ticket) { t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/2"} }))},
+		{"second reconcile bounce", snap(tk("T1", protocol.ReadyForRework,
+			withComment(marker.ReconcileBounce, map[string]string{"n": "1"}),
+			withComment(marker.ReconcileBounce, map[string]string{"n": "2"})))},
+		{"deploy failed", snap(tk("T1", protocol.Merged, func(t *Ticket) {
+			t.Deploy = DeployFailed
+		}))},
+		{"deployed with needs-review", snap(tk("T1", protocol.Merged, func(t *Ticket) {
+			t.Deploy = DeployDeployed
+			t.Labels = []string{LabelNeedsReview}
+		}))},
+		{"deploy timeout", snap(tk("T1", protocol.Merged, func(t *Ticket) {
+			t.StateSince = t0.Add(-100 * time.Hour)
+		}))},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			want := c.snap.Tickets[0].State
+			var blocked *Action
+			for _, a := range Sweep(c.snap) {
+				if a.Kind == ActTransition && a.To == protocol.Blocked {
+					got := a
+					blocked = &got
+				}
+			}
+			if blocked == nil {
+				t.Fatal("no transition into Blocked — the case no longer exercises what it names")
+			}
+			if blocked.Marker == nil {
+				t.Fatal("blocked with no marker at all; the origin has nowhere to live")
+			}
+			if got := blocked.Marker.Fields["from"]; got != string(want) {
+				t.Errorf("from = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// The test above can only check paths it knows about. This one catches
+// the path nobody wrote a case for: block() is the single constructor
+// for a transition into Blocked, so a new rule that builds its own
+// Action reaches Blocked without an origin and without failing anything
+// above.
+func TestOnlyBlockConstructsATransitionIntoBlocked(t *testing.T) {
+	body, err := os.ReadFile("sweep.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []int
+	for i, line := range strings.Split(string(body), "\n") {
+		if strings.Contains(line, "To:") && strings.Contains(line, "protocol.Blocked") {
+			lines = append(lines, i+1)
+		}
+	}
+	if len(lines) != 1 {
+		t.Errorf("sweep.go builds a Blocked transition at lines %v; block() must be the only one, or the origin is optional again", lines)
 	}
 }

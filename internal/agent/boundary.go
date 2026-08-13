@@ -71,7 +71,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	plan := &BoundaryPlan{
 		ClaimResult: ClaimResult{
 			TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-			Mode: "boundary", Description: t.Description,
+			Mode: "boundary", Description: t.Description, State: t.State,
 		},
 		Milestone: t.Milestone,
 		Done:      map[string]bool{},

@@ -205,6 +205,12 @@ const (
 	LabelReEvaluate  = "re-evaluate"
 	LabelNeedsReview = "needs-review"
 	LabelBoundary    = "milestone-boundary"
+	// LabelNeedsSetup is Blocked's third flavor (DESIGN §12): nothing
+	// failed and no judgment is owed — a human has to do something the
+	// automation cannot, like putting a secret in an environment. It
+	// reads as a failure in a Blocked column otherwise, which is how the
+	// Blocked count stops being a health signal.
+	LabelNeedsSetup = "needs-setup"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {

@@ -487,6 +487,7 @@ and nothing is re-evaluated.
 | `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
 | `re-evaluate` | Unresolved collision (§7). |
 | `needs-review` | Reconciliation couldn't tell. Deployed, clean, awaiting the author's eye (§11). |
+| `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
 
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
@@ -635,8 +636,10 @@ signal that was missing.
    marker is the author's to re-run — the sweep does not resurrect it, for the same reason
    stale claims are detected rather than silently retried.
 3. **Gate:** all `re-evaluate` labels clear, and nothing in `Blocked` except tickets carrying
-   `needs-review` — those are the author's pass, not a barrier to it. Anything outstanding is
-   named on the boundary ticket.
+   `needs-review` — those are the author's pass, not a barrier to it. A `needs-setup` ticket
+   *is* a barrier: it is work the milestone is waiting on, and closing a boundary over one
+   would ship a milestone whose last step nobody took. Anything outstanding is named on the
+   boundary ticket.
 4. **Author's pass**, with the ticket still in `Todo`: the live-suite result first, then manual
    testing across the milestone, plus every `Blocked` ticket carrying `needs-review`, each of
    which the author closes or sends to `Ready for rework`. Blockers filed during the pass run
@@ -831,18 +834,34 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has two flavors, and the
-comment says which:
+**`Blocked` is global.** Any agent may move any ticket there. It has three flavors, and both
+the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
 - **Nothing failed, but a judgment is needed.** The `needs-review` case: deployed, clean, and
   waiting on a human to say whether it landed as asked.
+- **Nothing failed and no judgment is owed — a human has to do something the automation
+  can't.** The `needs-setup` case: a secret that has to exist in an environment, an API to
+  enable, an account to create. An agent files it with `abort --reason needs-setup`, saying
+  what has to be done; the harness attaches the label. It is not a new state, because a state
+  is protocol vocabulary and this one would dispatch nothing — it would be `Blocked` under
+  another name with a duplicate copy of every rule attached to it. It is a label because the
+  distinction it carries is "is anything broken", and a `Blocked` column where waiting and
+  broken look identical answers that question wrongly.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation
 can't do — a comment resolving an ambiguity, a code change, a redeploy — and a ticket returned
 to the state it bounced from would arrive in a different condition than it left. The author is
 the one who knows which.
+
+**Every arrival in `Blocked` records the state it came from,** in a `from` field on the
+transition's marker — carried on whichever marker the transition already posts, and on a bare
+`blocked` marker when it posts none. The rule above is what makes this necessary rather than
+nice: the author is being asked to choose a destination, and a `needs-review` ticket answers
+that by sitting at the end of the line while "`Reworking`, until someone sets a secret" does
+not. The origin was previously recoverable only from the tracker's history, which no tool can
+read and no author reliably remembers.
 
 **Escalation rules:**
 - **CI red on a non-draft PR → a failure comment, then `Ready for rework`.** The comment is
@@ -981,9 +1000,12 @@ them.
 
 ## 14. Open items
 
-- **`needs-review` tickets have no timeout.** They sit in `Blocked` until a milestone boundary,
-  potentially weeks, deployed the whole time. Deliberate, and sound only while there is one
-  author.
+- **`needs-review` and `needs-setup` tickets have no timeout.** They sit in `Blocked` until a
+  milestone boundary or until a human does the thing — potentially weeks, deployed the whole
+  time in the `needs-review` case. Deliberate, and sound only while there is one author. Note
+  that `needs-setup` is the flavor most likely to want alerting later: it is the one where the
+  wait is not the author reviewing at their own pace but the author not yet knowing they were
+  asked.
 - **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
   System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
   what remains uncovered is files owned by no system — the router, the manifests — which are
