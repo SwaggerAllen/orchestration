@@ -522,8 +522,8 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback or failed")
-	message := fs.String("message", "", "the argument (required for pushback)")
+	reason := fs.String("reason", "failed", "pushback, failed or needs-setup")
+	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -538,7 +538,7 @@ func cmdAgentAbort(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := agent.Abort(context.Background(), p, res.TicketID, *reason, *message); err != nil {
+	if err := agent.Abort(context.Background(), p, res, *reason, *message); err != nil {
 		return err
 	}
 	fmt.Printf("aborted %s (%s)\n", res.TicketKey, *reason)

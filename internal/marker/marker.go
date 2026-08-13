@@ -67,6 +67,17 @@ const (
 	// ticket — the once-per-milestone real-network check the author's
 	// pass reads (DESIGN §10). Fields: result=pass|fail, run=<url>.
 	LiveSuite Kind = "live-suite"
+	// Blocked records a ticket's arrival in Blocked and, in `from`, the
+	// state it arrived from. Only the author moves a ticket out of
+	// Blocked and they choose the state (DESIGN §12) — which is right,
+	// because unblocking usually needs something the automation cannot
+	// do. But choosing needs knowing where it came from, and until this
+	// existed only the stale-claim path recorded that; everywhere else
+	// the origin lived in the tracker's history and nowhere a tool could
+	// read. Carried on whichever marker the transition already posts,
+	// and posted alone when it posts none. Fields: from=<state>, and on
+	// a needs-setup block, setup=<what a human has to do>.
+	Blocked Kind = "blocked"
 	// Preview records where this design pass's storybook export was
 	// published. Design review is the author reading the rendered
 	// states (DESIGN §4), and until this existed the ticket asking for

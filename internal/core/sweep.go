@@ -242,6 +242,33 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 	return acts
 }
 
+// block builds the one shape a transition into Blocked may take, and it
+// is the only place in this file that transitions to it — a test holds
+// that, because the point is that no future path can forget the part
+// below.
+//
+// Only the author moves a ticket out of Blocked and they choose the
+// state (DESIGN §12). Choosing needs knowing where it came from, and a
+// ticket parked mid-flight does not announce that the way a needs-review
+// ticket does: needs-review sits at the end of the line with one obvious
+// destination, while "Reworking, until someone sets a secret" has to be
+// remembered. So every arrival stamps `from` on whatever marker the
+// transition already carries, and gets a bare `blocked` marker when it
+// carries none.
+func block(t *Ticket, m *marker.Marker, prose, reason string) []Action {
+	if m == nil {
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{}}
+	}
+	if m.Fields == nil {
+		m.Fields = map[string]string{}
+	}
+	m.Fields["from"] = string(t.State)
+	return []Action{{
+		Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked, Marker: m,
+		Prose: prose, Reason: reason,
+	}}
+}
+
 // ciFor turns CI results on a Checks ticket into transitions (DESIGN §12,
 // §13). In production the project stub delivers these event-driven; the
 // sweep computes the same answers so the polled loop backstops lost events.
@@ -279,11 +306,9 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 			"attempt": fmt.Sprintf("%d", attempt),
 		}}
 		if attempt >= 2 {
-			return []Action{{
-				Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked, Marker: m,
-				Prose:  "Second CI failure on this branch. Two reds is rarely a flake — the author decides whether this is scope, design, or infrastructure (DESIGN §12).",
-				Reason: "CI red twice on the same branch",
-			}}
+			return block(t, m,
+				"Second CI failure on this branch. Two reds is rarely a flake — the author decides whether this is scope, design, or infrastructure (DESIGN §12).",
+				"CI red twice on the same branch")
 		}
 		return []Action{{
 			Kind: ActTransition, TicketID: t.ID, To: protocol.ReadyForRework, Marker: m,
@@ -301,11 +326,9 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 	// bounce markers, and two failures to land the same scope is a design
 	// problem, not an implementation one.
 	if t.State == protocol.ReadyForRework && len(markersOf(t, marker.ReconcileBounce)) >= 2 {
-		return []Action{{
-			Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked,
-			Prose:  "Second bounce from reconciliation on the same ticket. This is a design problem, not an implementation one — Designing is the usual route from here (DESIGN §12).",
-			Reason: "second reconcile bounce",
-		}}
+		return block(t, nil,
+			"Second bounce from reconciliation on the same ticket. This is a design problem, not an implementation one — Designing is the usual route from here (DESIGN §12).",
+			"second reconcile bounce")
 	}
 	return nil
 }
@@ -320,29 +343,23 @@ func postDeployFor(s *Snapshot, t *Ticket) []Action {
 	switch t.Deploy {
 	case DeployDeployed:
 		if t.HasLabel(LabelNeedsReview) {
-			return []Action{{
-				Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked,
-				Prose:  "Deployed clean, but reconciliation could not tell whether this landed as asked (needs-review). A human look closes it (DESIGN §11).",
-				Reason: "deployed with needs-review",
-			}}
+			return block(t, nil,
+				"Deployed clean, but reconciliation could not tell whether this landed as asked (needs-review). A human look closes it (DESIGN §11).",
+				"deployed with needs-review")
 		}
 		return []Action{{
 			Kind: ActTransition, TicketID: t.ID, To: protocol.Done,
 			Reason: "deployed and clean (DESIGN §11)",
 		}}
 	case DeployFailed:
-		return []Action{{
-			Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked,
-			Prose:  "The deployment carrying this merge failed. Recovery is a redeploy, not a state change, so the author decides where this goes (DESIGN §12).",
-			Reason: "deployment failed",
-		}}
+		return block(t, nil,
+			"The deployment carrying this merge failed. Recovery is a redeploy, not a state change, so the author decides where this goes (DESIGN §12).",
+			"deployment failed")
 	default:
 		if s.DeployTimeout > 0 && s.Now.Sub(t.StateSince) > s.DeployTimeout {
-			return []Action{{
-				Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked,
-				Prose:  "Merged past the deploy timeout with no deployment covering it — merged but never deployed is otherwise invisible (DESIGN §12).",
-				Reason: "deploy timeout",
-			}}
+			return block(t, nil,
+				"Merged past the deploy timeout with no deployment covering it — merged but never deployed is otherwise invisible (DESIGN §12).",
+				"deploy timeout")
 		}
 	}
 	return nil
@@ -384,15 +401,13 @@ func staleClaimFor(s *Snapshot, t *Ticket) []Action {
 	if s.StaleClaimGrace <= 0 || s.Now.Sub(since) <= s.StaleClaimGrace {
 		return nil
 	}
-	return []Action{{
-		Kind: ActTransition, TicketID: t.ID, To: protocol.Blocked,
-		Marker: &marker.Marker{Kind: marker.StaleClaim, Fields: map[string]string{
-			"state": string(t.State),
-			"run":   t.Run.ID,
-		}},
-		Prose:  fmt.Sprintf("The %s run claiming this ticket is no longer live and the grace period passed. At one agent a stuck claim halts the queue, so it is detected rather than waited out (DESIGN §12).", kind),
-		Reason: "stale claim",
-	}}
+	// `run` only: the state this died in is `from`, which block stamps —
+	// it used to be a second field named `state` saying the same thing,
+	// and one fact under two names is the beginning of them disagreeing.
+	m := &marker.Marker{Kind: marker.StaleClaim, Fields: map[string]string{"run": t.Run.ID}}
+	return block(t, m,
+		fmt.Sprintf("The %s run claiming this ticket is no longer live and the grace period passed. At one agent a stuck claim halts the queue, so it is detected rather than waited out (DESIGN §12).", kind),
+		"stale claim")
 }
 
 // boundaryFor creates the boundary ticket when the last milestone ticket

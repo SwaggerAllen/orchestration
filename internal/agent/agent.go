@@ -32,6 +32,12 @@ type ClaimResult struct {
 	// Mode is "dev" or "rework" — it decides where the scope came from
 	// and which state was claimed.
 	Mode string
+	// State is the state the run holds while it works, recorded at claim
+	// so an abort can say where the ticket is coming from. Only the
+	// author moves a ticket out of Blocked and they choose the state
+	// (DESIGN §12) — a choice that needs the origin, which the run knows
+	// and the blocked ticket otherwise does not carry.
+	State protocol.State
 	// Scope is the text the agent implements: the description on a fresh
 	// ticket, the newest comment on a returned one (DESIGN §2.3).
 	Scope string
@@ -138,6 +144,10 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 			return nil, fmt.Errorf("claim %s: in rework but has no comments — the newest comment is the scope and there isn't one", t.Key)
 		}
 	}
+	// The state the run works in, not the one it was picked up from: an
+	// abort is coming from where the agent is, which is the state the
+	// claim is about to write.
+	res.State = claimState
 	if m := baseRe.FindStringSubmatch(t.Description); m != nil {
 		res.BaseSHA = m[1]
 	}
@@ -192,11 +202,27 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	return p.TransitionTicket(ctx, res.TicketID, protocol.Checks)
 }
 
-// Abort routes a run that cannot finish. Push-back goes to Designing with
-// the argument — never a silently worse version (DESIGN §2.7). Failure
-// goes to Blocked naming what failed (DESIGN §12).
-func Abort(ctx context.Context, p *plane.Plane, ticketID, reason, message string) error {
+// Abort routes a run that cannot finish. Three reasons, and the third is
+// not a failure:
+//
+//   - pushback   -> Designing with the argument, never a silently worse
+//     version (DESIGN §2.7)
+//   - failed     -> Blocked naming what failed (DESIGN §12)
+//   - needs-setup -> Blocked with the needs-setup label: nothing failed
+//     and no judgment is owed, a human has to do something the run
+//     cannot — put a secret in an environment, enable an API, create an
+//     account. Without its own flavor it lands in Blocked looking like a
+//     failure, and the Blocked column stops being readable as "what is
+//     broken".
+//
+// Both Blocked routes stamp the state the run was working in. Only the
+// author moves a ticket out of Blocked and they choose the state
+// (DESIGN §12); a ticket parked mid-flight for a secret has no obvious
+// destination the way a needs-review ticket does, so the origin is
+// recorded rather than left to the tracker's history.
+func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, message string) error {
 	var to protocol.State
+	var m *marker.Marker
 	switch reason {
 	case "pushback":
 		to = protocol.Designing
@@ -208,13 +234,27 @@ func Abort(ctx context.Context, p *plane.Plane, ticketID, reason, message string
 		if message == "" {
 			message = "Agent run failed; see the workflow logs."
 		}
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{}}
+	case "needs-setup":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: needs-setup without saying what has to be set up is a ticket nobody can unblock")
+		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"setup": "1"}}
+		if err := p.AddTicketLabel(ctx, res.TicketID, core.LabelNeedsSetup); err != nil {
+			return err
+		}
 	default:
-		return fmt.Errorf("abort: reason must be pushback or failed, got %q", reason)
+		return fmt.Errorf("abort: reason must be pushback, failed or needs-setup, got %q", reason)
 	}
-	if err := p.CommentTicket(ctx, ticketID, message); err != nil {
+	if m != nil {
+		m.Fields["from"] = string(res.State)
+		message = m.Comment(message)
+	}
+	if err := p.CommentTicket(ctx, res.TicketID, message); err != nil {
 		return err
 	}
-	return p.TransitionTicket(ctx, ticketID, to)
+	return p.TransitionTicket(ctx, res.TicketID, to)
 }
 
 // newestComment returns the body of the most recent comment.

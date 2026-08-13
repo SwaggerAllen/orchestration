@@ -45,6 +45,7 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Mode:        "reconcile",
+		State:       t.State,
 		Scope:       t.Description,
 		Description: t.Description,
 		Branch:      pr.Branch,

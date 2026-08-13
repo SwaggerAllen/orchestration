@@ -137,6 +137,7 @@ var Labels = []string{
 	"design-inbox",
 	"re-evaluate",
 	"needs-review",
+	"needs-setup",
 	"milestone-boundary",
 }
 
