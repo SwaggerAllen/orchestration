@@ -132,7 +132,7 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
-func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome) error {
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL string) error {
 	switch o.Outcome {
 	case "artifacts":
 		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
@@ -150,6 +150,20 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		}
 		if o.Summary != "" {
 			if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+				return err
+			}
+		}
+		// Where to look, posted before the ticket asks to be looked at.
+		// Design review is the author reading the rendered states
+		// (DESIGN §4), and the ticket used to arrive in that state
+		// without saying where they were — the URL had to be rebuilt
+		// from a branch name and a Pages project name, by hand, every
+		// time. Absent when the project has no preview wired, which is
+		// silence rather than a broken link.
+		if previewURL != "" {
+			m := marker.Marker{Kind: marker.Preview, Fields: map[string]string{"url": previewURL}}
+			prose := fmt.Sprintf("Storybook preview for this pass: %s\n\nThis is what Design review reads — the rendered states, alongside the doc diff on the PR.", previewURL)
+			if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
 				return err
 			}
 		}

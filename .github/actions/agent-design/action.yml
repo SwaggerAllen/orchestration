@@ -150,6 +150,7 @@ runs:
         echo "dir=$(jq -r .preview.outputDir "$CFG")" >> "$GITHUB_OUTPUT"
 
     - name: publish the preview
+      id: published
       if: inputs.cloudflare_api_token != ''
       uses: cloudflare/wrangler-action@v3
       with:
@@ -166,10 +167,16 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        # The URL comes from wrangler rather than being rebuilt from the
+        # branch name and the Pages project. Cloudflare's branch-alias
+        # slugging is its own rule — truncation and hashing included —
+        # so deriving it would be guessing at someone else's algorithm
+        # and posting the guess to the author as a link.
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
-          --outcome "$RUNNER_TEMP/pipeline/outcome.json"
+          --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
+          --preview-url "${{ steps.published.outputs.deployment-url }}"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'

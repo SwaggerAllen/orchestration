@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -26,7 +27,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
-	if err := FinishDesign(ctx, p, h, res, o); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -59,7 +60,7 @@ func TestDesignDecisionlessAutoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
-	if err := FinishDesign(ctx, p, h, res, o); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -107,7 +108,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 	o := &DesignOutcome{Outcome: "clear", Summary: "The colliding ticket rewrote a different region; this scope still holds."}
-	if err := FinishDesign(ctx, p, h, res, o); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -129,7 +130,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	o2 := &DesignOutcome{Outcome: "demote", Summary: "The ground moved under this scope; it needs a fresh pass."}
-	if err := FinishDesign(ctx, p, h, res2, o2); err != nil {
+	if err := FinishDesign(ctx, p, h, res2, o2, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.Designing {
@@ -230,5 +231,71 @@ func writeNonAsks(t *testing.T, cfg *config.Config, body string) {
 	t.Helper()
 	if err := os.WriteFile(cfg.InRoot(cfg.NonAsksPath), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Design review is the author reading the rendered states (DESIGN §4),
+// and the ticket used to arrive in that state without saying where they
+// were — the URL had to be rebuilt by hand from a branch name and a
+// Pages project every time.
+func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_60", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
+	const url = "https://abc123.orchestration-dummy.pages.dev"
+	if err := FinishDesign(ctx, p, h, res, o, url); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
+		t.Fatalf("state = %q", got)
+	}
+
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	var previewAt = -1
+	for n, c := range issues[0].Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err == nil && ok && m.Kind == marker.Preview {
+			previewAt = n
+			if m.Fields["url"] != url {
+				t.Errorf("preview marker url = %q, want %q", m.Fields["url"], url)
+			}
+			if !strings.Contains(c.Body, url) {
+				t.Error("the prose must carry the link too — the marker is for the machine, the link is for the author")
+			}
+		}
+	}
+	if previewAt < 0 {
+		t.Fatal("no preview marker on a ticket being sent to Design review")
+	}
+}
+
+// A project with no preview wired gets silence rather than a broken
+// link, and the pass still lands.
+func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_61", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
+		t.Errorf("state = %q, want design_review", got)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	for _, c := range issues[0].Comments {
+		if m, ok, err := marker.Parse(c.Body); err == nil && ok && m.Kind == marker.Preview {
+			t.Error("posted a preview marker with no preview")
+		}
 	}
 }
