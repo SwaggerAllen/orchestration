@@ -1,13 +1,14 @@
 # Ring-3 rehearsal against the disposable project (PLAN §2).
 #
 # Lives here and is deliberately absent from examples/stubs. The reset
-# phase archives every ticket in a project and force-restores a branch;
-# a destructive workflow shipped as a stub is one that eventually lands
-# in a real project repo. Nothing here is ever copied to a project.
+# phase archives every ticket in a project and rewrites a branch's
+# contents; a destructive workflow shipped as a stub is one that
+# eventually lands in a real project repo. Nothing here is ever copied
+# to a project.
 #
 # Four phases, run one at a time so a human can look between them:
 #
-#   reset  — archive every ticket, restore the dummy to its seed commit
+#   reset  — archive every ticket, revert what the last run merged
 #   seed   — create the scenario's milestones and tickets
 #   check  — assert where everything ended up
 #   full   — reset then seed, and stop; the pipeline does the middle
@@ -76,7 +77,7 @@ jobs:
       - name: refuse a config that is not disposable
         if: steps.cfg.outputs.disposable != 'true'
         run: |
-          echo "::error::${{ env.CONFIG }} does not set \"disposable\": true — this workflow archives tickets and force-pushes a branch, and only a rehearsal project may carry that flag"
+          echo "::error::${{ env.CONFIG }} does not set \"disposable\": true — this workflow archives every ticket in the project and reverts commits on its main, and only a rehearsal project may carry that flag"
           exit 1
 
       - name: checkout the project repo
@@ -92,29 +93,82 @@ jobs:
         run: |
           go run ./cmd/pipeline scenario reset \
             --config "$CONFIG" \
-            --confirm "${{ steps.cfg.outputs.project }}"
+            --confirm "${{ steps.cfg.outputs.project }}" \
+            --merged-out "$RUNNER_TEMP/merges.json"
 
-      - name: reset the repo to its seed commit
+      # Undo what the last rehearsal landed, and nothing else.
+      #
+      # This used to force-push main back to the seed tag, which threw
+      # away every commit merged since — and most commits on a scratch
+      # project are infrastructure, not rehearsal output. Keeping the
+      # tag current meant re-cherry-picking and re-tagging after each of
+      # those merges, a chore whose omission is silent: a rehearsal
+      # started from a stale scaffold still reports a pass.
+      #
+      # Reverting instead needs no force, so branch protection on main
+      # and rehearsals can coexist, and the seed tag becomes a reference
+      # point rather than a destination that has to be kept moving.
+      #
+      # Which commits are the rehearsal's is not guessed from subjects
+      # or branch names: reconcile writes a `merged` marker carrying the
+      # squash sha on the ticket, and the tracker step above hands them
+      # over. The pipeline squash-merges, so each is a single commit —
+      # an ordinary revert, no merge-parent to choose.
+      - name: revert what the last rehearsal merged
         if: inputs.phase == 'reset' || inputs.phase == 'full'
         working-directory: .project
         run: |
           set -euo pipefail
-          # The seed tag is the documentation-and-scaffold state a
-          # rehearsal starts from. Without it there is no defined "back
-          # to the beginning", and each run would start from wherever
-          # the last one happened to stop.
-          if ! git rev-parse --verify --quiet refs/tags/seed >/dev/null; then
-            echo "::error::orchestration-dummy has no 'seed' tag. Tag the commit a rehearsal should start from: git tag seed <sha> && git push origin seed"
-            exit 1
-          fi
           git config user.name "pipeline-rehearsal"
           git config user.email "pipeline@invalid"
+          git checkout -q main
+          git pull -q --ff-only origin main
 
-          git push --force origin refs/tags/seed:refs/heads/main
-          echo "main restored to the seed tag"
+          MERGES="$RUNNER_TEMP/merges.json"
+          if [ ! -f "$MERGES" ]; then
+            echo "::error::the tracker step wrote no merge list — refusing to guess what to revert"
+            exit 1
+          fi
 
-          # Every branch the pipeline made last run. main and the seed
-          # tag are what survive; anything else is last run's litter.
+          # Newest first: reverting in reverse landing order is the only
+          # order that applies cleanly when two tickets touched the same
+          # file.
+          SHAS="$(jq -r '.[].sha' "$MERGES" | tac)"
+          if [ -z "$SHAS" ]; then
+            echo "the last rehearsal merged nothing; main is left as it is"
+          fi
+          for sha in $SHAS; do
+            if ! git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+              echo "  $sha is not on main (reverted by hand, or never landed) — skipping"
+              continue
+            fi
+            if git rev-list --grep="^This reverts commit ${sha}" HEAD | grep -q .; then
+              echo "  $sha already reverted — skipping"
+              continue
+            fi
+            echo "  reverting $sha"
+            # No -X ours, no --strategy: a conflict means an
+            # infrastructure commit touched the same lines this ticket
+            # did, and resolving that automatically would start the next
+            # rehearsal from a tree nobody chose.
+            if ! git revert --no-edit "$sha"; then
+              echo "::error::reverting $sha conflicts with work merged since. Resolve it by hand on main, then re-run reset."
+              git revert --abort || true
+              git status --porcelain
+              exit 1
+            fi
+          done
+
+          # What survived, so a stale baseline is visible rather than
+          # assumed. The seed tag is the anchor this is measured from.
+          echo "kept on main since the seed tag:"
+          git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD \
+            | sed 's/^/  /' || true
+
+          git push origin main
+
+          # Every branch the pipeline made last run. main is what
+          # survives; anything else is last run's litter.
           for ref in $(git for-each-ref --format='%(refname:short)' refs/remotes/origin \
                        | sed 's|^origin/||' | grep -v -e '^main$' -e '^HEAD$'); do
             echo "  deleting branch $ref"

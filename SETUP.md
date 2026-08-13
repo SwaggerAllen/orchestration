@@ -370,27 +370,52 @@ everything landed. Same scenario every time, so a run that behaves
 differently means something changed — the fixture is fixed, and the
 agents' judgment is the only variable.
 
-**One-time:** tag the dummy's starting state, so "back to the
-beginning" has a definition.
+**The reset reverts; it does not rewind.** Each rehearsal undoes
+exactly the commits the last one merged, and leaves everything else on
+`main` alone. That matters because most of what lands on a scratch
+project is infrastructure — toolchains, stub fixes, config — and
+rewinding to a fixed commit throws all of it away.
+
+Which commits were the rehearsal's is not inferred from commit
+subjects or branch names. Reconcile writes a `merged` marker carrying
+the squash sha onto each ticket, and the reset reads them off the
+tickets it is about to archive — the harness's own record of what it
+merged. It has to happen in that order: an archived issue drops out of
+Linear's listings, so after the archive the answer no longer exists.
+
+Two consequences worth knowing:
+
+- **No force-push**, so branch protection on `main` and rehearsals can
+  coexist. Under the old scheme they could not: rewinding needs bypass,
+  which would have meant an admin token.
+- **A revert that conflicts stops the reset**, naming the commit. It
+  means something merged since touched the same lines the ticket did.
+  Resolve it on `main` by hand and re-run — resolving it automatically
+  would start the next rehearsal from a tree nobody chose.
+
+**One-time:** tag the state a rehearsal is measured from. Under the old
+scheme this was a destination that had to be re-pointed after every
+infrastructure merge; now it is only an anchor for the "kept on main"
+report, and it does not need moving again.
 
 ```sh
-git -C orchestration-dummy tag seed <the scaffold commit>
-git -C orchestration-dummy push origin seed
+git -C orchestration-dummy tag -f seed <the scaffold commit>
+git -C orchestration-dummy push -f origin seed
 ```
 
 Add `REHEARSAL_REPO_TOKEN` to this repo's secrets: a fine-grained PAT
 with **Contents → Read and write** on `orchestration-dummy` only. The
-reset force-pushes `main` back to `seed` and deletes last run's
-branches, which the read-only `PIPELINE_REPO_TOKEN` cannot do — and
-which is exactly why it is a separate, narrower token rather than a
-widening of that one.
+reset commits reverts to `main` and deletes last run's branches, which
+the read-only `PIPELINE_REPO_TOKEN` cannot do — and which is exactly
+why it is a separate, narrower token rather than a widening of that
+one.
 
 **Each rehearsal:** Actions → **rehearse** → Run workflow.
 
 | Phase | What it does |
 | --- | --- |
 | `full` | Reset then seed, and stop |
-| `reset` | Archive every ticket; restore the dummy to `seed` |
+| `reset` | Archive every ticket; revert what the last run merged |
 | `seed` | Create the scenario's milestones and tickets |
 | `check` | Assert the final states, files and markers |
 

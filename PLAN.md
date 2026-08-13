@@ -92,7 +92,9 @@ only ring where the agents' actual judgment is exercised.
   any team it's pointed at. The same command later provisions real projects, so the dummy setup
   path *is* the production setup path.
 - **`pipeline scenario`** (reset / seed / check / validate), driven by the `rehearse` workflow:
-  reset archives every ticket and force-restores the dummy to its `seed` tag; seed writes a
+  reset archives every ticket and reverts exactly the commits those tickets merged, read off
+  their `merged` markers before the archive hides them — never a rewind to a fixed commit, which
+  would throw away the infrastructure that lands on a scratch project between runs; seed writes a
   fixture's milestones and tickets; check asserts where they ended up. Dry runs must be
   repeatable from zero, or they stop being run. Two keys guard the destructive half — the config
   must declare itself `disposable`, and the project id is confirmed separately — and the harness
