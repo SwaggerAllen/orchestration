@@ -530,8 +530,22 @@ step 5 already covered them.
    ordered however suits the project.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
-   `teamId`), its own `designOwnedPaths`, gates, deploy provider
-   (`digitalocean` for a real DO app) and preview project.
+   `teamId`), its own `designOwnedPaths`, `componentPaths`, gates,
+   deploy provider (`digitalocean` for a real DO app) and preview
+   project.
+
+   `componentPaths` is where that project keeps its component modules,
+   and it is the one field whose absence is silent-but-not-broken: the
+   class audit prints that it skipped rather than passing, so a project
+   without it simply never checks that a new component was announced.
+
+   **Write the `ci` workflow too** — it is not a stub, because it holds
+   the project's own gates. The name `ci` is load-bearing (the sweep and
+   the metronome both key on it; if you name it otherwise, set
+   `ciWorkflow` in `PROJECTS`), and it must pass **both** file lists to
+   `pipeline audit` — see `examples/stubs/README.md` for the recipe.
+   Without `--added-files` the class audit cannot tell a component
+   arriving from one being edited, and says so rather than passing.
 
    **Then replace the toolchain block in each agent stub.** The stubs
    ship an Elixir setup because the dummy is Elixir; a Node project
@@ -562,8 +576,18 @@ step 5 already covered them.
    redeploys the Worker on its own — but widening the token is a
    separate act in GitHub's settings, and a beat that dispatches with
    a token that cannot reach the repo just logs a 404 every hour.
-   One webhook on the ORC team serves every project in it; the
+   One Linear webhook on the ORC team serves every project in it; the
    `trackerProject` ids are what route each event to one repo.
+7. **A GitHub webhook on that repo** — unlike Linear's, this one is per
+   repository, because it is the repo that emits the events. Settings →
+   Webhooks → Add webhook: the Worker URL, content type
+   **application/json**, the `WEBHOOK_SECRET` value, and *Let me select
+   individual events* → **Workflow runs** + **Deployment statuses**.
+
+   Skipping it does not break the project; it makes it slow in a way
+   nothing reports. The CI hop has no other trigger — a green build
+   writes nothing to Linear — so without this the ticket sits in
+   `Checks` until the hourly cron notices.
 
 Note: labels are never per-project either, so `screen:`/`system:` labels from
 both projects appear in one list. That is cosmetic only — the queue and
