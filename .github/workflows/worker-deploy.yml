@@ -41,7 +41,7 @@ jobs:
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
           # wrangler deploys happily with an empty secret. The failures
           # land later and quietly: a blank DISPATCH_TOKEN 401s against
@@ -56,8 +56,8 @@ jobs:
             echo "::error::LINEAR_WEBHOOK_SECRET is not set — every Linear webhook would be rejected and the pipeline would fall back to the hourly cron"
             exit 1
           fi
-          if [ -z "$GITHUB_WEBHOOK_SECRET" ]; then
-            echo "::error::GITHUB_WEBHOOK_SECRET is not set — every GitHub webhook would be rejected, and the CI and deploy hops would wait for the hourly cron. They cannot fall back to the project's own workflow triggers: GitHub does not start a run from an event created with GITHUB_TOKEN, which is what every agent pushes with."
+          if [ -z "$WEBHOOK_SECRET" ]; then
+            echo "::error::WEBHOOK_SECRET is not set — every GitHub webhook would be rejected, and the CI and deploy hops would wait for the hourly cron. They cannot fall back to the project's own workflow triggers: GitHub does not start a run from an event created with GITHUB_TOKEN, which is what every agent pushes with."
             exit 1
           fi
 
@@ -83,11 +83,11 @@ jobs:
           secrets: |
             DISPATCH_TOKEN
             LINEAR_WEBHOOK_SECRET
-            GITHUB_WEBHOOK_SECRET
+            WEBHOOK_SECRET
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.GITHUB_WEBHOOK_SECRET }}
+          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
 
       - name: what was deployed
         run: |

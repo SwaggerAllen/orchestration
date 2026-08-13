@@ -44,12 +44,17 @@ export interface Env {
    */
   LINEAR_WEBHOOK_SECRET: string;
   /**
-   * The secret set on the GitHub webhook, per repository (secret).
+   * The secret set on each project repo's GitHub webhook (secret).
    * Unset means GitHub webhooks are rejected, which fails the same way
    * Linear's does: the cron still beats, so the pipeline slows rather
    * than stops.
+   *
+   * The bare name is not sloppiness next to LINEAR_WEBHOOK_SECRET:
+   * Actions reserves the GITHUB_ prefix for secret names, so the
+   * obvious GITHUB_WEBHOOK_SECRET cannot exist on the repository this
+   * value is set on. Same reason DISPATCH_TOKEN is not GITHUB_DISPATCH_TOKEN.
    */
-  GITHUB_WEBHOOK_SECRET: string;
+  WEBHOOK_SECRET: string;
 }
 
 interface Project {
@@ -281,7 +286,7 @@ export default {
     // nothing is dispatched until that sender's own signature passes.
     const ghEvent = request.headers.get("x-github-event");
     if (ghEvent) {
-      if (!(await verifyGitHubSignature(raw, request.headers.get("x-hub-signature-256"), env.GITHUB_WEBHOOK_SECRET))) {
+      if (!(await verifyGitHubSignature(raw, request.headers.get("x-hub-signature-256"), env.WEBHOOK_SECRET))) {
         console.error("metronome: rejected a GitHub webhook with a bad or missing signature");
         return new Response("bad signature\n", { status: 401 });
       }
