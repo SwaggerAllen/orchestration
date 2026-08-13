@@ -28,6 +28,9 @@
     "non-asks.md",
     "lib/sample_web/components/**"
   ],
+  "componentPaths": [
+    "lib/sample_web/components/**"
+  ],
   "nonAsksPath": "non-asks.md",
   "qualityGates": [
     "mix format --check-formatted",

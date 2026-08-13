@@ -41,9 +41,13 @@ paths:
 ```
 
 That map is load-bearing, not documentation. It decides which tickets
-may touch which files at the same time, and CI fails a diff that strays
-outside the maps its ticket's labels cover. Moving code between systems
-means moving the path in the map, in the same change.
+may touch which files at the same time: CI fails a diff that touches a
+**mapped** path whose doc's label the ticket doesn't carry. Paths no map
+claims are **unowned** — deliberate, listed in `systems/README.md`, and
+the audit passes them through, because git's textual conflict detection
+is the mutex there. Unowned is not unaudited-by-accident: name the touch
+in your hand-back. Moving code between systems means moving the path in
+the map, in the same change.
 
 ## Invariants
 

@@ -36,7 +36,12 @@ narrative/system docs get committed. Scratch HTML is never committed.
   in your summary.
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
-  in as many words in your summary — CI fails unannounced ones.
+  in as many words in your summary. CI enforces this for components: a
+  file added under the project's component paths whose name appears
+  nowhere in the ticket or its comments fails the build. Theme tokens
+  are on your word alone — no project defines a theme file the audit
+  could read yet — so an unannounced one costs the author the review
+  that would have caught it.
 - **Read the confirmed non-asks** below before proposing anything, and
   **maintain the file** as you would a system doc. It sits in the repo
   beside `screens/` and `systems/`, the section below inlines it, and
