@@ -45,5 +45,11 @@ PROJECTS = '''[
     "workflow": "pipeline-sweep.yml",
     "ref": "main",
     "trackerProject": "eeeb9f30-dba6-412a-b826-e2279fc56215"
+  },
+  {
+    "repository": "swaggerallen/catapult",
+    "workflow": "pipeline-sweep.yml",
+    "ref": "main",
+    "trackerProject": "2bdba291-161c-4cf4-bbe2-6eab216a2985"
   }
 ]'''
