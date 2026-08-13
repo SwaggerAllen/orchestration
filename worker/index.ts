@@ -43,6 +43,13 @@ export interface Env {
    * the cron still beats, so the pipeline slows rather than stops.
    */
   LINEAR_WEBHOOK_SECRET: string;
+  /**
+   * The secret set on the GitHub webhook, per repository (secret).
+   * Unset means GitHub webhooks are rejected, which fails the same way
+   * Linear's does: the cron still beats, so the pipeline slows rather
+   * than stops.
+   */
+  GITHUB_WEBHOOK_SECRET: string;
 }
 
 interface Project {
@@ -50,7 +57,17 @@ interface Project {
   workflow: string;
   ref?: string;
   trackerProject?: string;
+  /**
+   * The project's CI workflow name, as it appears in `name:`. Only this
+   * workflow's completion wakes a sweep — see githubTargets for why
+   * that filter is load-bearing rather than an optimisation.
+   */
+  ciWorkflow?: string;
 }
+
+/** Default for Project.ciWorkflow. The stubs' comment already calls the
+ * name load-bearing: the sweep correlates on it. */
+const DEFAULT_CI_WORKFLOW = "ci";
 
 /** How far a webhook's own timestamp may be from now. Linear signs the
  * timestamp with the body, so this bounds replay of a captured request
@@ -139,6 +156,84 @@ export function routeFor(projects: Project[], trackerProject?: string): Project[
   return projects.filter((p) => p.trackerProject === trackerProject);
 }
 
+/**
+ * Verifies GitHub's HMAC-SHA256, which arrives as `sha256=<hex>` in
+ * x-hub-signature-256. Same door as Linear's, different doorframe.
+ */
+export async function verifyGitHubSignature(
+  rawBody: string,
+  header: string | null,
+  secret: string,
+): Promise<boolean> {
+  if (!header || !secret) return false;
+  const [scheme, digest] = header.trim().split("=");
+  if (scheme !== "sha256" || !digest) return false;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
+  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return timingSafeEqual(hex, digest.toLowerCase());
+}
+
+/**
+ * Chooses which projects a GitHub webhook wakes, and — more to the
+ * point — which it must not.
+ *
+ * This route exists because GitHub will not do it in-repo. Events
+ * created with GITHUB_TOKEN do not start workflow runs (workflow_dispatch
+ * and repository_dispatch excepted), so when the dev agent pushes and
+ * `ci` goes green, the stub's `workflow_run` trigger never fires. It
+ * fires fine for commits a human pushed, which is why this looked
+ * healthy: the broken case is the only case that matters. Measured on
+ * ORC-1 — CI green at 02:03:17, no sweep, the ticket waiting on the
+ * hourly beat. Webhook delivery is not workflow triggering, so the
+ * guard does not reach it.
+ *
+ * THE FILTER IS THE SAFETY PROPERTY, NOT A TUNING CHOICE. A sweep run
+ * completing is itself a workflow_run event. Waking a sweep on any
+ * completed run would have each sweep dispatch the next one, forever,
+ * against a token that can start workflows in every project repo. So a
+ * run only counts when it is that project's CI workflow by name, and
+ * anything else — the sweep, the agents, the previews — is dropped.
+ */
+export function githubTargets(projects: Project[], event: string | null, payload: any): Project[] {
+  const repo = payload?.repository?.full_name;
+  if (typeof repo !== "string" || repo === "") return [];
+  // Case-insensitively, because the two sides disagree in practice and
+  // always will: GitHub sends full_name in the owner's canonical case
+  // ("SwaggerAllen/..."), while PROJECTS is typed by hand and this
+  // repo's own config says "swaggerallen/...". An exact compare would
+  // route nothing, silently, and look exactly like a webhook that was
+  // never delivered.
+  const want = repo.toLowerCase();
+  const mine = projects.filter((p) => p.repository.toLowerCase() === want);
+  if (mine.length === 0) return []; // a repo we do not manage
+
+  switch (event) {
+    case "workflow_run": {
+      if (payload?.action !== "completed") return [];
+      const name = payload?.workflow_run?.name;
+      return mine.filter((p) => name === (p.ciWorkflow || DEFAULT_CI_WORKFLOW));
+    }
+    // The Merged -> Done hop has the same hole: the deploy record is
+    // written with GITHUB_TOKEN, so the stub's deployment_status trigger
+    // is suppressed too. No loop risk here — nothing the pipeline runs
+    // creates a deployment except the recorder itself, which is not a
+    // sweep.
+    case "deployment_status":
+      return mine;
+    // ping is what GitHub sends when the webhook is created. Answering
+    // it without dispatching is how the setup page shows a green tick.
+    default:
+      return [];
+  }
+}
+
 async function dispatch(p: Project, token: string): Promise<void> {
   const url = `https://api.github.com/repos/${p.repository}/actions/workflows/${p.workflow}/dispatches`;
   const res = await fetch(url, {
@@ -179,6 +274,39 @@ export default {
       return new Response("method not allowed\n", { status: 405 });
     }
     const raw = await request.text();
+
+    // Which sender, decided before verifying: the two sign differently,
+    // and checking a GitHub body against Linear's scheme would reject
+    // it for the wrong reason. The header is a routing hint only —
+    // nothing is dispatched until that sender's own signature passes.
+    const ghEvent = request.headers.get("x-github-event");
+    if (ghEvent) {
+      if (!(await verifyGitHubSignature(raw, request.headers.get("x-hub-signature-256"), env.GITHUB_WEBHOOK_SECRET))) {
+        console.error("metronome: rejected a GitHub webhook with a bad or missing signature");
+        return new Response("bad signature\n", { status: 401 });
+      }
+      let payload: any;
+      try {
+        payload = JSON.parse(raw);
+      } catch {
+        return new Response("bad json\n", { status: 400 });
+      }
+      // No freshness check, unlike Linear, and deliberately: GitHub
+      // signs no timestamp, and the nearest stand-in — a field off the
+      // payload — would drop real events whenever Actions queues. That
+      // is not hypothetical: the run that exposed this bug sat queued
+      // for eight minutes. A replayed webhook costs one extra sweep,
+      // which is a no-op, so the trade runs the other way here.
+      const targets = githubTargets(projectsOrLog(env), ghEvent, payload);
+      if (targets.length === 0) {
+        // ping, a run that is not CI, a repo we do not manage — all
+        // ordinary, and all answered 202 so GitHub keeps the hook green.
+        return new Response("nothing to dispatch\n", { status: 202 });
+      }
+      ctx.waitUntil(Promise.allSettled(targets.map((p) => dispatch(p, env.DISPATCH_TOKEN))));
+      return new Response("dispatched\n", { status: 202 });
+    }
+
     if (!(await verifySignature(raw, request.headers.get("linear-signature"), env.LINEAR_WEBHOOK_SECRET))) {
       console.error("metronome: rejected a webhook with a bad or missing signature");
       return new Response("bad signature\n", { status: 401 });

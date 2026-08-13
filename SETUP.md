@@ -306,6 +306,7 @@ repo, and one cron fires them all.
 | `CLOUDFLARE_ACCOUNT_ID` | Same account id as everywhere else. |
 | `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The deploy uploads it as the Worker's secret, so it is never typed into a `wrangler secret put` prompt and cannot drift from the value here. |
 | `LINEAR_WEBHOOK_SECRET` | Linear's signing secret, from the webhook you create below. Set a placeholder for the first deploy — you need the Worker's URL before Linear will give you the real one — then update it and re-run. |
+| `GITHUB_WEBHOOK_SECRET` | The secret you set on the GitHub webhook below. You choose this one rather than being given it, so it can go in before the first deploy. |
 
 After that it is automatic: any push to `main` touching `worker/`
 redeploys. That is the point — the realistic failure is not a bad
@@ -333,15 +334,41 @@ respond in seconds rather than on the hour:
 3. Copy the **signing secret** Linear shows, put it in this repo's
    `LINEAR_WEBHOOK_SECRET` secret, and re-run **worker-deploy**.
 
-Until that last step the Worker rejects every webhook — which is the
-right failure: a Worker with no secret must reject everything rather
-than accept everything, and the pipeline merely falls back to the
-hourly beat.
+**Then create a GitHub webhook on each project repo**, which is what
+makes the CI and deploy hops respond in seconds. On the project repo →
+Settings → **Webhooks** → Add webhook:
 
-**What fires when.** Tracker changes arrive by webhook, in seconds. CI
-green and red are GitHub events on the project stub and never waited on
-the poll. Deploy detection is a `deployment_status` event wherever the
-platform records GitHub Deployments. The hourly cron is left with the
+- Payload URL: the same Worker URL
+- Content type: **application/json** (the signature is over the raw
+  body, and the form encoding sends different bytes)
+- Secret: the value you put in `GITHUB_WEBHOOK_SECRET`
+- Events: **Let me select individual events** → **Workflow runs** and
+  **Deployment statuses**, nothing else
+
+**Why this is not left to the project's own workflow triggers.** It
+was, and it did not work. GitHub does not start a workflow run from an
+event created with `GITHUB_TOKEN` — `workflow_dispatch` and
+`repository_dispatch` are the only exceptions — and every agent pushes
+with exactly that token. So the sweep stub's `workflow_run` trigger
+fires when *you* push and never when an agent does, which is the only
+case it exists for. The same guard suppresses `deployment_status` for
+the merge-to-deploy hop. Webhook delivery is not workflow triggering,
+so it reaches the Worker regardless of who acted.
+
+The Worker dispatches only on the project's **CI workflow** completing,
+named by `ciWorkflow` in `PROJECTS` (default `ci`). That filter is a
+safety property rather than a preference: a sweep run completing is
+itself a workflow-run event, so waking on any completed run would have
+each sweep dispatch the next one indefinitely.
+
+Until the secrets are in, the Worker rejects every webhook — which is
+the right failure: a Worker with no secret must reject everything
+rather than accept everything, and the pipeline merely falls back to
+the hourly beat.
+
+**What fires when.** Tracker changes arrive on Linear webhooks, in
+seconds. CI green and red, and deploy detection, arrive on GitHub
+webhooks the same way. The hourly cron is left with the
 two elapsed-time conditions that announce nothing — stale claims and
 deploy timeouts, both behind grace periods of tens of minutes — and
 with catching any webhook that gets dropped.
@@ -495,7 +522,7 @@ project never collides with a `screen:home` in the other.
 | Where | Name |
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
-| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
+| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
 
 The two Cloudflare tokens are separate on purpose: project repos can

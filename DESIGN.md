@@ -940,9 +940,21 @@ pipeline that runs at the cron's pace, not one that anyone can drive.
 **The polled sweep survives, hourly**, because two conditions have nothing to subscribe to: stale
 claims and deploy timeouts are elapsed-time judgments. Both sit behind grace periods of tens of
 minutes (§12), so an hourly beat finds them well within tolerance, and it doubles as the backstop
-for any webhook that is dropped. Deploy *detection* — the common path, and otherwise the hop most
-likely to sit waiting on the clock — is event-driven wherever the platform records GitHub
-Deployments, via a `deployment_status` trigger on the project stub.
+for any webhook that is dropped.
+
+**The GitHub-side hops arrive by webhook too, and cannot arrive any other way.** CI green and
+deploy detection were originally left to `workflow_run` and `deployment_status` triggers on the
+project stub. Those do not fire for the pipeline: GitHub will not start a workflow run from an
+event created with `GITHUB_TOKEN` — `workflow_dispatch` and `repository_dispatch` are the only
+exceptions — and every agent pushes, merges and records deploys with exactly that token. The
+triggers work for a human's commits and never for an agent's, which is the only case they exist
+for, so the gap reads as a pipeline that has merely gone slow. Webhook *delivery* is not workflow
+triggering, so the same Worker receives them, verified against GitHub's own signature.
+
+One filter there is load-bearing rather than an optimisation: only the project's CI workflow
+completing may wake a sweep. A sweep run completing is itself a `workflow_run` event, so waking on
+any completed run would have each sweep dispatch the next, indefinitely, against a token that can
+start workflows in every project repo.
 
 **If even that is too slow,** Durable Objects are on the free plan with the SQLite backend, and one
 Durable Object per project *is* the single-dev-agent mutex, serialized by construction. Watch the
