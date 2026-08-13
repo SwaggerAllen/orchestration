@@ -56,6 +56,21 @@ jobs:
             echo "::error::LINEAR_WEBHOOK_SECRET is not set — every Linear webhook would be rejected and the pipeline would fall back to the hourly cron"
             exit 1
           fi
+          # Whitespace is the failure this check exists for. Neither
+          # GitHub nor the Worker trims a secret, and GitHub's webhook
+          # Secret box cannot hold a newline — so a value pasted into
+          # the Actions secret with one trailing behind it verifies
+          # against nothing, while looking identical to the eye in both
+          # places. The symptom is every webhook 401ing with correct
+          # secrets on both sides.
+          for name in DISPATCH_TOKEN LINEAR_WEBHOOK_SECRET WEBHOOK_SECRET; do
+            value="${!name}"
+            trimmed="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            if [ -n "$value" ] && [ "$value" != "$trimmed" ]; then
+              echo "::error::$name has leading or trailing whitespace (${#value} chars, ${#trimmed} trimmed). Nothing trims it later, so it will not match the value you typed into the sender's settings. Re-add the secret without the stray character."
+              exit 1
+            fi
+          done
           if [ -z "$WEBHOOK_SECRET" ]; then
             echo "::error::WEBHOOK_SECRET is not set — every GitHub webhook would be rejected, and the CI and deploy hops would wait for the hourly cron. They cannot fall back to the project's own workflow triggers: GitHub does not start a run from an event created with GITHUB_TOKEN, which is what every agent pushes with."
             exit 1
