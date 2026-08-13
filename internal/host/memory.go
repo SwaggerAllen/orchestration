@@ -22,7 +22,10 @@ type Memory struct {
 	Files map[string]string
 	// Deployments records RecordDeployment calls, in order.
 	Deployments []Deployment
-	nextPR      int
+	// FailRecordDeployment makes RecordDeployment error, standing in for
+	// the 403 a workflow without deployments: write actually gets.
+	FailRecordDeployment bool
+	nextPR               int
 }
 
 // Deployment is one recorded deployment.
@@ -131,6 +134,9 @@ func (m *Memory) IsAncestor(_ context.Context, ancestor, descendant string) (boo
 func (m *Memory) RecordDeployment(_ context.Context, sha, environment string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.FailRecordDeployment {
+		return fmt.Errorf("memory host: deployments are refused (HTTP 403)")
+	}
 	m.Deployments = append(m.Deployments, Deployment{SHA: sha, Environment: environment})
 	return nil
 }

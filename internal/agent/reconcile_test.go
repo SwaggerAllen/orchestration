@@ -192,3 +192,32 @@ func TestReconcileFailRecordsNoDeployment(t *testing.T) {
 		t.Errorf("deployments = %+v, want none on a bounce", w.h.Deployments)
 	}
 }
+
+// Past the merge there is no way back. The PR is closed, so
+// ClaimReconcile refuses it, and the writer matrix reverts any hand
+// move to Merged or Done — so a failure after merging strands the
+// ticket in Blocked with its work already on main. ORC-1 hit exactly
+// this on the first real merge the pipeline made: the deployment API
+// returned 403, the run aborted, and the ticket had nowhere legitimate
+// left to go.
+func TestReconcileStillReachesMergedWhenTheDeployRecordFails(t *testing.T) {
+	w := seedReconciling(t)
+	w.cfg.Deploy.Provider = "github"
+	w.h.FailRecordDeployment = true
+
+	if err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{Outcome: "pass"}); err != nil {
+		t.Fatalf("a failed deploy record must not fail the run: %v", err)
+	}
+	w.check(t, protocol.Merged)
+
+	issues, _ := w.tr.ListIssues(w.ctx, w.cfg.Tracker.TeamID, w.cfg.Tracker.ProjectID)
+	said := false
+	for _, c := range issues[0].Comments {
+		if strings.Contains(c.Body, "recording the stand-in deployment failed") {
+			said = true
+		}
+	}
+	if !said {
+		t.Error("the failure must be on the ticket in words — a silent one looks like a deploy that never happened")
+	}
+}
