@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
@@ -279,11 +280,50 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 			add("\n---\n" + c + "\n")
 		}
 	}
+	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design"))
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
 	if outcomePath != "" {
 		add(fmt.Sprintf("- Write your outcome JSON to `%s` before you finish (see Outcomes above).\n", outcomePath))
 	}
 	return string(b)
+}
+
+// nonAsksSection renders the confirmed non-asks document (DESIGN §4).
+//
+// The document is a file in the project repo, beside the screen and
+// system docs it constrains — the design agent could open it itself. It
+// is inlined anyway, for the same reason the scope is: a prompt that
+// says "go read this" is a prompt whose most important input is
+// optional. Inlining also gives the harness somewhere to say the file
+// is missing, which a `cat` that fails cannot do.
+//
+// All three outcomes are stated outright rather than being left to an
+// empty section, because "the author recorded no non-asks" and "I could
+// not read what the author recorded" license very different confidence
+// in a proposal that cuts against the grain.
+func nonAsksSection(n *agent.NonAsks, verb string, maintain bool) string {
+	if n == nil || n.Path == "" {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Confirmed non-asks — read before %s (DESIGN 4)\n\n", verb)
+	switch {
+	case n.Err != "":
+		fmt.Fprintf(&b, "`%s` could not be read this run: %s\n"+
+			"This is NOT the same as the project having no non-asks. Treat them as unknown, and say so in your hand-back if anything you propose might collide with one.\n",
+			n.Path, n.Err)
+	case !n.Found:
+		fmt.Fprintf(&b, "The repo has no `%s`. Nothing is recorded as deliberately not wanted; this was checked, not skipped.\n", n.Path)
+	default:
+		fmt.Fprintf(&b, "From `%s` — each entry is something the author decided against, with the reason. Do not propose these back. If the ticket in front of you requires one of them, that is a push-back, not a design.\n\n---\n%s\n---\n",
+			n.Path, strings.TrimSpace(n.Body))
+	}
+	if maintain {
+		fmt.Fprintf(&b, "\nThis file is yours to maintain, at `%s`, in the same commit as your artifacts. "+
+			"When this pass settles that something is deliberately not wanted — the author pushed back, or you ruled an approach out for a reason the next pass would otherwise re-litigate — add an entry with its reason. "+
+			"Add and amend; never delete an entry, because a refusal that quietly disappears is one the pipeline will propose again. The author sees every line of it in the Design review diff.\n", n.Path)
+	}
+	return b.String()
 }
 
 // assembleBoundaryPrompt: the milestone, what already ran, and the
@@ -307,6 +347,9 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 			add(fmt.Sprintf("- %s (%d open)%s\n", m.Name, m.Open, mark))
 		}
 		add("\nThe gating test asks about the next PRODUCT milestone — read it off this list rather than assuming a naming convention.\n")
+	}
+	if !plan.Done[agent.StepScan] {
+		add(nonAsksSection(plan.NonAsks, "filing proposals", false))
 	}
 	if outcomePath != "" {
 		add(fmt.Sprintf("\nWrite your proposals JSON to `%s` (schema above), then stop — the harness files them with dedupe keys and applies the ranking.\n", outcomePath))

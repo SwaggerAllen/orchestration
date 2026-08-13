@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,6 +44,14 @@ type Config struct {
 	// DesignOwnedPaths are the glob patterns of DESIGN §5's ownership table.
 	DesignOwnedPaths []string `json:"designOwnedPaths"`
 
+	// NonAsksPath is the project-relative path of the confirmed non-asks
+	// document (DESIGN §4) — what the design deliberately does not want,
+	// each with its reason. It lives in the repo beside the screen and
+	// system docs it constrains, and the design agent maintains it there
+	// as part of the same artifacts commit. Defaults to
+	// DefaultNonAsksPath; "" turns the feature off.
+	NonAsksPath string `json:"nonAsksPath"`
+
 	// QualityGates are the blocking CI commands (DESIGN §9), run in order.
 	QualityGates []string `json:"qualityGates"`
 
@@ -64,6 +73,15 @@ type Config struct {
 	// gains teeth per-agent when each agent gets its own identity.
 	Actors map[string][]string `json:"actors"`
 
+	// Root is the project repo's directory, taken from the config file's
+	// own location rather than the process's working directory: the
+	// agent commands run with cwd inside the pipeline checkout
+	// (`go -C .pipeline run ...`), so "relative to the project" and
+	// "relative to here" are two different places on every real run.
+	// Never serialized — it is a fact about where the file was found,
+	// not a field anyone writes.
+	Root string `json:"-"`
+
 	// Agents maps agent kinds to the project repo's stub workflow
 	// filenames the control plane dispatches (DESIGN §13). An empty value
 	// means the agent isn't wired yet: its dispatches are logged and
@@ -84,6 +102,17 @@ var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile"
 func sharedAuthorControlplane(a, b string) bool {
 	return (a == "author" && b == "controlplane") || (a == "controlplane" && b == "author")
 }
+
+// DefaultNonAsksPath is where the confirmed non-asks live when a config
+// names no path. Repo root, beside screens/ and systems/: the rest of
+// the design is in the repo, and a record of refused decisions kept
+// anywhere else is indirection with no reviewer.
+//
+// A project without the file is not an error — the prompt says so in as
+// many words, because "nothing is recorded" and "I could not read what
+// was recorded" are different facts to an agent deciding whether it is
+// contradicting the author.
+const DefaultNonAsksPath = "non-asks.md"
 
 // Tracker identifies the Linear team and project. Both are required on
 // every pickup: the state is the queue, the project is the scope (DESIGN §2).
@@ -157,10 +186,33 @@ func Load(path string) (*Config, error) {
 	if err := dec.Decode(&c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	// An explicit "" in the file means opted out and survives; an absent
+	// key means a config written before the feature existed, which
+	// should get the feature rather than opt out of it.
+	if !bytes.Contains(raw, []byte(`"nonAsksPath"`)) {
+		c.NonAsksPath = DefaultNonAsksPath
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	c.Root = filepath.Dir(abs)
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &c, nil
+}
+
+// InRoot resolves a project-relative path against the project repo. An
+// absolute path is returned unchanged, and an unrooted config (Sample,
+// or one built in a test) resolves against the working directory, which
+// is the only sensible reading of "relative" with nothing to be
+// relative to.
+func (c *Config) InRoot(rel string) string {
+	if rel == "" || filepath.IsAbs(rel) || c.Root == "" {
+		return rel
+	}
+	return filepath.Join(c.Root, rel)
 }
 
 // Validate reports every problem at once rather than the first one found:

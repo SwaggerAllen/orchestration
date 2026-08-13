@@ -21,6 +21,13 @@ scratch environment (ORC team → `orchestration-dummy`).
   gets that list verbatim, so name them however reads best.
 - States and labels are **not** created by hand — step 5 provisions
   them idempotently.
+- Nothing else here. In particular the confirmed non-asks (DESIGN §4)
+  live in the **repo** as `non-asks.md`, not in a Linear document —
+  the rest of the design is in the repo, the design agent maintains
+  the file alongside the screen and system docs, and step 8's
+  bootstrap seeds it. A project without the file is fine: the design
+  prompt then says the repo records none, which is a different thing
+  from silence.
 
 ## 2. GitHub tokens
 
@@ -432,9 +439,10 @@ step 5 already covered them.
    problem one state later.
 3. Bootstrap the docs: run `prompts/bootstrap.md` with Claude Code,
    attended, to split the existing architecture doc into
-   `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), and
-   a root `CLAUDE.md` holding that repo's own specifics — toolchain,
-   gates, domain. The protocol half needs no copying: agent runs are
+   `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), a
+   root `non-asks.md` seeded with whatever the existing docs already
+   refuse, and a root `CLAUDE.md` holding that repo's own specifics —
+   toolchain, gates, domain. The protocol half needs no copying: agent runs are
    given `prompts/repo-context.md` from the pipeline checkout at claim
    time, so editing it here reaches every project on its next run.
 4. Secrets on that repo: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`,

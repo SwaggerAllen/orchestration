@@ -40,6 +40,26 @@ in the stub — that is a finding for the author, not something to build
 now. No state sections at all: the state list lives in the stories alone
 (DESIGN §4).
 
+**`non-asks.md` — the confirmed non-asks (DESIGN §4).** One list at the
+repo root: what the product deliberately does not want, each entry with
+the reason it was refused. The design agent reads this before every
+pass and appends to it as push-backs settle, so what you write here is
+the seed of a living file rather than a one-time inventory.
+
+The same discipline as the standing decisions, and it matters more
+here: **do not invent a refusal.** Take only what the existing docs,
+issue history or code plainly refuse — "no multi-tenancy, single
+customer per deployment", "no offline mode, the sync cost outweighs the
+demand" — and leave the file with a header and nothing under it if you
+find none. An invented non-ask is worse than an absent one: it silently
+forecloses work nobody actually ruled out, and it will read as the
+author's decision to every pass that follows.
+
+Format is one bullet per entry, the refusal then the reason, newest
+last. A per-system refusal belongs in that system's standing decisions
+instead; this file is for the product-level ones a system doc has no
+claim on.
+
 **`CLAUDE.md` — what only this repo can say.** Claude Code loads it
 automatically, for agent runs and for humans working here by hand.
 Write the gate commands and what a newcomer cannot infer from the tree

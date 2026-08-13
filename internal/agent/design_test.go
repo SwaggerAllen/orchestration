@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -156,5 +157,78 @@ func TestLoadDesignOutcomeValidation(t *testing.T) {
 	}
 	if o, err := LoadDesignOutcome(write(`{"outcome":"artifacts","screens":["home"]}`), "design"); err != nil || o.Outcome != "artifacts" {
 		t.Errorf("artifacts without summary should load, got %v %v", o, err)
+	}
+}
+
+// The non-asks live in the project repo beside the screen and system
+// docs, and the claim inlines them: a prompt whose most important input
+// is "go read this file" is a prompt whose most important input is
+// optional.
+func TestDesignClaimCarriesTheNonAsksDocument(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeNonAsks(t, cfg, "- No dark mode: two palettes, one designer.")
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_54", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.NonAsks == nil {
+		t.Fatal("claim carries no non-asks at all")
+	}
+	if !res.NonAsks.Found || !strings.Contains(res.NonAsks.Body, "No dark mode") {
+		t.Errorf("non-asks = %+v, want the repo's document", res.NonAsks)
+	}
+}
+
+// A project without the file still claims, and the result says so
+// explicitly rather than arriving nil — the prompt distinguishes "none
+// recorded" from "could not read", and it can only do that if the claim
+// reports which one it was.
+func TestDesignClaimReportsAnAbsentNonAsksDocument(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_55", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.NonAsks == nil || res.NonAsks.Found || res.NonAsks.Err != "" {
+		t.Errorf("non-asks = %+v, want a clean not-found record", res.NonAsks)
+	}
+	if res.NonAsks.Path != cfg.NonAsksPath {
+		t.Errorf("path = %q, want %q — the agent writes new entries there", res.NonAsks.Path, cfg.NonAsksPath)
+	}
+}
+
+// The design agent runs with cwd inside the pipeline checkout, not the
+// project. A path resolved against cwd finds nothing on every real run,
+// and the failure is silent: the prompt would report "the repo records
+// none" while the file sat right there in the project.
+func TestDesignClaimReadsTheNonAsksFromTheProjectNotTheWorkingDirectory(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeNonAsks(t, cfg, "- No dark mode.")
+	t.Chdir(t.TempDir()) // stand somewhere else entirely, as a real run does
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_56", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.NonAsks.Found {
+		t.Error("found = false; the file is in the project, which is where the claim must look")
+	}
+}
+
+func writeNonAsks(t *testing.T, cfg *config.Config, body string) {
+	t.Helper()
+	if err := os.WriteFile(cfg.InRoot(cfg.NonAsksPath), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

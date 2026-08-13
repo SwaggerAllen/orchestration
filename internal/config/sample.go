@@ -38,8 +38,10 @@ func Sample() *Config {
 			"storybook/**",
 			"screens/*.md",
 			"systems/*.md",
+			"non-asks.md",
 			"lib/sample_web/components/**",
 		},
+		NonAsksPath: DefaultNonAsksPath,
 		QualityGates: []string{
 			"mix format --check-formatted",
 			"mix compile --warnings-as-errors",

@@ -8,10 +8,12 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -46,6 +48,55 @@ type ClaimResult struct {
 	// Comments is the ticket's comment history, reconcile mode only —
 	// comments carry the deltas the diff is measured against (DESIGN §2.3).
 	Comments []string `json:",omitempty"`
+	// NonAsks is the confirmed non-asks document (DESIGN §4), read out of
+	// the project checkout at claim time. Design and boundary only: they
+	// are the passes that propose.
+	NonAsks *NonAsks `json:",omitempty"`
+}
+
+// NonAsks is the confirmed non-asks document as the claim found it.
+// Three outcomes, all distinct and none collapsible: the file exists and
+// here it is, the project records no non-asks, or the read failed. The
+// last two look identical in an empty section, and they are not the same
+// fact to an agent deciding whether it is about to contradict the author
+// — so the prompt states which one happened, in as many words.
+type NonAsks struct {
+	// Path is project-relative, and it is what the design agent writes
+	// back to: the doc is maintained alongside the screen and system
+	// docs, in the same artifacts commit, reviewed in the same sign-off.
+	Path  string
+	Found bool
+	Body  string
+	// Err is the read failure, if any. A string rather than an error so
+	// the claim file round-trips through JSON.
+	Err string `json:",omitempty"`
+}
+
+// claimNonAsks reads the confirmed non-asks document for a pass that
+// proposes. It lives in the project repo, which the calling job has
+// already checked out — but cwd on a real run is the pipeline checkout,
+// not the project, so the path resolves against the config's directory
+// rather than against here.
+//
+// An unreadable file is not a reason to fail the claim — the pass still
+// has work to do — so the failure travels to the prompt instead of
+// ending the run.
+func claimNonAsks(cfg *config.Config) *NonAsks {
+	n := &NonAsks{Path: cfg.NonAsksPath}
+	if n.Path == "" {
+		return n
+	}
+	body, err := os.ReadFile(cfg.InRoot(n.Path))
+	switch {
+	case os.IsNotExist(err):
+		return n // the project records none, which is an answer
+	case err != nil:
+		n.Err = err.Error()
+		fmt.Fprintf(os.Stderr, "warning: could not read %s: %v\n", n.Path, err)
+		return n
+	}
+	n.Found, n.Body = true, string(body)
+	return n
 }
 
 // Claim performs pickup: assertions, state-transition-as-claim, and the
