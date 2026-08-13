@@ -193,9 +193,25 @@ func TestActionMetadataHasNoExpressions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		inOutputs := false
 		for i, line := range strings.Split(string(raw), "\n") {
 			if strings.HasPrefix(line, "runs:") {
 				break // steps may use expressions freely
+			}
+			// `outputs.<id>.value` is the one part of the metadata
+			// evaluated after the steps run, so an expression there is
+			// not only legal but the only way to write one. Excluded
+			// rather than tolerated everywhere, because the failure this
+			// test exists for was an expression in an input description.
+			if strings.HasPrefix(line, "outputs:") {
+				inOutputs = true
+				continue
+			}
+			if inOutputs && line != "" && !strings.HasPrefix(line, " ") {
+				inOutputs = false
+			}
+			if inOutputs {
+				continue
 			}
 			code, _, _ := strings.Cut(line, "#") // comments are not templated
 			if strings.Contains(code, "${{") {
@@ -203,5 +219,97 @@ func TestActionMetadataHasNoExpressions(t *testing.T) {
 					filepath.Base(filepath.Dir(a)), i+1, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// Every agent action and the sweep stub used to compile the CLI from
+// source before their first tracker call: check out the pipeline,
+// install Go, `go run ./cmd/pipeline`. Measured on a real dev run that
+// was 32 seconds between the job entering the action and the claim
+// landing in Linear. setup-go's own cache cannot help — it keys on
+// go.sum and this repo deliberately has no dependencies, so the logs
+// said "Primary key was not generated" and every job compiled cold.
+//
+// The binary is now built once per pipeline commit and cached. A
+// `go run` creeping back would be invisible: everything still works,
+// just slower every time, on the path that runs hourly.
+func TestNothingCompilesThePipelineOnTheHotPath(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pattern := range []string{
+		filepath.Join(root, ".github", "actions", "*", "action.yml"),
+		filepath.Join(root, "examples", "stubs", "*.yml"),
+	} {
+		found, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, found...)
+	}
+	if len(files) == 0 {
+		t.Fatal("found no actions or stubs to check")
+	}
+
+	checked := 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		// setup-pipeline is where the one build lives, by design.
+		if filepath.Base(filepath.Dir(f)) == "setup-pipeline" {
+			if !strings.Contains(body, "go -C") {
+				t.Error("setup-pipeline no longer builds anything — the other files rely on it")
+			}
+			continue
+		}
+		checked++
+		if strings.Contains(body, "run ./cmd/pipeline") {
+			t.Errorf("%s compiles the pipeline instead of using the cached binary", filepath.Base(f))
+		}
+	}
+	if checked == 0 {
+		t.Error("checked nothing — the file globs have drifted")
+	}
+}
+
+// A file that invokes `pipeline` must be one that put it on PATH, or
+// the step dies with "command not found" — an error that says nothing
+// about the cause.
+func TestEverythingInvokingThePipelineSetsItUpFirst(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pattern := range []string{
+		filepath.Join(root, ".github", "actions", "*", "action.yml"),
+		filepath.Join(root, "examples", "stubs", "*.yml"),
+	} {
+		found, _ := filepath.Glob(pattern)
+		files = append(files, found...)
+	}
+	invokes := regexp.MustCompile(`(?m)^\s*pipeline (agent|sweep|audit|scenario|setup) `)
+
+	checked := 0
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		if !invokes.MatchString(body) {
+			continue
+		}
+		checked++
+		// Either it sets the binary up itself, or it calls an action
+		// that does — the agent actions nest setup-pipeline so a
+		// project's stub needs no change to get the cache.
+		setsUp := strings.Contains(body, "actions/setup-pipeline@")
+		callsAgentAction := strings.Contains(body, "SwaggerAllen/orchestration/.github/actions/agent-")
+		if !setsUp && !callsAgentAction {
+			t.Errorf("%s runs the pipeline binary but never puts it on PATH", filepath.Base(f))
+		}
+	}
+	if checked == 0 {
+		t.Error("matched nothing that invokes the pipeline — the pattern has drifted")
 	}
 }

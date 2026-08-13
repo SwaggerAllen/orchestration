@@ -37,6 +37,12 @@ A project also needs:
     --ticket <key>
   ```
 
+  Put `pipeline` on PATH first with the `setup-pipeline` action —
+  it checks out the pipeline and builds the binary once per pipeline
+  commit, restoring it from cache after that. The agent actions call
+  it themselves; a workflow of your own that runs `pipeline` has to
+  ask for it.
+
   The ticket key parses out of the branch name. `--added-files` is what
   turns on the class audit — a component arriving and a component being
   edited are the same line in `--name-only`. Without it, or without

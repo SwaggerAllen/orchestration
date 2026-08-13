@@ -51,19 +51,17 @@ jobs:
       - name: checkout project (for pipeline.config.json)
         uses: actions/checkout@v4
 
-      - name: checkout pipeline
-        uses: actions/checkout@v4
+      # Checks out the pipeline and puts its binary on PATH, built once
+      # per pipeline commit and restored from cache after that. The
+      # sweep runs hourly and on every webhook, so it is the single
+      # biggest consumer of the compile this avoids.
+      - name: set up the pipeline
+        uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
         with:
-          repository: SwaggerAllen/orchestration
-          ref: main # pin to @v1 once released
-          path: .pipeline
-          token: ${{ secrets.PIPELINE_REPO_TOKEN || github.token }}
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: .pipeline/go.mod
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+          pipeline_ref: main # pin to @v1 once released
 
       - name: sweep
         run: |
-          go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline sweep \
+          pipeline sweep \
             --config "$GITHUB_WORKSPACE/pipeline.config.json"
