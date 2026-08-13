@@ -6,16 +6,25 @@ name = "pipeline-metronome"
 main = "index.ts"
 compatibility_date = "2026-01-01"
 
-# The webhook endpoint needs a URL. Linear posts to
-# https://pipeline-metronome.<your-subdomain>.workers.dev
+# The webhook endpoint needs a URL. Linear and GitHub both post to
+# https://pipeline-metronome.<your-subdomain>.workers.dev — one path,
+# told apart by the x-github-event header, each verified against its
+# own secret.
 workers_dev = true
 
 [triggers]
-# Hourly, not every five minutes. The tracker hops arrive by webhook and
-# the CI hops are GitHub events on the project stub, so what is left for
-# the cron is the elapsed-time conditions that have nothing to subscribe
-# to — stale claims and deploy timeouts, both past a grace period of
-# tens of minutes (DESIGN §12, §13) — plus catching a dropped webhook.
+# Hourly, not every five minutes. Tracker hops arrive on Linear
+# webhooks and CI hops on GitHub ones, so what is left for the cron is
+# the elapsed-time conditions that have nothing to subscribe to — stale
+# claims and deploy timeouts, both past a grace period of tens of
+# minutes (DESIGN §12, §13) — plus catching a dropped webhook.
+#
+# The CI hops used to be left to the project stub's own workflow_run
+# trigger. They cannot be: GitHub does not start a workflow run from an
+# event created with GITHUB_TOKEN, and the dev agent pushes with exactly
+# that, so the stub's trigger fires for a human's commits and never for
+# an agent's. Webhook delivery is not workflow triggering, so it reaches
+# here instead.
 crons = ["0 * * * *"]
 
 [vars]
@@ -25,6 +34,11 @@ crons = ["0 * * * *"]
 # trackerProject is the Linear project id, and it is what routes a
 # webhook to one repo. Leave it out and every webhook wakes every
 # project — correct, but it spends a run per project per edit.
+#
+# ciWorkflow is that repo's CI workflow name, defaulting to "ci". Only
+# that workflow's completion wakes a sweep, and the filter is a safety
+# property: a sweep run completing is itself a workflow_run event, so
+# waking on any completed run would have each sweep dispatch the next.
 PROJECTS = '''[
   {
     "repository": "swaggerallen/orchestration-dummy",

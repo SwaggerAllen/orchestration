@@ -1,0 +1,92 @@
+# Put the pipeline binary on PATH, building it only when it isn't
+# already cached.
+#
+# Every agent action and the sweep stub used to check out the pipeline,
+# install Go, and `go run ./cmd/pipeline` — which compiles the whole
+# CLI before the first tracker call can happen. Measured on a real dev
+# run: 32 seconds between the job starting the action and the claim
+# landing in Linear, of which the model's actual work was none. The
+# sweep pays it too, and the sweep runs hourly plus on every webhook,
+# so it was the largest single line in the pipeline's runner bill.
+#
+# `actions/setup-go`'s own cache does not help here and cannot: it keys
+# on go.sum and skips entirely when GOMODCACHE is absent, and this repo
+# deliberately has no dependencies. The logs say so outright —
+# "Primary key was not generated" — so every job compiled cold.
+#
+# So the cache key is the pipeline commit itself. One job per pipeline
+# commit pays the build; every job after it restores a binary. The key
+# is exact rather than a prefix, because a stale binary would run old
+# protocol against a new tracker and the failure would look like a bug
+# in whatever ran next.
+#
+# The checkout stays regardless of the cache: the prompts live in the
+# repo and the agents are handed their paths, which is what lets an
+# edit to prompts/repo-context.md reach every project on its next run
+# with nothing to sync (DESIGN §1).
+name: setup pipeline
+description: Check out the pipeline and put its binary on PATH, cached by commit
+
+inputs:
+  pipeline_repo_token:
+    description: >-
+      Contents:read PAT for the pipeline repo while it is private.
+      Falls back to the caller's token, which suffices once it is public.
+    required: false
+    default: ""
+  pipeline_ref:
+    description: Pipeline repo ref to run the harness from
+    required: false
+    default: main
+
+runs:
+  using: composite
+  steps:
+    - name: checkout pipeline
+      uses: actions/checkout@v4
+      with:
+        repository: SwaggerAllen/orchestration
+        ref: ${{ inputs.pipeline_ref }}
+        path: .pipeline
+        token: ${{ inputs.pipeline_repo_token || github.token }}
+
+    - name: identify the build
+      id: rev
+      shell: bash
+      run: echo "sha=$(git -C "$GITHUB_WORKSPACE/.pipeline" rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: restore the binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/.pipeline/bin
+        key: pipeline-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.rev.outputs.sha }}
+
+    # Only on a miss. Installing Go is most of what is being skipped —
+    # the compile itself is quick, since there is nothing to fetch.
+    - name: set up go
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: .pipeline/go.mod
+        cache: false # keyed on go.sum, and there isn't one; see above
+
+    - name: build
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: go -C "$GITHUB_WORKSPACE/.pipeline" build -o bin/pipeline ./cmd/pipeline
+
+    - name: put it on PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        BIN="$GITHUB_WORKSPACE/.pipeline/bin/pipeline"
+        # A cache hit that restored nothing usable is the one failure
+        # mode worth naming: every later step would fail with "pipeline:
+        # command not found", which says nothing about why.
+        if [ ! -x "$BIN" ]; then
+          echo "::error::no pipeline binary at $BIN (cache hit: ${{ steps.cache.outputs.cache-hit }}). The cache restored something unusable; re-run to rebuild."
+          exit 1
+        fi
+        echo "$GITHUB_WORKSPACE/.pipeline/bin" >> "$GITHUB_PATH"
+        echo "pipeline $("$BIN" version 2>/dev/null || echo "at ${{ steps.rev.outputs.sha }}")"

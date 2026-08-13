@@ -9,12 +9,10 @@ bindings live.
 | `pipeline-sweep.yml` | Control-plane pass: metronome dispatch + CI-hop trigger |
 | `pipeline-agent-dev.yml` | Dev agent run, dispatched by the sweep |
 | `pipeline-agent-design.yml` | Design agent run, dispatched on Designing entry and re-evaluate re-reads |
-| `pipeline-preview.yml` | Per-branch storybook export to Cloudflare Pages |
 | `pipeline-preview-cleanup.yml` | Deletes a branch's previews when its PR closes |
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
 | `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass |
-| `pipeline-record-deploy.yml` | Dummy project only: records a GitHub Deployment per merge so deploy detection has real data (config `deploy.provider: "github"`) |
 
 A project also needs:
 
@@ -36,6 +34,12 @@ A project also needs:
   pipeline audit --changed-files /tmp/changed --added-files /tmp/added \
     --ticket <key>
   ```
+
+  Put `pipeline` on PATH first with the `setup-pipeline` action —
+  it checks out the pipeline and builds the binary once per pipeline
+  commit, restoring it from cache after that. The agent actions call
+  it themselves; a workflow of your own that runs `pipeline` has to
+  ask for it.
 
   The ticket key parses out of the branch name. `--added-files` is what
   turns on the class audit — a component arriving and a component being

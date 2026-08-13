@@ -179,18 +179,31 @@ Everything happens in the one account that already holds your domains.
    - **Access Policy off** for now — see item 5.
 
    The Pages name need not match the repo name, but the only name that
-   has to agree is that repo's config `preview.pagesProject` — both the
-   preview and cleanup workflows read it from there rather than
-   carrying their own copy, so the config is the one place to set it.
+   has to agree is that repo's config `preview.pagesProject` — the
+   agent actions and the cleanup workflow read it from there rather
+   than carrying their own copy, so the config is the one place to set
+   it.
 
    Branch previews then appear at
-   `<branch-slug>.orchestration-dummy.pages.dev`, updated on every
-   push — that's the whole preview feature; we build no machinery.
+   `<branch-slug>.orchestration-dummy.pages.dev`, updated whenever an
+   agent pushes — that's the whole preview feature; we build no
+   machinery.
+
+   **Published by the agent runs, not by a push trigger.** It was a
+   workflow on `push`, and it never fired for the pipeline: GitHub does
+   not start a workflow run from an event created with `GITHUB_TOKEN`,
+   which is what the agents push with. So previews built for your
+   branches and never for an agent's — missing from the exact sign-off
+   they exist for. The design and dev actions now build and publish
+   after pushing, which is also why those stubs pass
+   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` through. Drop
+   those two lines to run a project without previews; the steps skip
+   and say so.
 
    The project's own `.pages.dev` root stays at the placeholder,
-   because the preview stub deliberately skips `main`: design review
-   reads branch previews, and publishing main would spend a deployment
-   on a URL nothing in the protocol consults.
+   because nothing publishes `main`: design review reads branch
+   previews, and publishing main would spend a deployment on a URL
+   nothing in the protocol consults.
 
    **Not shared between repos**: both repos deploy their `main` as the
    production deployment, so one Pages project serving two repos would
@@ -220,14 +233,19 @@ Everything happens in the one account that already holds your domains.
    code runs. Adding Workers:Edit to it would let any of them redeploy
    the metronome that drives all of them. Two tokens keeps the
    control plane's credential out of reach of the projects it drives.
-4. **Watch the deployment allowance.** Every push to every branch
-   publishes a preview, and Cloudflare's free tier caps deployments per
-   month. The `pipeline-preview-cleanup.yml` stub deletes a branch's
-   previews when its PR closes, which keeps the steady state small; a
-   heavy testing day can still hit the ceiling, and the symptom is a
-   stale `Design review` link rather than an obvious failure. The fix is
-   deleting old deployments in the dashboard or pausing the preview stub
-   on the dummy.
+4. **Watch the deployment allowance.** Every agent push publishes a
+   preview, and Cloudflare's free tier caps deployments per month. The
+   `pipeline-preview-cleanup.yml` stub deletes a branch's previews when
+   its PR closes, which keeps the steady state small — but only for a
+   PR **you** close. An agent merge closes the PR with `GITHUB_TOKEN`,
+   which raises no workflow run, so those previews are left behind
+   until something else prunes them. Janitorial rather than protocol
+   (the cleanup workflow says so in its own header), and the failure
+   mode is clutter; a heavy testing day can still hit the ceiling, and
+   the symptom is a stale `Design review` link rather than an obvious
+   failure. The fix is deleting old deployments in the dashboard, or
+   dropping the Cloudflare inputs from the agent stubs to pause
+   previews on the dummy.
 5. Preview URLs are unauthenticated (obscure subdomains). Fine at one
    author (DESIGN §4); **Cloudflare Access** (Zero Trust → Access →
    Applications, free ≤50 users) is the upgrade path if that stops
@@ -306,6 +324,7 @@ repo, and one cron fires them all.
 | `CLOUDFLARE_ACCOUNT_ID` | Same account id as everywhere else. |
 | `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The deploy uploads it as the Worker's secret, so it is never typed into a `wrangler secret put` prompt and cannot drift from the value here. |
 | `LINEAR_WEBHOOK_SECRET` | Linear's signing secret, from the webhook you create below. Set a placeholder for the first deploy — you need the Worker's URL before Linear will give you the real one — then update it and re-run. |
+| `WEBHOOK_SECRET` | The secret you set on the GitHub webhooks below. You choose this one rather than being given it, so it can go in before the first deploy. Not `GITHUB_WEBHOOK_SECRET`: Actions reserves the `GITHUB_` prefix for secret names and refuses to create one, the same reason `DISPATCH_TOKEN` is unprefixed. |
 
 After that it is automatic: any push to `main` touching `worker/`
 redeploys. That is the point — the realistic failure is not a bad
@@ -333,15 +352,41 @@ respond in seconds rather than on the hour:
 3. Copy the **signing secret** Linear shows, put it in this repo's
    `LINEAR_WEBHOOK_SECRET` secret, and re-run **worker-deploy**.
 
-Until that last step the Worker rejects every webhook — which is the
-right failure: a Worker with no secret must reject everything rather
-than accept everything, and the pipeline merely falls back to the
-hourly beat.
+**Then create a GitHub webhook on each project repo**, which is what
+makes the CI and deploy hops respond in seconds. On the project repo →
+Settings → **Webhooks** → Add webhook:
 
-**What fires when.** Tracker changes arrive by webhook, in seconds. CI
-green and red are GitHub events on the project stub and never waited on
-the poll. Deploy detection is a `deployment_status` event wherever the
-platform records GitHub Deployments. The hourly cron is left with the
+- Payload URL: the same Worker URL
+- Content type: **application/json** (the signature is over the raw
+  body, and the form encoding sends different bytes)
+- Secret: the value you put in `WEBHOOK_SECRET`
+- Events: **Let me select individual events** → **Workflow runs** and
+  **Deployment statuses**, nothing else
+
+**Why this is not left to the project's own workflow triggers.** It
+was, and it did not work. GitHub does not start a workflow run from an
+event created with `GITHUB_TOKEN` — `workflow_dispatch` and
+`repository_dispatch` are the only exceptions — and every agent pushes
+with exactly that token. So the sweep stub's `workflow_run` trigger
+fires when *you* push and never when an agent does, which is the only
+case it exists for. The same guard suppresses `deployment_status` for
+the merge-to-deploy hop. Webhook delivery is not workflow triggering,
+so it reaches the Worker regardless of who acted.
+
+The Worker dispatches only on the project's **CI workflow** completing,
+named by `ciWorkflow` in `PROJECTS` (default `ci`). That filter is a
+safety property rather than a preference: a sweep run completing is
+itself a workflow-run event, so waking on any completed run would have
+each sweep dispatch the next one indefinitely.
+
+Until the secrets are in, the Worker rejects every webhook — which is
+the right failure: a Worker with no secret must reject everything
+rather than accept everything, and the pipeline merely falls back to
+the hourly beat.
+
+**What fires when.** Tracker changes arrive on Linear webhooks, in
+seconds. CI green and red, and deploy detection, arrive on GitHub
+webhooks the same way. The hourly cron is left with the
 two elapsed-time conditions that announce nothing — stale claims and
 deploy timeouts, both behind grace periods of tens of minutes — and
 with catching any webhook that gets dropped.
@@ -495,7 +540,7 @@ project never collides with a `screen:home` in the other.
 | Where | Name |
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
-| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
+| pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
 
 The two Cloudflare tokens are separate on purpose: project repos can

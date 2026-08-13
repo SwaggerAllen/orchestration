@@ -1,5 +1,7 @@
 /**
- * Run with: node --test --experimental-strip-types worker/
+ * Run with: node --test --experimental-strip-types index.test.ts
+ * (from worker/ — the same command CI runs; passing the directory
+ * instead makes Node try to load `worker` as a module and fail).
  *
  * No test framework and no dependencies, matching the rest of the repo.
  * Node's own runner strips the types and supplies Web Crypto, which is
@@ -15,7 +17,9 @@ import {
   projectIdOf,
   routeFor,
   timingSafeEqual,
+  verifyGitHubSignature,
   verifySignature,
+  githubTargets,
 } from "./index.ts";
 
 const SECRET = "linear-signing-secret";
@@ -132,4 +136,126 @@ test("PROJECTS must describe something dispatchable", () => {
   assert.throws(() => parseProjects("[]"), /non-empty/);
   assert.throws(() => parseProjects('[{"repository":"o/r"}]'), /needs repository and workflow/);
   assert.throws(() => parseProjects('{"repository":"o/r"}'), /non-empty/);
+});
+
+// ---- GitHub webhooks ------------------------------------------------
+//
+// This route exists because GitHub will not do the job in-repo: events
+// created with GITHUB_TOKEN do not start workflow runs, so when the dev
+// agent pushes and `ci` goes green, the stub's own workflow_run trigger
+// never fires. It fires for commits a human pushed, which is exactly
+// why the gap went unnoticed.
+
+const GH_SECRET = "github-webhook-secret";
+
+async function ghSign(body: string, secret = GH_SECRET): Promise<string> {
+  return `sha256=${await sign(body, secret)}`;
+}
+
+const GH_PROJECTS = [
+  { repository: "acme/app", workflow: "pipeline-sweep.yml", trackerProject: "proj_1" },
+  { repository: "acme/other", workflow: "pipeline-sweep.yml", ciWorkflow: "build" },
+];
+
+function runEvent(repo: string, name: string, action = "completed") {
+  return { action, repository: { full_name: repo }, workflow_run: { name } };
+}
+
+test("a correctly signed GitHub body verifies", async () => {
+  const body = JSON.stringify(runEvent("acme/app", "ci"));
+  assert.equal(await verifyGitHubSignature(body, await ghSign(body), GH_SECRET), true);
+});
+
+test("GitHub's door is shut without a valid signature", async (t) => {
+  const body = JSON.stringify(runEvent("acme/app", "ci"));
+
+  await t.test("wrong secret", async () => {
+    assert.equal(await verifyGitHubSignature(body, await ghSign(body, "nope"), GH_SECRET), false);
+  });
+  await t.test("body altered after signing", async () => {
+    assert.equal(await verifyGitHubSignature(body + " ", await ghSign(body), GH_SECRET), false);
+  });
+  await t.test("sha1 scheme is not accepted", async () => {
+    const digest = (await ghSign(body)).slice("sha256=".length);
+    assert.equal(await verifyGitHubSignature(body, `sha1=${digest}`, GH_SECRET), false);
+  });
+  await t.test("bare digest with no scheme", async () => {
+    assert.equal(await verifyGitHubSignature(body, await sign(body, GH_SECRET), GH_SECRET), false);
+  });
+  await t.test("missing header", async () => {
+    assert.equal(await verifyGitHubSignature(body, null, GH_SECRET), false);
+  });
+  await t.test("unset secret rejects rather than accepts", async () => {
+    assert.equal(await verifyGitHubSignature(body, await ghSign(body), ""), false);
+  });
+});
+
+// The one that matters. A sweep run completing is itself a
+// workflow_run event, so waking a sweep on any completed run would have
+// each sweep dispatch the next, forever, against a token that can start
+// workflows in every project repo.
+test("a sweep's own completion never dispatches another sweep", () => {
+  for (const name of ["pipeline: sweep", "pipeline: dev ORC-1", "pipeline: design ORC-1", "pipeline: preview"]) {
+    assert.deepEqual(
+      githubTargets(GH_PROJECTS, "workflow_run", runEvent("acme/app", name)),
+      [],
+      `${name} must not wake a sweep`,
+    );
+  }
+});
+
+test("CI going green wakes exactly that repo's sweep", () => {
+  const targets = githubTargets(GH_PROJECTS, "workflow_run", runEvent("acme/app", "ci"));
+  assert.deepEqual(targets.map((p) => p.repository), ["acme/app"]);
+});
+
+test("a project can name its own CI workflow", () => {
+  assert.deepEqual(
+    githubTargets(GH_PROJECTS, "workflow_run", runEvent("acme/other", "build")).map((p) => p.repository),
+    ["acme/other"],
+  );
+  // ...and the default name does not wake a project that renamed it.
+  assert.deepEqual(githubTargets(GH_PROJECTS, "workflow_run", runEvent("acme/other", "ci")), []);
+});
+
+test("a CI run that has not finished yet is not green", () => {
+  assert.deepEqual(githubTargets(GH_PROJECTS, "workflow_run", runEvent("acme/app", "ci", "requested")), []);
+});
+
+test("another org's repo dispatches nothing", () => {
+  assert.deepEqual(githubTargets(GH_PROJECTS, "workflow_run", runEvent("someone/else", "ci")), []);
+});
+
+// The Merged -> Done hop has the same hole: the deploy record is written
+// with GITHUB_TOKEN, so the stub's deployment_status trigger is
+// suppressed the same way.
+test("a deployment status wakes the sweep", () => {
+  const payload = { action: "created", repository: { full_name: "acme/app" }, deployment_status: { state: "success" } };
+  assert.deepEqual(
+    githubTargets(GH_PROJECTS, "deployment_status", payload).map((p) => p.repository),
+    ["acme/app"],
+  );
+});
+
+test("ping and unknown events are accepted but dispatch nothing", () => {
+  const payload = { zen: "Keep it logically awesome.", repository: { full_name: "acme/app" } };
+  assert.deepEqual(githubTargets(GH_PROJECTS, "ping", payload), []);
+  assert.deepEqual(githubTargets(GH_PROJECTS, "issues", payload), []);
+});
+
+test("a payload with no repository dispatches nothing", () => {
+  assert.deepEqual(githubTargets(GH_PROJECTS, "workflow_run", { action: "completed" }), []);
+});
+
+// GitHub sends full_name in the owner's canonical case; PROJECTS is
+// typed by hand and this repo's own config is lowercase. An exact
+// compare routes nothing and is indistinguishable from a webhook that
+// never arrived.
+test("repository matching survives the two sides disagreeing on case", () => {
+  const projects = [{ repository: "swaggerallen/orchestration-dummy", workflow: "pipeline-sweep.yml" }];
+  const payload = runEvent("SwaggerAllen/orchestration-dummy", "ci");
+  assert.deepEqual(
+    githubTargets(projects, "workflow_run", payload).map((p) => p.repository),
+    ["swaggerallen/orchestration-dummy"],
+  );
 });

@@ -28,6 +28,16 @@ inputs:
     # expression here fails the whole file to load before any step runs.
     description: Token for the project repo. Pass the caller's github.token.
     required: true
+  cloudflare_api_token:
+    description: >-
+      Cloudflare token with Pages edit rights, for publishing this
+      branch's storybook export. Omit to skip publishing.
+    required: false
+    default: ""
+  cloudflare_account_id:
+    description: Cloudflare account id, alongside cloudflare_api_token
+    required: false
+    default: ""
   pipeline_repo_token:
     description: >-
       Contents:read PAT for the pipeline repo while it is private.
@@ -45,17 +55,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: checkout pipeline
-      uses: actions/checkout@v4
+    # Nested rather than asked of the caller so a project's stub needs
+    # no change to get this. The ref pins the *recipe*; the binary it
+    # builds comes from inputs.pipeline_ref, so a caller pinned to a
+    # release still runs that release's harness.
+    - name: set up the pipeline
+      uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
       with:
-        repository: SwaggerAllen/orchestration
-        ref: ${{ inputs.pipeline_ref }}
-        path: .pipeline
-        token: ${{ inputs.pipeline_repo_token || github.token }}
-
-    - uses: actions/setup-go@v5
-      with:
-        go-version-file: .pipeline/go.mod
+        pipeline_repo_token: ${{ inputs.pipeline_repo_token }}
+        pipeline_ref: ${{ inputs.pipeline_ref }}
 
     - name: claim
       id: claim
@@ -64,7 +72,7 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent claim \
+        pipeline agent claim \
           --kind dev \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --ticket "${{ inputs.ticket }}" \
@@ -106,13 +114,58 @@ runs:
         fi
         git push -u origin "${{ steps.claim.outputs.branch }}"
 
+    # The branch preview, published by the harness rather than by a
+    # workflow watching for a push. That watcher could never fire for
+    # this push: GitHub does not start a workflow run from an event
+    # created with GITHUB_TOKEN, which is what the step above pushes
+    # with — so previews were built for a human's branches and never for
+    # an agent's. The author reviews the storybook export at Design
+    # review (DESIGN 4), so the missing one was missing from the exact
+    # sign-off it exists for.
+    #
+    # Skipped rather than failed when no Cloudflare token is passed: a
+    # project without previews wired yet still gets its agent runs, and
+    # the step says which it did.
+    - name: build the storybook export
+      if: inputs.cloudflare_api_token != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        CMD="$(jq -r .preview.buildCommand "$GITHUB_WORKSPACE/pipeline.config.json")"
+        echo "preview build: $CMD"
+        cd "$GITHUB_WORKSPACE" && eval "$CMD"
+
+    - name: read the preview target
+      id: preview
+      if: inputs.cloudflare_api_token != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        CFG="$GITHUB_WORKSPACE/pipeline.config.json"
+        # Read from the config, never written here: a second copy drifts,
+        # and then previews publish to one project while cleanup deletes
+        # from another with nothing to say so.
+        echo "project=$(jq -r .preview.pagesProject "$CFG")" >> "$GITHUB_OUTPUT"
+        echo "dir=$(jq -r .preview.outputDir "$CFG")" >> "$GITHUB_OUTPUT"
+
+    - name: publish the preview
+      if: inputs.cloudflare_api_token != ''
+      uses: cloudflare/wrangler-action@v3
+      with:
+        apiToken: ${{ inputs.cloudflare_api_token }}
+        accountId: ${{ inputs.cloudflare_account_id }}
+        workingDirectory: ${{ github.workspace }}
+        command: >-
+          pages deploy ${{ steps.preview.outputs.dir }}
+          --project-name=${{ steps.preview.outputs.project }}
+          --branch=${{ steps.claim.outputs.branch }}
     - name: finish
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent finish \
+        pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --handback "$RUNNER_TEMP/pipeline/handback.md"
@@ -124,7 +177,7 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent abort \
+        pipeline agent abort \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \

@@ -138,3 +138,57 @@ func TestLoadVerdictValidation(t *testing.T) {
 		t.Errorf("pass without report should load, got %v %v", v, err)
 	}
 }
+
+// The post-deploy check reads a deployment; on the dummy's stand-in
+// platform something has to create one. That used to be a project
+// workflow on `push: main`, which cannot fire for a merge made with
+// GITHUB_TOKEN — so no deployment was ever recorded for an agent merge
+// and the ticket sat in Merged until the deploy timeout moved it to
+// Blocked. Reconcile does it now, and this is the test that says so.
+func TestReconcileRecordsTheStandInDeployment(t *testing.T) {
+	w := seedReconciling(t)
+	w.cfg.Deploy.Provider = "github"
+	w.cfg.Deploy.Endpoint = "production"
+
+	if err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{Outcome: "pass"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.h.Deployments) != 1 {
+		t.Fatalf("deployments = %+v, want exactly the merge's", w.h.Deployments)
+	}
+	got := w.h.Deployments[0]
+	if got.SHA != w.h.Merged[5] {
+		t.Errorf("deployment sha = %q, want the merge commit %q — the ancestry check compares against this",
+			got.SHA, w.h.Merged[5])
+	}
+	if got.Environment != "production" {
+		t.Errorf("environment = %q, want the config's deploy.endpoint", got.Environment)
+	}
+}
+
+// A real platform deploys itself and the sweep polls it. Recording one
+// here would be the pipeline telling itself something shipped.
+func TestReconcileRecordsNothingOnARealPlatform(t *testing.T) {
+	w := seedReconciling(t)
+	w.cfg.Deploy.Provider = "digitalocean"
+
+	if err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{Outcome: "pass"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.h.Deployments) != 0 {
+		t.Errorf("deployments = %+v, want none — DigitalOcean rolls out on its own", w.h.Deployments)
+	}
+}
+
+// A bounce does not merge, so there is nothing deployed to record.
+func TestReconcileFailRecordsNoDeployment(t *testing.T) {
+	w := seedReconciling(t)
+	w.cfg.Deploy.Provider = "github"
+
+	if err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{Outcome: "fail", Report: "missing the second line"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.h.Deployments) != 0 {
+		t.Errorf("deployments = %+v, want none on a bounce", w.h.Deployments)
+	}
+}

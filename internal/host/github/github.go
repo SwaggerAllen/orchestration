@@ -273,6 +273,37 @@ func (c *Client) IsAncestor(ctx context.Context, ancestor, descendant string) (b
 
 // PutFileIfAbsent commits one file to the dispatch ref via the contents
 // API, unless it already exists there.
+// RecordDeployment creates a deployment for a commit and immediately
+// marks it successful. The dummy's stand-in for a hosting platform
+// (PLAN M4): what the pipeline's post-deploy check actually exercises
+// is listing deployments and comparing ancestry, and that path is the
+// same whether the deployment describes a real rollout or this.
+//
+// required_contexts is empty on purpose. GitHub otherwise refuses to
+// create a deployment until every status check on the commit has
+// passed, which for a merge commit on main is a race the caller would
+// have to poll around.
+func (c *Client) RecordDeployment(ctx context.Context, sha, environment string) error {
+	var dep struct {
+		ID int `json:"id"`
+	}
+	create := map[string]any{
+		"ref":               sha,
+		"environment":       environment,
+		"auto_merge":        false,
+		"required_contexts": []string{},
+	}
+	if err := c.rest(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/%s/deployments", c.owner, c.repo), create, &dep); err != nil {
+		return fmt.Errorf("creating deployment for %s: %w", sha, err)
+	}
+	status := map[string]any{"state": "success"}
+	path := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses", c.owner, c.repo, dep.ID)
+	if err := c.rest(ctx, http.MethodPost, path, status, nil); err != nil {
+		return fmt.Errorf("marking deployment %d successful: %w", dep.ID, err)
+	}
+	return nil
+}
+
 func (c *Client) PutFileIfAbsent(ctx context.Context, path, content, message string) (bool, error) {
 	getPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", c.owner, c.repo, path, c.ref)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+getPath, nil)

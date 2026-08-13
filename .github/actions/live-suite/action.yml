@@ -40,17 +40,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: checkout pipeline
-      uses: actions/checkout@v4
+    # Nested rather than asked of the caller so a project's stub needs
+    # no change to get this. The ref pins the *recipe*; the binary it
+    # builds comes from inputs.pipeline_ref, so a caller pinned to a
+    # release still runs that release's harness.
+    - name: set up the pipeline
+      uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
       with:
-        repository: SwaggerAllen/orchestration
-        ref: ${{ inputs.pipeline_ref }}
-        path: .pipeline
-        token: ${{ inputs.pipeline_repo_token || github.token }}
-
-    - uses: actions/setup-go@v5
-      with:
-        go-version-file: .pipeline/go.mod
+        pipeline_repo_token: ${{ inputs.pipeline_repo_token }}
+        pipeline_ref: ${{ inputs.pipeline_ref }}
 
     - name: run live suite
       id: suite
@@ -64,7 +62,7 @@ runs:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        go -C "$GITHUB_WORKSPACE/.pipeline" run ./cmd/pipeline agent live-suite-report \
+        pipeline agent live-suite-report \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --ticket "${{ inputs.ticket }}" \
           --result "${{ steps.suite.outcome == 'success' && 'pass' || 'fail' }}" \
