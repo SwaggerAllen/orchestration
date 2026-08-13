@@ -25,10 +25,23 @@ A project also needs:
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
 - Actions secrets: `LINEAR_API_KEY`, `ANTHROPIC_API_KEY`
 - A `ci` workflow (name matters — the sweep stub triggers on its
-  completion) running the quality gates from the config, plus the mutex
-  audit: `git diff --name-only origin/main...HEAD > /tmp/changed &&
-  pipeline audit --changed-files /tmp/changed --ticket <key>` (the
-  ticket key parses out of the branch name)
+  completion) running the quality gates from the config, plus
+  `pipeline audit` — one command for all three of DESIGN §9's checks
+  (mutex, doc lint, class):
+
+  ```sh
+  BASE="origin/main...HEAD"
+  git diff --name-only "$BASE" > /tmp/changed
+  git diff --diff-filter=A --name-only "$BASE" > /tmp/added
+  pipeline audit --changed-files /tmp/changed --added-files /tmp/added \
+    --ticket <key>
+  ```
+
+  The ticket key parses out of the branch name. `--added-files` is what
+  turns on the class audit — a component arriving and a component being
+  edited are the same line in `--name-only`. Without it, or without
+  `componentPaths` in the config, the audit says which check it skipped
+  rather than reporting a clean run it didn't make.
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
 - Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch

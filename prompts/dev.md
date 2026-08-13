@@ -36,8 +36,10 @@ the diff.
   fails the build. Discovering you need another system mid-flight is the
   re-evaluation flow (DESIGN §7), not a silent expansion.
 - **A new component module or theme token you weren't asked for is a
-  decision, not a port** (DESIGN §2.8). CI fails the build on unannounced
-  ones. If the scope needs one it didn't name, that is a push-back.
+  decision, not a port** (DESIGN §2.8). CI fails the build on an
+  unannounced component — one added under the project's component paths
+  and named nowhere in the ticket. Theme tokens are on your word alone.
+  If the scope needs either and didn't name it, that is a push-back.
 - **Push-back has a channel** (DESIGN §2.7). A design that can't be built
   as drawn goes back with the argument why — never a silently worse
   version, never a silent third thing. The harness command for this is

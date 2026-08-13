@@ -29,6 +29,9 @@
     "non-asks.md",
     "lib/dummy_web/components/**"
   ],
+  "componentPaths": [
+    "lib/dummy_web/components/**"
+  ],
   "qualityGates": [
     "mix format --check-formatted",
     "mix compile --warnings-as-errors",

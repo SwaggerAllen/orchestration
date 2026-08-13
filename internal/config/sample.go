@@ -41,7 +41,8 @@ func Sample() *Config {
 			"non-asks.md",
 			"lib/sample_web/components/**",
 		},
-		NonAsksPath: DefaultNonAsksPath,
+		ComponentPaths: []string{"lib/sample_web/components/**"},
+		NonAsksPath:    DefaultNonAsksPath,
 		QualityGates: []string{
 			"mix format --check-formatted",
 			"mix compile --warnings-as-errors",

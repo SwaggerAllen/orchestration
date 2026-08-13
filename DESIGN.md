@@ -508,7 +508,13 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
 - static storybook export builds and publishes
 - **a new component module or theme token not named in the issue fails the build** — the class
   audit, promoted from convention to enforcement, so a proposed component cannot arrive
-  unannounced inside an artifact
+  unannounced inside an artifact. Components are enforced: a file added under the project's
+  `componentPaths` whose base name appears nowhere in the ticket's title, description or
+  comments fails. **Theme tokens are not**, deliberately — a token is a key in a theme
+  configuration, no project the pipeline drives has one, and a grammar invented against no real
+  file is a check that asserts its author's guess. That half stays convention until there is a
+  theme file to read, and the audit prints which halves it did not run rather than reporting a
+  clean pass it never made.
 - a PR touching files in a screen doc's file map carries **that screen's** label, and a PR
   touching paths in a system doc's file map carries **that system's** label — the mutex audit,
   the same promotion from convention to enforcement as the class audit: a mutex nobody took is
@@ -516,7 +522,13 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   label" would let the wrong label satisfy the check.
 - no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
   and an ambiguous mutex is two tickets in the same files with a green build
-- `screens/*.md` and `systems/*.md` contain no state sections and no code inventory
+- `screens/*.md` and `systems/*.md` contain no state sections and no code inventory — the doc
+  lint, enforced on the docs as they stand rather than on the diff, since a doc that has held a
+  banned section since before this ticket is still holding it. It catches both rules in their
+  **sectioned** form: a `## States`-style heading, a `## Modules`-style one. Prose is not
+  linted, and that is the point — a standing decision naming `farewell/1` is the decision doing
+  its job, while a heading with a list under it is the split the rule was written against. A
+  check that failed good docs would be switched off, taking the rule with it.
 
 **Reconciliation (blocking, and the last gate before production):**
 - the PR diff says what the issue asked for

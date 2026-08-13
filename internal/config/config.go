@@ -52,6 +52,15 @@ type Config struct {
 	// DefaultNonAsksPath; "" turns the feature off.
 	NonAsksPath string `json:"nonAsksPath"`
 
+	// ComponentPaths are the globs under which this project keeps its
+	// component modules. The class audit (DESIGN §9) uses them to spot a
+	// component arriving that the ticket never named. Optional and
+	// separate from DesignOwnedPaths, which also covers docs and stories
+	// — those get added every ticket, and flagging them would be noise.
+	// Empty means the class audit isn't wired here; `pipeline audit`
+	// says so rather than reporting a check it didn't run.
+	ComponentPaths []string `json:"componentPaths"`
+
 	// QualityGates are the blocking CI commands (DESIGN §9), run in order.
 	QualityGates []string `json:"qualityGates"`
 

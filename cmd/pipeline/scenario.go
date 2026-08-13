@@ -144,7 +144,7 @@ func cmdScenarioCheck(args []string) error {
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	path := fs.String("scenario", "", "scenario file to check against")
 	seededPath := fs.String("seeded", "", "the map written by scenario seed")
-	repo := fs.String("repo", ".", "checkout of the project repo, for file expectations")
+	repo := fs.String("repo", "", "checkout of the project repo, for file expectations (default: the config file's directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -171,6 +171,14 @@ func cmdScenarioCheck(args []string) error {
 	t, cfg, err := scenarioDeps(*cfgPath)
 	if err != nil {
 		return err
+	}
+	// Same reasoning as the audit's --root: the project is where its
+	// config is, not where the process stands. This one fails loudly
+	// rather than passing vacuously — every file expectation misses —
+	// but a rehearsal that reports the wrong reason is still a rehearsal
+	// nobody can act on.
+	if *repo == "" {
+		*repo = cfg.Root
 	}
 	hasFile := func(p string) bool {
 		_, err := os.Stat(filepath.Join(*repo, p))
