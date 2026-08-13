@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -360,4 +361,32 @@ func doneState(t *testing.T, tr tracker.Tracker, cfg *config.Config) string {
 	}
 	t.Fatal("no done state")
 	return ""
+}
+
+// A rehearsal that merged nothing must still write a JSON array. The
+// repo half of the reset reads this file with `jq '.[].sha'`, and a nil
+// slice marshals to `null`, which jq cannot iterate — so the reset died
+// on "Cannot iterate over null" in exactly the case it handles
+// explicitly two lines later ("the last rehearsal merged nothing").
+// Asserted on the marshalled bytes, because the shape the workflow sees
+// is the only shape that matters here.
+func TestResetWritesAnArrayWhenNothingMerged(t *testing.T) {
+	tr, cfg := world(t)
+	if err := seedOne(t, tr, cfg); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Merges) != 0 {
+		t.Fatalf("the seed merged nothing but the reset found %v", res.Merges)
+	}
+	raw, err := json.Marshal(res.Merges)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "[]" {
+		t.Errorf("merges marshalled to %s; jq '.[]' cannot iterate that", raw)
+	}
 }

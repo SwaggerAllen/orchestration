@@ -77,7 +77,13 @@ func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmPr
 	if err != nil {
 		return nil, err
 	}
-	res := &ResetResult{}
+	// Merges starts as an empty slice, not nil. A nil slice marshals to
+	// `null`, and the repo half of the reset reads this file with
+	// `jq '.[]'`, which cannot iterate null — so a rehearsal that merged
+	// nothing died on its own reset with "Cannot iterate over null"
+	// instead of printing "merged nothing" and carrying on. The empty
+	// case is the one the revert loop was never run against.
+	res := &ResetResult{Merges: []Merged{}}
 	for _, i := range issues {
 		for _, m := range mergedMarkers(i) {
 			m.Key = i.Key
