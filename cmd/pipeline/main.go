@@ -13,6 +13,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/deploy"
 	"github.com/SwaggerAllen/orchestration/internal/deploy/digitalocean"
 	"github.com/SwaggerAllen/orchestration/internal/deploy/ghdeploy"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
@@ -66,7 +67,9 @@ func usage(w *os.File) {
 	fmt.Fprint(w, `usage: pipeline <command> [flags]
 
 commands:
-  setup    provision a Linear team with the pipeline's states and labels
+  setup    provision a Linear team with the pipeline's states and labels,
+           then probe deploy.endpoint so a wrong one surfaces at hookup
+           rather than on the first ticket to reach Merged
            (idempotent; requires LINEAR_API_KEY)
   sweep    one control-plane pass: build snapshot, plan, apply
            (requires LINEAR_API_KEY; --dry-run plans without applying;
@@ -111,7 +114,7 @@ func cmdSetup(args []string) error {
 	}
 	if len(actions) == 0 {
 		fmt.Println("nothing to do: team is already provisioned")
-		return nil
+		return checkDeploy(context.Background(), cfg)
 	}
 	verb := "applied"
 	if *dryRun {
@@ -121,6 +124,69 @@ func cmdSetup(args []string) error {
 	for _, a := range actions {
 		fmt.Println("  " + a.String())
 	}
+	return checkDeploy(context.Background(), cfg)
+}
+
+// deployPort builds the deploy port the config names, or returns nil plus
+// the reason there is none. Sweep and setup share it deliberately: a check
+// that constructs its own client can pass while the sweep's client fails,
+// and then the check is worse than nothing.
+func deployPort(cfg *config.Config, repo, token string) (deploy.Deploy, string, error) {
+	switch cfg.Deploy.Provider {
+	case "github":
+		if repo == "" || token == "" {
+			return nil, "GITHUB_REPOSITORY and GITHUB_TOKEN are not both set", nil
+		}
+		d, err := ghdeploy.New(repo, token, cfg.Deploy.Endpoint)
+		if err != nil {
+			return nil, "", err
+		}
+		return d, "", nil
+	case "digitalocean":
+		doToken := os.Getenv("DIGITALOCEAN_TOKEN")
+		if doToken == "" {
+			return nil, "DIGITALOCEAN_TOKEN not set", nil
+		}
+		return digitalocean.New(cfg.Deploy.Endpoint, doToken), "", nil
+	}
+	return nil, "", nil
+}
+
+// checkDeploy probes the configured deploy endpoint at hookup, because
+// nothing else does until far too late. Every other piece of a project's
+// wiring is exercised early — the tracker ids on the first sweep, the
+// model credential on the first dispatch, the audit on the first PR — but
+// deploy detection sits unused through design, dev, CI and reconcile, and
+// then runs for the first time on the last hop of the first ticket. One
+// project carried a wrong app id from hookup until that moment, and the
+// symptom, hours later, was "stuck in Merged" — which names neither the
+// endpoint nor the token.
+//
+// A failure here is fatal to the command on purpose: the provisioning
+// above has already been applied and is idempotent, so the cost of exiting
+// non-zero is a re-run, while the cost of a printed warning is that nobody
+// reads it until a ticket is stuck.
+func checkDeploy(ctx context.Context, cfg *config.Config) error {
+	if cfg.Deploy.Provider == "" {
+		return nil
+	}
+	d, why, err := deployPort(cfg, os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN"))
+	if err != nil {
+		return fmt.Errorf("setup: deploy check: %w", err)
+	}
+	if d == nil {
+		// Not a pass. Say which credential was missing, so a skipped check
+		// cannot be mistaken for a clean one.
+		fmt.Printf("deploy check SKIPPED (%s): %s was never contacted\n", why, cfg.Deploy.Endpoint)
+		return nil
+	}
+	if _, err := d.State(ctx); err != nil {
+		return fmt.Errorf("setup: deploy check failed against %s: %w\n"+
+			"  Nothing exercises deploy detection again until a ticket reaches Merged, so this is the moment to fix it.\n"+
+			"  404: the endpoint names an app this token cannot see — a wrong app id, or a token minted in another team.\n"+
+			"  401: the token is wrong, expired, or revoked", cfg.Deploy.Endpoint, err)
+	}
+	fmt.Printf("deploy check: %s answered\n", cfg.Deploy.Endpoint)
 	return nil
 }
 
@@ -152,22 +218,17 @@ func cmdSweep(args []string) error {
 			return err
 		}
 		p.WithHost(h)
-		switch cfg.Deploy.Provider {
-		case "github":
-			d, err := ghdeploy.New(repo, token, cfg.Deploy.Endpoint)
-			if err != nil {
-				return err
-			}
+		d, why, err := deployPort(cfg, repo, token)
+		if err != nil {
+			return err
+		}
+		if d != nil {
 			p.WithDeploy(d)
-		case "digitalocean":
-			if doToken := os.Getenv("DIGITALOCEAN_TOKEN"); doToken != "" {
-				p.WithDeploy(digitalocean.New(cfg.Deploy.Endpoint, doToken))
-			} else {
-				// Without the token Merged tickets stay pending and the
-				// deploy timeout is the honest backstop; say so rather
-				// than silently narrowing the sweep.
-				fmt.Fprintln(os.Stderr, "pipeline: DIGITALOCEAN_TOKEN not set; deploy detection off, Merged tickets will hit the timeout")
-			}
+		} else if why != "" {
+			// Without a port, Merged tickets stay pending and the deploy
+			// timeout is the honest backstop; say so rather than silently
+			// narrowing the sweep.
+			fmt.Fprintln(os.Stderr, "pipeline: "+why+"; deploy detection off, Merged tickets will hit the timeout")
 		}
 	}
 	ctx := context.Background()
