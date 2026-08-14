@@ -590,6 +590,19 @@ step 5 already covered them.
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
+
+   Then run `pipeline setup` once against the project's config **with
+   the provider token in the environment** (`DIGITALOCEAN_TOKEN=… \
+   LINEAR_API_KEY=… pipeline setup`). Beyond provisioning states and
+   labels, it probes `deploy.endpoint` and fails loudly if that app is
+   not one the token can read. Do not skip the token: without it the
+   command prints `deploy check SKIPPED` and provisions anyway, which
+   is the case this step exists to avoid. Nothing else touches deploy
+   detection until a ticket reaches `Merged` — design, dev, CI and
+   reconcile all pass without it — so a wrong app id survives an entire
+   first ticket and then presents as "stuck in Merged", a symptom that
+   names neither the endpoint nor the token. This happened; the check
+   is why it takes one command now.
 6. Metronome: add the repo to `PROJECTS` in `worker/wrangler.toml`,
    with its Linear project id as `trackerProject`, and add the repo to
    `DISPATCH_TOKEN`'s repository list. Merging the `PROJECTS` edit

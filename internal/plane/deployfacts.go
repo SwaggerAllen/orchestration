@@ -2,6 +2,8 @@ package plane
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/deploy"
@@ -26,6 +28,7 @@ func (p *Plane) attachDeployFacts(ctx context.Context, tickets []*core.Ticket) e
 	}
 
 	var state *deploy.State
+	asked := false
 	for _, t := range tickets {
 		if t.State != protocol.Merged || t.IsBoundary() {
 			continue
@@ -35,14 +38,27 @@ func (p *Plane) attachDeployFacts(ctx context.Context, tickets []*core.Ticket) e
 			t.Deploy = core.DeployPending
 			continue
 		}
-		if state == nil {
+		if !asked {
+			asked = true
 			var err error
-			state, err = p.Deploy.State(ctx)
-			if err != nil {
-				return err
+			if state, err = p.Deploy.State(ctx); err != nil {
+				// A provider that answers with an error is the same
+				// epistemic position as no provider at all, and that case
+				// is already pending-with-a-timeout two branches up. This
+				// used to abort the whole build, which made one
+				// unreachable third-party GET fatal to *everything* the
+				// sweep does — dispatch, CI routing, escalation, stale
+				// claims — for as long as the provider stayed unreachable.
+				// A deploy fact the plane cannot read must not cost it the
+				// facts it can.
+				fmt.Fprintln(os.Stderr, "pipeline: deploy detection unavailable; Merged tickets stay pending until the deploy timeout:", err)
+				state = nil
 			}
 		}
 		t.Deploy = core.DeployPending
+		if state == nil {
+			continue
+		}
 		if state.ActiveSHA != "" {
 			deployed, err := p.Host.IsAncestor(ctx, mergeSHA, state.ActiveSHA)
 			if err != nil {
