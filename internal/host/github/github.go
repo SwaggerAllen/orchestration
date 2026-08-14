@@ -91,7 +91,8 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("github: %s %s: HTTP %d%s", method, path, resp.StatusCode, hint(resp.StatusCode, method, path))
+		return fmt.Errorf("github: %s %s: HTTP %d%s%s", method, path, resp.StatusCode,
+			apiMessage(resp), hint(resp.StatusCode, method, path))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -116,7 +117,34 @@ func hint(status int, method, path string) string {
 			" Settings → Actions → General → \"Allow GitHub Actions to create and approve pull requests\"" +
 			" on the repository; the second is not grantable from a workflow file"
 	}
-	return " — check the calling workflow's permissions: block, which drops every permission it does not name"
+	return " — 403 is a permissions answer, but which permissions depends on which token the run was" +
+		" given: under GITHUB_TOKEN it is the calling workflow's permissions: block, which drops every" +
+		" permission it does not name; under AGENT_GITHUB_TOKEN it is that token's own repository" +
+		" permissions, which no workflow file can widen. Naming only the first sent a rework run to a" +
+		" permissions: block that was already correct"
+}
+
+// apiMessage returns GitHub's own explanation for a failed response.
+// That explanation is the whole difference between two 403s that are
+// otherwise identical on the wire — "Resource not accessible by personal
+// access token" and "Resource not accessible by integration" point at
+// different credentials. Discarding the body left callers with a bare
+// "403 Forbidden" and a guess, and the guess cost a full rework run.
+//
+// Bounded, because an error body is not a payload; the caller has
+// already given up on the response by the time this is reached.
+func apiMessage(r *http.Response) string {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 4<<10))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &body); err == nil && body.Message != "" {
+		return ": " + body.Message
+	}
+	return ": " + strings.TrimSpace(string(raw))
 }
 
 // pathOnly trims a query string so a suffix match is not defeated by one.
@@ -343,7 +371,12 @@ func (c *Client) jobLog(ctx context.Context, jobID string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("job log %s: %s", jobID, resp.Status)
+		// This error is read by a model, not by a maintainer with the repo
+		// open: it lands verbatim in the rework prompt as the reason the
+		// build's logs are missing. "403 Forbidden" told one dev agent
+		// nothing it could act on, so it worked the ticket log-blind.
+		return "", fmt.Errorf("job log %s: %s%s%s", jobID, resp.Status,
+			apiMessage(resp), hint(resp.StatusCode, http.MethodGet, url))
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
