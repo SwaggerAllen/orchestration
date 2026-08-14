@@ -91,7 +91,8 @@ runs:
           --out "$RUNNER_TEMP/pipeline" \
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/dev.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
-          --handback-path "$RUNNER_TEMP/pipeline/handback.md"
+          --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the ticket branch
       shell: bash
@@ -176,7 +177,8 @@ runs:
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
-          --handback "$RUNNER_TEMP/pipeline/handback.md"
+          --handback "$RUNNER_TEMP/pipeline/handback.md" \
+          --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'
@@ -189,4 +191,5 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --message "Dev agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -55,6 +55,10 @@ narrative/system docs get committed. Scratch HTML is never committed.
   branch's storybook export and puts the URL on the ticket when it asks
   for review, so your summary does not need to say where to look — say
   what to look *at*, and why it is drawn that way.
+- **A problem with the pipeline goes in the harness findings**, not in
+  your summary and not into `non-asks.md`. The non-asks file records
+  what the author does not want built; a harness finding records what
+  the machine got wrong. Mixing them buries both.
 - **Declare every screen and system you touched.** Your outcome's
   `screens` and `systems` lists become the mutex labels (DESIGN §6), and
   CI audits the eventual diff against the docs' file maps — a touch you

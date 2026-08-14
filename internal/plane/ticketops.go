@@ -26,9 +26,20 @@ func (p *Plane) CommentTicket(ctx context.Context, ticketID, body string) error 
 	return p.Tracker.CommentOnIssue(ctx, ticketID, body)
 }
 
-// AddTicketLabel attaches one label by name.
+// AddTicketLabel attaches one label by name, creating it if the team
+// lacks it.
+//
+// It used to attach only, on the theory that the fixed set (protocol
+// .Labels) is provisioned by setup and the per-name mutex labels are the
+// only ones born late. That theory breaks every time the protocol gains
+// a label: setup provisions it, but only on projects where somebody
+// re-runs setup, and until they do the attach fails — so an agent
+// aborting with needs-setup could not file the abort, which is the worst
+// possible moment to discover a label is missing. Creating on demand
+// makes the two paths one, and a label the team already has costs one
+// list call.
 func (p *Plane) AddTicketLabel(ctx context.Context, ticketID, label string) error {
-	return p.Tracker.AddIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
+	return p.ensureLabel(ctx, ticketID, label)
 }
 
 // RemoveTicketLabel detaches one label by name.
@@ -36,11 +47,15 @@ func (p *Plane) RemoveTicketLabel(ctx context.Context, ticketID, label string) e
 	return p.Tracker.RemoveIssueLabel(ctx, p.Config.Tracker.TeamID, ticketID, label)
 }
 
-// EnsureMutexLabel creates a screen:<name> or system:<name> label if the
-// team lacks it, then attaches it. Mutex labels are born per-name as
-// design discovers them (DESIGN §6, §8), so unlike the fixed set they are
-// created on demand.
+// EnsureMutexLabel attaches a screen:<name> or system:<name> label.
+// Named separately from AddTicketLabel because the call sites read
+// differently — mutex labels are born per-name as design discovers them
+// (DESIGN §6, §8) — but the behaviour is now the same for both.
 func (p *Plane) EnsureMutexLabel(ctx context.Context, ticketID, label string) error {
+	return p.ensureLabel(ctx, ticketID, label)
+}
+
+func (p *Plane) ensureLabel(ctx context.Context, ticketID, label string) error {
 	teamID := p.Config.Tracker.TeamID
 	labels, err := p.Tracker.ListLabels(ctx, teamID)
 	if err != nil {
@@ -99,8 +114,15 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 		}
 	}
 	label := "tech-debt"
-	if kind == "design" {
+	switch kind {
+	case "design":
 		label = "design-inbox"
+	case "harness":
+		// The pipeline's own problems, filed where the author triages
+		// everything else but labelled apart: "is the harness costing
+		// us tickets" is a different question from "is this codebase
+		// accruing debt", and one list cannot answer both.
+		label = "harness"
 	}
 	m := marker.Marker{Kind: marker.TriageProposal, Fields: map[string]string{
 		"dedupe": dedupe,

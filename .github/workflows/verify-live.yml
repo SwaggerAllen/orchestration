@@ -18,6 +18,13 @@ on:
         description: Apply setup and run a live sweep (false = dry-run only)
         type: boolean
         default: false
+      setup_only:
+        description: >-
+          With apply: provision the tracker and stop, without sweeping.
+          "Provision the team" and "act on it" are different intentions,
+          and only the first is one you want to trigger from a phone.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -37,6 +44,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      # Before anything else: a scope this project lacks fails here,
+      # loudly, with a ticket-free tracker — rather than at whatever
+      # moment first needs it, which for the deploy read was the first
+      # ticket ever to reach Merged.
+      # Tracker half only, deliberately: GITHUB_REPOSITORY here is the
+      # pipeline repo, not the project, so host and deploy checks run
+      # against the wrong repository and would fail for a reason that
+      # isn't the project's. The project's own preflight stub covers
+      # that half, where the token and the repo agree.
+      - name: preflight (tracker)
+        run: go run ./cmd/pipeline preflight --config "${{ inputs.config }}"
 
       - name: setup (dry run)
         run: go run ./cmd/pipeline setup --config "${{ inputs.config }}" --dry-run
@@ -63,10 +82,14 @@ jobs:
           echo "sweep checks skipped: the team is not provisioned until setup applies."
           echo "Re-run with apply=true — setup is idempotent, so applying is safe on every run."
 
+      - name: sweep (skipped — setup only)
+        if: ${{ inputs.apply && inputs.setup_only }}
+        run: echo "setup applied; sweep skipped because setup_only is set."
+
       - name: sweep (dry run)
-        if: ${{ inputs.apply }}
+        if: ${{ inputs.apply && !inputs.setup_only }}
         run: go run ./cmd/pipeline sweep --config "${{ inputs.config }}" --dry-run
 
       - name: sweep (apply)
-        if: ${{ inputs.apply }}
+        if: ${{ inputs.apply && !inputs.setup_only }}
         run: go run ./cmd/pipeline sweep --config "${{ inputs.config }}"

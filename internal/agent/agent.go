@@ -24,6 +24,27 @@ import (
 // baseRe extracts the `Base: <sha>` line from a description (DESIGN §4).
 var baseRe = regexp.MustCompile(`(?m)^Base:\s*([0-9a-fA-F]{7,40})\s*$`)
 
+// baseSHA is the merge-base the design was drawn against: the newest
+// base marker the harness posted, falling back to a `Base:` line an
+// author wrote by hand. The description form is what DESIGN §4 documents
+// and stays supported for exactly that reason — but nothing automated
+// can write there, because the description is the immutable argument
+// (§2.3), which is why the marker exists.
+func baseSHA(t *core.Ticket) string {
+	for i := len(t.Comments) - 1; i >= 0; i-- {
+		m, ok, err := marker.Parse(t.Comments[i].Body)
+		if err == nil && ok && m.Kind == marker.Base {
+			if sha := m.Fields["sha"]; sha != "" {
+				return sha
+			}
+		}
+	}
+	if m := baseRe.FindStringSubmatch(t.Description); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
 // ClaimResult is everything the workflow steps after claim need.
 type ClaimResult struct {
 	TicketID  string
@@ -193,9 +214,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 	// abort is coming from where the agent is, which is the state the
 	// claim is about to write.
 	res.State = claimState
-	if m := baseRe.FindStringSubmatch(t.Description); m != nil {
-		res.BaseSHA = m[1]
-	}
+	res.BaseSHA = baseSHA(t)
 
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
 		res.Branch = pr.Branch

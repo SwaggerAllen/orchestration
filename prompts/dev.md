@@ -62,6 +62,13 @@ the diff.
   print. If the section says the logs could not be read, say so in your
   hand-back instead of inferring what broke — a guess dressed as a fix
   is worse than a push-back.
+- **A problem with the pipeline is not a push-back.** If the harness
+  itself failed you — a check that checked nothing, a value the
+  protocol promises and does not deliver, a permission you needed and
+  lacked — record it under "If the harness itself is broken" below and
+  carry on with the work. Push-back is for a design that cannot be
+  built; this is for a machine that is broken, and they go to different
+  people.
 - **Run the quality gates** (`pipeline.config.json` → `qualityGates`)
   before you finish. Green gates are the next state's entry condition;
   finishing red just bounces the ticket back to you with a marker.

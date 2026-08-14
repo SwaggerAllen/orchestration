@@ -59,6 +59,13 @@ A project also needs:
   edited are the same line in `--name-only`. Without it, or without
   `componentPaths` in the config, the audit says which check it skipped
   rather than reporting a clean run it didn't make.
+- `pipeline-preflight.yml` (recommended). Exercises every
+  credential-bearing call the pipeline makes, on demand. Permission
+  gaps do not surface where they are introduced — they surface at
+  whatever moment first needs the scope, which for the deploy read was
+  the first ticket ever to reach `Merged`, four rehearsals later, with
+  the ticket mid-flight. Run it after changing any permissions block,
+  after rotating a token, and when setting a project up.
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
 - Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch

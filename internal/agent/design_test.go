@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
@@ -27,7 +28,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
-	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -60,7 +61,7 @@ func TestDesignDecisionlessAutoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
-	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -108,7 +109,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 	o := &DesignOutcome{Outcome: "clear", Summary: "The colliding ticket rewrote a different region; this scope still holds."}
-	if err := FinishDesign(ctx, p, h, res, o, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -130,7 +131,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	o2 := &DesignOutcome{Outcome: "demote", Summary: "The ground moved under this scope; it needs a fresh pass."}
-	if err := FinishDesign(ctx, p, h, res2, o2, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res2, o2, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.Designing {
@@ -249,7 +250,7 @@ func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
 	const url = "https://abc123.orchestration-dummy.pages.dev"
-	if err := FinishDesign(ctx, p, h, res, o, url); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, url, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -286,7 +287,7 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -297,5 +298,54 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 		if m, ok, err := marker.Parse(c.Body); err == nil && ok && m.Kind == marker.Preview {
 			t.Error("posted a preview marker with no preview")
 		}
+	}
+}
+
+// The base sha is the one thing in the description's schema that nothing
+// could ever write: DESIGN §4 names the description as its home and
+// §2.3 makes descriptions immutable, so the only writer that could fill
+// it in is the one forbidden to edit it. Every ticket therefore reported
+// "no Base sha recorded" and the §2.4 concurrency check never ran. The
+// harness posts it as a marker at design finish, and the claim reads it
+// back.
+func TestDesignFinishRecordsTheBaseSHA(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument, with no Base line", protocol.Designing)
+
+	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b"}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}}
+	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read it back the way a dev claim does.
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tk *core.Ticket
+	for _, cand := range snap.Tickets {
+		if cand.ID == i.ID {
+			tk = cand
+		}
+	}
+	if tk == nil {
+		t.Fatal("ticket vanished")
+	}
+	if got := baseSHA(tk); got != "abc1234" {
+		t.Errorf("baseSHA = %q, want abc1234 — the dev pass is back to having nothing to diff against", got)
+	}
+}
+
+// A hand-written Base: line in the description still works. It is what
+// DESIGN §4 documents, and an author who writes one means it.
+func TestBaseSHAFallsBackToTheDescription(t *testing.T) {
+	tk := &core.Ticket{Description: "The argument.\n\nBase: deadbeef\n\nWhat it touches: ..."}
+	if got := baseSHA(tk); got != "deadbeef" {
+		t.Errorf("baseSHA = %q, want deadbeef", got)
+	}
+	if got := baseSHA(&core.Ticket{Description: "no base here"}); got != "" {
+		t.Errorf("baseSHA = %q, want empty", got)
 	}
 }

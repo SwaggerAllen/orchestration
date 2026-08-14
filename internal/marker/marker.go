@@ -67,6 +67,28 @@ const (
 	// ticket — the once-per-milestone real-network check the author's
 	// pass reads (DESIGN §10). Fields: result=pass|fail, run=<url>.
 	LiveSuite Kind = "live-suite"
+	// HarnessFinding records a problem an agent hit in the pipeline
+	// itself — a check that was vacuous, a credential that was missing,
+	// a protocol with no route for what the run met. Agents noticed
+	// these constantly and had nowhere to put them: the observations
+	// went into hand-back prose, and the boundary scan's bounded inputs
+	// (DESIGN §10) do not include hand-backs, so the one channel for
+	// "the harness is broken" reached nobody who could fix it. Narrow on
+	// purpose — product debt keeps the boundary's own scan, because an
+	// agent filing whatever it noticed is how a backlog stops being
+	// trusted (DESIGN §4). Fields: id=<dedupe>, title=<one line>.
+	HarnessFinding Kind = "harness-finding"
+	// Base records the merge-base the design was drawn against
+	// (DESIGN §2.4, §4). The description names it as the place this
+	// lives, and nothing ever wrote it there: descriptions are the
+	// immutable original argument (§2.3), so the only writer that could
+	// have filled it in is the one forbidden to edit it. So the base
+	// check — optimistic concurrency control, checked at pickup — was
+	// documentation of a check that never ran, and every dev hand-back
+	// spent a paragraph saying the sha was absent. A marker instead: the
+	// harness posts it at design finish, when the value first exists,
+	// and the description stays untouched. Field: sha=<merge-base>.
+	Base Kind = "base"
 	// Blocked records a ticket's arrival in Blocked and, in `from`, the
 	// state it arrived from. Only the author moves a ticket out of
 	// Blocked and they choose the state (DESIGN §12) — which is right,

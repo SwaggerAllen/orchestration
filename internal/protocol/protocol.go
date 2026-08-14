@@ -138,6 +138,7 @@ var Labels = []string{
 	"re-evaluate",
 	"needs-review",
 	"needs-setup",
+	"harness",
 	"milestone-boundary",
 }
 
