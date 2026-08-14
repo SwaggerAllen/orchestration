@@ -119,6 +119,12 @@ func TestWorkflowsRunningThePipelineCanReadTheSnapshot(t *testing.T) {
 		"pull-requests": "read", // ListOpenPRs
 		"checks":        "read", // ChecksFor
 		"contents":      "read", // IsAncestor, via compare
+		// State, for projects whose deploy provider is "github" — the
+		// dummy's stand-in for a hosting platform. Read lazily, only
+		// once a Merged ticket exists, which is why its absence stayed
+		// invisible through every run that never reached Merged and then
+		// failed every command at once when one did.
+		"deployments": "read",
 	}
 	root := filepath.Join("..", "..")
 	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))

@@ -33,6 +33,7 @@ permissions:
   actions: write # dispatching agent workflows; write covers listing runs
   pull-requests: read # the open-PR list the snapshot is built from
   checks: read # CI verdicts per PR head, which drive the Checks hop
+  deployments: read # deploy state, when the project's provider is "github"
 
 # One dispatcher at a time: the single-dev-agent invariant is only as
 # strong as single-dispatcher (DESIGN §13).
