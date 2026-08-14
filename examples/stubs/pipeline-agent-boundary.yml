@@ -29,6 +29,7 @@ permissions:
   pull-requests: read # the snapshot's open PR list
   actions: read # the snapshot's agent run list
   checks: read # CI verdict per PR head
+  deployments: read # deploy state, when the project's provider is "github"
 
 jobs:
   boundary:
