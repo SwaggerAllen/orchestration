@@ -48,6 +48,14 @@ A project also needs:
     --ticket <key>
   ```
 
+  `--ticket` needs `LINEAR_API_KEY` in the step's env — the class
+  audit fetches the issue's labels and text from the tracker, and the
+  command exits 1 before checking anything when the key is absent. The
+  first project to arm this step learned it from a red run: the recipe
+  as previously written omitted the key. (A checkout deep enough to
+  reach `origin/main` is also required — `fetch-depth: 0`, since the
+  default shallow PR checkout can't compute the diff base.)
+
   Put `pipeline` on PATH first with the `setup-pipeline` action —
   it checks out the pipeline and builds the binary once per pipeline
   commit, restoring it from cache after that. The agent actions call
