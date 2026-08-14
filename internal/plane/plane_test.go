@@ -231,3 +231,46 @@ func TestExecuteCreatesBoundaryTicket(t *testing.T) {
 		}
 	}
 }
+
+// A proposal in Linear's Triage is not a pipeline ticket. The boundary
+// agent files its findings there (DESIGN §10) and the author accepts or
+// declines them; until then there is no state for the sweep to reason
+// about, so the snapshot skips them.
+//
+// This was fatal, and the boundary agent is the one thing that creates
+// such issues — so it broke its own next snapshot by doing its job:
+// three proposals filed, all three steps green, then dead on the first
+// one it read back, and the ticket Blocked with every step's work done.
+func TestBuildSkipsTriageProposals(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+
+	triage, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Triage", Category: protocol.CategoryTriage})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := seedIssue(t, tr, cfg, "Real ticket", protocol.Todo)
+	proposal := seedIssue(t, tr, cfg, "Boundary finding", protocol.Todo)
+	if err := tr.UpdateIssueState(ctx, proposal.ID, triage.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("a filed proposal broke the snapshot: %v", err)
+	}
+	for _, tk := range snap.Tickets {
+		if tk.ID == proposal.ID {
+			t.Error("a triage proposal is in the snapshot — the sweep could dispatch against a finding nobody accepted")
+		}
+	}
+	found := false
+	for _, tk := range snap.Tickets {
+		if tk.ID == kept.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the real ticket went missing — triage skipping must not swallow the queue")
+	}
+}
