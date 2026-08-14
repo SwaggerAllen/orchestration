@@ -32,6 +32,18 @@ inputs:
       Falls back to github_token, which suffices once it is public.
     required: false
     default: ""
+  no_tests_pattern:
+    description: >-
+      How this project's test runner says the filter matched nothing.
+      A runner given a tag filter that matches no test exits non-zero —
+      ExUnit prints "no test was executed" — so a project that has not
+      written its first live test yet reports a FAILING live suite at
+      every boundary, for a structural reason, which is how the one
+      automated signal the boundary has gets trained into noise. Matched
+      against the suite's output to tell that apart from a real failure.
+      Set to something unmatchable to turn the distinction off.
+    required: false
+    default: "no test was executed"
   pipeline_ref:
     description: Pipeline repo ref to run the harness from
     required: false
@@ -50,11 +62,32 @@ runs:
         pipeline_repo_token: ${{ inputs.pipeline_repo_token }}
         pipeline_ref: ${{ inputs.pipeline_ref }}
 
+    # Output is captured as well as shown, so the next step can tell
+    # "the filter matched no tests" from "tests ran and failed". Both
+    # exit non-zero and they are not the same fact.
     - name: run live suite
       id: suite
       shell: bash
       continue-on-error: true
-      run: ${{ inputs.command }}
+      env:
+        LIVE_COMMAND: ${{ inputs.command }}
+      run: |
+        set -o pipefail
+        eval "$LIVE_COMMAND" 2>&1 | tee "$RUNNER_TEMP/live-suite.log"
+
+    - name: read the verdict
+      id: verdict
+      shell: bash
+      env:
+        NO_TESTS: ${{ inputs.no_tests_pattern }}
+      run: |
+        if [ "${{ steps.suite.outcome }}" = "success" ]; then
+          echo "result=pass" >> "$GITHUB_OUTPUT"
+        elif [ -n "$NO_TESTS" ] && grep -qF -- "$NO_TESTS" "$RUNNER_TEMP/live-suite.log"; then
+          echo "result=no-tests" >> "$GITHUB_OUTPUT"
+        else
+          echo "result=fail" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: report
       shell: bash
@@ -65,13 +98,20 @@ runs:
         pipeline agent live-suite-report \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --ticket "${{ inputs.ticket }}" \
-          --result "${{ steps.suite.outcome == 'success' && 'pass' || 'fail' }}" \
+          --result "${{ steps.verdict.outputs.result }}" \
           --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
     # The job's own status mirrors the suite so the run is red in the
     # Actions UI when the suite failed — the marker is the record, but a
     # green run wrapping a red suite misleads at a glance.
+    #
+    # Not red for no-tests. A project that has not written its first live
+    # test is not broken, and a gate that is red on every project's first
+    # boundary is a gate the author learns to skip past — which costs
+    # more than the missing coverage does. The ticket says plainly that
+    # nothing was checked; that is the signal, and it is in the place the
+    # author actually reads at a boundary.
     - name: propagate failure
-      if: steps.suite.outcome != 'success'
+      if: steps.verdict.outputs.result == 'fail'
       shell: bash
       run: exit 1

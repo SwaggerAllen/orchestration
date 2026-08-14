@@ -635,6 +635,17 @@ signal that was missing.
    green" quietly diverges from "works against the world". A run that dies without posting its
    marker is the author's to re-run — the sweep does not resurrect it, for the same reason
    stale claims are detected rather than silently retried.
+
+   **Three results, not two: `pass`, `fail`, `no-tests`.** A test runner handed a tag filter
+   that matches nothing exits non-zero — an `--only` filter with no match is an error, not an
+   empty pass — so a project that has not written its first `:live` test reported a *failing*
+   live suite at every boundary. The first real boundary spent an investigation on exactly
+   that, and a gate that is red for structural reasons is a gate the author learns to skip
+   past, which costs more than the missing coverage does. `no-tests` is deliberately neither
+   verdict: calling it a pass would claim the world was checked when nothing ran, which is the
+   failure this gate exists to prevent. The ticket says plainly that nothing was checked and
+   the author's pass decides whether the milestone closes without it; the run itself is not
+   marked red, because a project with no live tests yet is not broken.
 3. **Gate:** all `re-evaluate` labels clear, and nothing in `Blocked` except tickets carrying
    `needs-review` — those are the author's pass, not a barrier to it. A `needs-setup` ticket
    *is* a barrier: it is work the milestone is waiting on, and closing a boundary over one
