@@ -31,6 +31,11 @@ type BoundaryPlan struct {
 	ClaimResult
 	Milestone string
 	Done      map[string]bool
+	// HarnessFindings are the pipeline problems agents recorded during
+	// this milestone (DESIGN §10). Bounded like every other scan input:
+	// markers on live tickets, deduped, not prose anybody has to read
+	// their way through.
+	HarnessFindings []HarnessFinding
 	// Roster is every milestone in the tracker's order, with how much of
 	// each is still open. The gating test asks about "the next product
 	// milestone" (DESIGN §10), and this is where that comes from —
@@ -73,8 +78,9 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 			TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 			Mode: "boundary", Description: t.Description, State: t.State,
 		},
-		Milestone: t.Milestone,
-		Done:      map[string]bool{},
+		Milestone:       t.Milestone,
+		Done:            map[string]bool{},
+		HarnessFindings: CollectHarnessFindings(snap.Tickets),
 	}
 	for _, c := range t.Comments {
 		plan.Comments = append(plan.Comments, c.Body)
@@ -214,8 +220,10 @@ func ParseProposals(raw []byte) (*Proposals, error) {
 		if pr.Title == "" || pr.Dedupe == "" {
 			return nil, fmt.Errorf("proposal %d: title and dedupe are required — without the key a re-run files it twice (DESIGN §10)", i)
 		}
-		if pr.Kind != "debt" && pr.Kind != "design" {
-			return nil, fmt.Errorf("proposal %d (%s): kind %q — design findings and debt only, never bugs (DESIGN §10)", i, pr.Title, pr.Kind)
+		switch pr.Kind {
+		case "debt", "design", "harness":
+		default:
+			return nil, fmt.Errorf("proposal %d (%s): kind %q — debt, design findings and harness findings only, never bugs (DESIGN §10)", i, pr.Title, pr.Kind)
 		}
 	}
 	for i, r := range ps.Ranking {

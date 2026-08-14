@@ -1,0 +1,47 @@
+# Project stub: preflight. Copy into the project repo's
+# .github/workflows/.
+#
+# Exercises every credential-bearing call the pipeline makes, against
+# this repo, on demand. It exists because permission gaps do not surface
+# where they are introduced — they surface at whatever moment first
+# needs the scope. The deploy read was missing for four rehearsals and
+# announced itself on the first ticket ever to reach Merged, with the
+# ticket mid-flight and every sweep dying before it could act.
+#
+# Run it after changing any workflow's permissions block, after rotating
+# a token, and when setting a project up for the first time. Nothing
+# runs it on a schedule and no other job calls it: it is a thing you
+# reach for when something is wrong, and it makes no writes, so reaching
+# for it costs nothing but a minute.
+name: pipeline-preflight
+run-name: "pipeline: preflight"
+
+on:
+  workflow_dispatch:
+
+# The read-set the snapshot needs, which is exactly what this checks.
+# Kept in step with the other stubs on purpose: a preflight granted more
+# than the sweep would pass while the sweep still failed.
+permissions:
+  contents: read # IsAncestor, via compare
+  actions: read # the agent run list
+  pull-requests: read # the open-PR list
+  checks: read # CI verdict per PR head
+  deployments: read # deploy state, when the project's provider is "github"
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: checkout project (for pipeline.config.json)
+        uses: actions/checkout@v4
+
+      - uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+        with:
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+
+      - name: preflight
+        run: pipeline preflight --config "$GITHUB_WORKSPACE/pipeline.config.json"

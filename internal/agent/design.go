@@ -133,7 +133,18 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
-func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL string) error {
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string) error {
+	// Recorded before the outcome branches, on every pass that hands the
+	// ticket forward: the base check is what warns the next dev pass that
+	// main moved under the design (DESIGN §2.4), and a decisionless pass
+	// hands the ticket to dev just as an artifacts pass does.
+	if baseSHA != "" && (o.Outcome == "artifacts" || o.Outcome == "decisionless") {
+		m := marker.Marker{Kind: marker.Base, Fields: map[string]string{"sha": baseSHA}}
+		prose := fmt.Sprintf("Design was drawn against `%s`. The dev pass diffs against it; if main moved and both changes touch the same behavior, that is a push-back rather than a guess (DESIGN §2.4).", baseSHA)
+		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
+			return err
+		}
+	}
 	switch o.Outcome {
 	case "artifacts":
 		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {

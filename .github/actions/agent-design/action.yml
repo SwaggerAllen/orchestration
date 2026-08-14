@@ -90,7 +90,8 @@ runs:
           --out "$RUNNER_TEMP/pipeline" \
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
-          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json"
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the ticket branch
       shell: bash
@@ -102,6 +103,19 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+
+    # The merge-base the design is drawn against (DESIGN §2.4), read
+    # before the model writes anything. Computed here rather than in the
+    # harness because only the runner has the checkout, and taken as a
+    # merge-base rather than as origin/main's tip so a branch that
+    # already existed reports the point it actually diverged.
+    - name: read the merge-base
+      id: base
+      shell: bash
+      run: |
+        set -euo pipefail
+        git fetch origin +refs/heads/main:refs/remotes/origin/main
+        echo "sha=$(git merge-base HEAD origin/main)" >> "$GITHUB_OUTPUT"
 
     - name: run the design agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
@@ -184,7 +198,9 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
-          --preview-url "${{ steps.published.outputs.deployment-url }}"
+          --preview-url "${{ steps.published.outputs.deployment-url }}" \
+          --base-sha "${{ steps.base.outputs.sha }}" \
+          --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'
@@ -197,4 +213,5 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --message "Design agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

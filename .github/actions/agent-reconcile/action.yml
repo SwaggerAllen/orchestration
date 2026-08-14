@@ -79,7 +79,8 @@ runs:
           --out "$RUNNER_TEMP/pipeline" \
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/reconcile.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
-          --verdict-path "$RUNNER_TEMP/pipeline/verdict.json"
+          --verdict-path "$RUNNER_TEMP/pipeline/verdict.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the PR branch (read-only inspection)
       shell: bash
@@ -119,7 +120,8 @@ runs:
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
-          --verdict "$RUNNER_TEMP/pipeline/verdict.json"
+          --verdict "$RUNNER_TEMP/pipeline/verdict.json" \
+          --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'
@@ -132,4 +134,5 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --message "Reconcile run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

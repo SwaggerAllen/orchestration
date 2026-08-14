@@ -650,8 +650,24 @@ signal that was missing.
    **emits a retro note into the repo**: issue keys, titles, one line each. Without it,
    archiving silently breaks duplicate detection.
 7. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
-   skipped or deleted tests, dependency and advisory drift. Bounded because "did we take on
-   debt?" asked openly produces invented findings.
+   skipped or deleted tests, dependency and advisory drift, and **the harness findings agents
+   recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
+   invented findings.
+
+   Harness findings are the pipeline's own problems, filed by the runs that hit them
+   (`kind: "harness"`, labelled `harness`). Every other input describes the project; this one
+   describes the machine, and the author is the only person who can fix it while the agents are
+   the only ones who watch it fail. Without the channel the observation went into hand-back
+   prose and stopped there: three separate passes reported that no `Base:` sha was recorded and
+   nothing aggregated them, which is how a check that never ran survived four rehearsals. The
+   boundary is the first pass that sees them together, and together is what makes them legible
+   — one run saying it is a shrug, three runs saying it is a missing check.
+
+   Deliberately narrow, and the narrowness is the feature: agents may record harness findings
+   and nothing else. Product debt, coverage and refactors stay with the scan above, because an
+   agent that reads a product in an afternoon is very good at spotting gaps and very bad at
+   judging whether a gap is news (§4) — and one flooded list answers neither "is this codebase
+   accruing debt" nor "is the pipeline costing me tickets".
    *Gating test:* does the next product milestone get materially harder without it? Yes →
    propose for the gating debt milestone. No → backlog.
 8. **Grooming pass.** Re-ranks existing debt as well as proposing additions.

@@ -113,19 +113,24 @@ func rank(level string) int {
 // binary but names only the scopes its *writes* need gets an HTTP 403
 // partway through the claim — after the run looks healthy, and with the
 // ticket already dispatched.
+// snapshotReads is the read-set of a snapshot build: the scope each
+// call needs, spelled as a workflow spells it. Shared by the permission
+// test below and the preflight test after it, so "what the sweep needs"
+// has one definition rather than two that drift.
+var snapshotReads = map[string]string{
+	"actions":       "read", // ListAgentRuns
+	"pull-requests": "read", // ListOpenPRs
+	"checks":        "read", // ChecksFor
+	"contents":      "read", // IsAncestor, via compare
+	// State, for projects whose deploy provider is "github" — the
+	// dummy's stand-in for a hosting platform. Read lazily, only
+	// once a Merged ticket exists, which is why its absence stayed
+	// invisible through every run that never reached Merged and then
+	// failed every command at once when one did.
+	"deployments": "read",
+}
+
 func TestWorkflowsRunningThePipelineCanReadTheSnapshot(t *testing.T) {
-	snapshotReads := map[string]string{
-		"actions":       "read", // ListAgentRuns
-		"pull-requests": "read", // ListOpenPRs
-		"checks":        "read", // ChecksFor
-		"contents":      "read", // IsAncestor, via compare
-		// State, for projects whose deploy provider is "github" — the
-		// dummy's stand-in for a hosting platform. Read lazily, only
-		// once a Merged ticket exists, which is why its absence stayed
-		// invisible through every run that never reached Merged and then
-		// failed every command at once when one did.
-		"deployments": "read",
-	}
 	root := filepath.Join("..", "..")
 	files, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
 	if err != nil {
@@ -452,6 +457,64 @@ func TestTheModelRunnerNeverShadowsTheSubscriptionCredential(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("run-agent-model has no attempt of the form %q — the unset is what stops the shadowing", want)
+		}
+	}
+}
+
+// Preflight has to probe every scope the snapshot needs, or it is a
+// green light that means nothing. Read off the check list's own scope
+// strings, so adding a call to the read-set without adding a probe for
+// it fails here rather than at the next 403.
+func TestPreflightProbesEveryScopeTheSnapshotNeeds(t *testing.T) {
+	body, err := os.ReadFile("preflight.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	for scope := range snapshotReads {
+		// The scope as a workflow spells it, which is how the check list
+		// prints it too — the string a reader has to go edit.
+		if !strings.Contains(src, `"`+scope+`: read"`) {
+			t.Errorf("preflight probes nothing needing %q — a green preflight would still be followed by a 403 on that call", scope)
+		}
+	}
+}
+
+// A green preflight must not read as "the permissions are fine". It
+// probes reads; every write the pipeline makes has a side effect
+// somebody would have to undo, so none of them are probed — and the most
+// expensive 403 of the lot was reconcile's POST /deployments, a write.
+// The unexercised list is what keeps the green line honest, so it has to
+// name every write scope the stubs actually grant.
+func TestPreflightNamesTheWritesItDoesNotProbe(t *testing.T) {
+	body, err := os.ReadFile("preflight.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	stubs, err := filepath.Glob(filepath.Join("..", "..", "examples", "stubs", "*.yml"))
+	if err != nil || len(stubs) == 0 {
+		t.Fatalf("found no stubs: %v", err)
+	}
+	granted := map[string]bool{}
+	for _, f := range stubs {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for scope, level := range permissionsOf(stripComments(string(raw))) {
+			if level == "write" {
+				granted[scope] = true
+			}
+		}
+	}
+	if len(granted) == 0 {
+		t.Fatal("no stub grants any write — the scan has drifted")
+	}
+	for scope := range granted {
+		if !strings.Contains(src, scope+": write") {
+			t.Errorf("a stub grants %s: write and preflight neither probes it nor names it as unexercised — a green run would imply it was checked", scope)
 		}
 	}
 }

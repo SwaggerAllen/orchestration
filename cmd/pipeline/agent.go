@@ -99,6 +99,7 @@ func cmdAgentClaim(args []string) error {
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file to assemble prompt.md from")
 	repoContext := fs.String("repo-context", "", "shared repo orientation to inject after the role prompt (prompts/repo-context.md)")
 	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
+	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to (all kinds)")
 	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
 	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
 	if err := fs.Parse(args); err != nil {
@@ -174,6 +175,10 @@ func cmdAgentClaim(args []string) error {
 		default:
 			prompt = assemblePrompt(base, res, *handbackPath)
 		}
+		// Every kind, including boundary: the boundary agent is as
+		// likely as any other to meet a harness gap, and its own scan
+		// reads these back.
+		prompt += harnessFindingsSection(*findingsPath)
 		if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 			return err
 		}
@@ -351,6 +356,7 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 		add("\nThe gating test asks about the next PRODUCT milestone — read it off this list rather than assuming a naming convention.\n")
 	}
 	if !plan.Done[agent.StepScan] {
+		add(harnessFindingsForBoundary(plan.HarnessFindings))
 		add(nonAsksSection(plan.NonAsks, "filing proposals", false))
 	}
 	if outcomePath != "" {
@@ -412,6 +418,7 @@ func cmdBoundaryFile(args []string) error {
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim --kind boundary")
 	proposalsPath := fs.String("proposals", "", "proposals.json from the scan (omit on resume; recovered from the scan comment)")
+	findings := fs.String("findings", "", "harness findings the model recorded")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -434,6 +441,9 @@ func cmdBoundaryFile(args []string) error {
 		}
 	}
 	if err := agent.BoundaryFile(context.Background(), p, plan, ps, time.Now()); err != nil {
+		return err
+	}
+	if err := postFindings(p, plan.TicketID, *findings); err != nil {
 		return err
 	}
 	fmt.Printf("boundary %s: proposals filed, ticket in Boundary review\n", plan.TicketKey)
@@ -459,7 +469,9 @@ func cmdAgentFinish(args []string) error {
 	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
 	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
 	outcome := fs.String("outcome", "", "outcome.json written by the model (design)")
+	baseSHA := fs.String("base-sha", "", "merge-base the design was drawn against (design mode)")
 	previewURL := fs.String("preview-url", "", "where this pass's storybook export was published (design)")
+	findings := fs.String("findings", "", "harness findings the model recorded (any kind)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -486,6 +498,9 @@ func cmdAgentFinish(args []string) error {
 		if err := agent.FinishReconcile(context.Background(), p, h, res, v); err != nil {
 			return err
 		}
+		if err := postFindings(p, res.TicketID, *findings); err != nil {
+			return err
+		}
 		fmt.Printf("reconciled %s: %s\n", res.TicketKey, v.Outcome)
 		return nil
 	}
@@ -498,7 +513,10 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA); err != nil {
+			return err
+		}
+		if err := postFindings(p, res.TicketID, *findings); err != nil {
 			return err
 		}
 		fmt.Printf("design %s: %s\n", res.TicketKey, o.Outcome)
@@ -515,6 +533,9 @@ func cmdAgentFinish(args []string) error {
 	if err := agent.Finish(context.Background(), p, h, res, string(body)); err != nil {
 		return err
 	}
+	if err := postFindings(p, res.TicketID, *findings); err != nil {
+		return err
+	}
 	fmt.Printf("finished %s: PR #%d ready, ticket in Checks\n", res.TicketKey, res.PRNumber)
 	return nil
 }
@@ -525,6 +546,9 @@ func cmdAgentAbort(args []string) error {
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
 	reason := fs.String("reason", "failed", "pushback, failed or needs-setup")
 	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
+	// A run that aborts is the likeliest one to have met a harness gap —
+	// that is often why it aborted — so the findings travel here too.
+	findings := fs.String("findings", "", "harness findings the model recorded")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -540,6 +564,9 @@ func cmdAgentAbort(args []string) error {
 		return err
 	}
 	if err := agent.Abort(context.Background(), p, res, *reason, *message); err != nil {
+		return err
+	}
+	if err := postFindings(p, res.TicketID, *findings); err != nil {
 		return err
 	}
 	fmt.Printf("aborted %s (%s)\n", res.TicketKey, *reason)
@@ -617,6 +644,91 @@ func ciFailureSection(f *agent.CIFailure) string {
 			continue
 		}
 		b.WriteString("\n```\n" + j.Log + "\n```\n")
+	}
+	return b.String()
+}
+
+// postFindings records the run's harness findings, if it wrote any.
+//
+// After the finish rather than before: a finding is worth nothing if the
+// work it came with did not land, and a run that fails between them
+// leaves the finding on the next run's floor rather than a ticket that
+// moved for a reason nobody can see.
+func postFindings(p *plane.Plane, ticketID, path string) error {
+	fs, err := agent.LoadHarnessFindings(path)
+	if err != nil {
+		return err
+	}
+	if len(fs) == 0 {
+		return nil
+	}
+	if err := agent.PostHarnessFindings(context.Background(), p, ticketID, fs); err != nil {
+		return err
+	}
+	fmt.Printf("recorded %d harness finding(s) for the milestone boundary\n", len(fs))
+	return nil
+}
+
+// harnessFindingsSection tells every agent about the one channel it has
+// for reporting that the pipeline itself is broken — and, at more
+// length, about what does not belong in it.
+//
+// The scope rule is the whole feature. Agents are very good at spotting
+// gaps and very bad at judging whether a gap is news (DESIGN §4), so a
+// general "file what you noticed" channel fills the queue with confident
+// product opinions and the queue stops being read. Harness findings are
+// the exception because the author is the only one who can fix the
+// pipeline and the agent is the only one who watches it fail.
+func harnessFindingsSection(path string) string {
+	if path == "" {
+		return ""
+	}
+	return fmt.Sprintf(`
+
+## If the harness itself is broken
+
+You may record findings about **the pipeline**, and only about the
+pipeline, by writing a JSON array to `+"`%s`"+`:
+
+    [{"title": "...", "detail": "...", "dedupe": "stable-key"}]
+
+The harness posts them for the milestone boundary to judge. Writing
+nothing is the normal case and needs no explanation.
+
+**In scope:** a check that passed without checking anything; a value the
+protocol says exists and doesn't; a credential or permission you needed
+and did not have; a state you reached with no legal way out; an
+instruction in your own prompt contradicted by the repository. Things
+where the pipeline lied to you or left you stuck.
+
+**Out of scope, and this is the important half:** product tech debt,
+code quality, test coverage, refactors, anything about the project's own
+architecture. Those have their own route — the milestone boundary's
+bounded scan — and filing them here floods the one list the author reads
+for "is the pipeline costing me tickets". If your finding would still be
+true on a project using none of this machinery, it does not belong here.
+
+`+"`dedupe`"+` names the thing, never the run: ten runs hitting one gap
+should produce one ticket.
+`, path)
+}
+
+// harnessFindingsForBoundary renders what the milestone's agents
+// reported about the pipeline itself — a bounded scan input like the
+// merged diffs and the new TODOs, not a second opinion to weigh.
+//
+// The boundary is the first pass that sees them together, and together
+// is the only way they read as anything: one run saying "no Base sha was
+// recorded" is a shrug, and three runs saying it across three tickets is
+// a check that does not exist.
+func harnessFindingsForBoundary(fs []agent.HarnessFinding) string {
+	if len(fs) == 0 {
+		return "\n## Harness findings this milestone\n\nNone recorded. That is a normal milestone, not a gap in the input.\n"
+	}
+	var b strings.Builder
+	b.WriteString("\n## Harness findings this milestone\n\nRecorded by the agents that hit them, deduped. These are about the pipeline, not this project's code — file the ones worth a ticket with `\"kind\": \"harness\"`, and say so plainly when one is not worth filing.\n")
+	for _, f := range fs {
+		fmt.Fprintf(&b, "\n### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
 	}
 	return b.String()
 }

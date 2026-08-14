@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -348,5 +350,67 @@ func TestFreshClaimHasNoFailingBuild(t *testing.T) {
 	}
 	if res.CIFailure != nil {
 		t.Errorf("a fresh dev claim carries a CI failure: %+v", res.CIFailure)
+	}
+}
+
+// Harness findings are the channel agents have for "the pipeline itself
+// is broken" — the thing that previously went into hand-back prose and
+// reached nobody, because the boundary scan's inputs (DESIGN §10) are
+// diffs, TODOs, skipped tests and dependency drift.
+func TestHarnessFindingsRoundTripToTheBoundary(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "d", protocol.ReadyForDev)
+
+	found := []HarnessFinding{{
+		Title:  "No Base sha is ever recorded",
+		Detail: "DESIGN §2.4 makes it optimistic concurrency control checked at pickup; nothing writes it.",
+		Dedupe: "base-sha-never-written",
+	}}
+	if err := PostHarnessFindings(ctx, p, i.ID, found); err != nil {
+		t.Fatal(err)
+	}
+	// Twice, as two runs hitting the same gap would.
+	if err := PostHarnessFindings(ctx, p, i.ID, found); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := CollectHarnessFindings(snap.Tickets)
+	if len(got) != 1 {
+		t.Fatalf("collected %d findings, want 1 — the dedupe key is what stops ten runs filing ten tickets: %+v", len(got), got)
+	}
+	if got[0].Title != found[0].Title {
+		t.Errorf("title = %q, want %q", got[0].Title, found[0].Title)
+	}
+	if !strings.Contains(got[0].Detail, "optimistic concurrency control") {
+		t.Errorf("the detail did not survive the round trip: %q", got[0].Detail)
+	}
+}
+
+// A finding nobody can act on costs a read and buys nothing, and one
+// without a stable key files itself every run.
+func TestHarnessFindingsRefuseTheUnusable(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		path := filepath.Join(dir, "f.json")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := LoadHarnessFindings(write(`[{"title":"x","dedupe":"k"}]`)); err == nil {
+		t.Error("a finding with no detail was accepted")
+	}
+	if _, err := LoadHarnessFindings(write(`[{"title":"x","detail":"y"}]`)); err == nil {
+		t.Error("a finding with no dedupe key was accepted")
+	}
+	// The normal case: no file at all, which is most runs.
+	got, err := LoadHarnessFindings(filepath.Join(dir, "absent.json"))
+	if err != nil || got != nil {
+		t.Errorf("an absent findings file must be silence, got %v / %v", got, err)
 	}
 }

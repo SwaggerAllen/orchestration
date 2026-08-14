@@ -79,7 +79,8 @@ runs:
           --out "$RUNNER_TEMP/pipeline" \
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/boundary.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
-          --outcome-path "$RUNNER_TEMP/pipeline/proposals.json"
+          --outcome-path "$RUNNER_TEMP/pipeline/proposals.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: archive pass + retro note
       shell: bash
@@ -106,6 +107,7 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json" --claim "$RUNNER_TEMP/pipeline/claim.json")
+        ARGS+=(--findings "$RUNNER_TEMP/pipeline/findings.json")
         if [ "${{ steps.claim.outputs.scan_done }}" != "true" ]; then
           ARGS+=(--proposals "$RUNNER_TEMP/pipeline/proposals.json")
         fi
@@ -122,4 +124,5 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --message "Boundary run failed; move the ticket back to In progress to resume from the last completed step (DESIGN 10). Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
