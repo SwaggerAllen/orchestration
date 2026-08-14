@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -309,50 +310,92 @@ const (
 	maxLogTailBytes = 20000
 )
 
+// FailedJobLogs reads the Actions API rather than the check-runs API that
+// ChecksFor uses, and the difference is which credential each call can be
+// made with. ChecksFor runs in the sweep, under the workflow's own
+// GITHUB_TOKEN, where `checks: read` is grantable from the permissions
+// block. This runs at claim time in an agent workflow, under
+// AGENT_GITHUB_TOKEN — and a fine-grained PAT has no check-runs
+// permission to grant: the endpoint appears nowhere in GitHub's
+// fine-grained permissions reference, so no setting fixes it. The first
+// rework run to need a log got a bare 403 and worked the ticket blind.
+//
+// Actions runs and jobs are grantable (`Actions`, which agent tokens
+// already hold to dispatch), and they are the only thing with a log to
+// read anyway. Third-party checks are lost here and not missed: the
+// ci-red marker already names every failing check, from ChecksFor.
 func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobLog, error) {
-	runs, err := c.checkRuns(ctx, headSHA)
-	if err != nil {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", c.owner, c.repo, headSHA)
+	var runs struct {
+		WorkflowRuns []struct {
+			ID         int64  `json:"id"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"workflow_runs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &runs); err != nil {
 		return nil, err
 	}
 	var out []host.JobLog
-	for _, r := range runs {
-		if r.Status != "completed" {
+	for _, r := range runs.WorkflowRuns {
+		if r.Status != "completed" || !failedConclusion(r.Conclusion) {
 			continue
 		}
-		switch r.Conclusion {
-		case "success", "neutral", "skipped":
-			continue
+		jobs, err := c.runJobs(ctx, r.ID)
+		if err != nil {
+			return nil, err
 		}
-		if len(out) >= maxFailedJobs {
-			break
-		}
-		j := host.JobLog{Name: r.Name, URL: r.HTMLURL}
-		// A check run that is not an Actions job — a third-party check —
-		// has no log to fetch here. Named without one rather than
-		// dropped: "this check failed and I could not read it" is a fact
-		// the agent needs, and silence would read as "it passed".
-		if id := jobID(r.HTMLURL); id != "" {
-			log, err := c.jobLog(ctx, id)
-			if err != nil {
-				j.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
-			} else {
-				j.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+		for _, j := range jobs {
+			if j.Status != "completed" || !failedConclusion(j.Conclusion) {
+				continue
 			}
+			if len(out) >= maxFailedJobs {
+				return out, nil
+			}
+			entry := host.JobLog{Name: j.Name, URL: j.HTMLURL}
+			log, err := c.jobLog(ctx, strconv.FormatInt(j.ID, 10))
+			if err != nil {
+				// Named without a log rather than dropped: "this job failed
+				// and I could not read it" is a fact the agent needs, and
+				// silence would read as "it passed".
+				entry.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
+			} else {
+				entry.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+			}
+			out = append(out, entry)
 		}
-		out = append(out, j)
 	}
 	return out, nil
 }
 
-// jobIDRe pulls the Actions job id out of a check run's html_url, which
-// looks like .../actions/runs/<run>/job/<job>.
-var jobIDRe = regexp.MustCompile(`/job/(\d+)`)
-
-func jobID(htmlURL string) string {
-	if m := jobIDRe.FindStringSubmatch(htmlURL); m != nil {
-		return m[1]
+// failedConclusion reports whether a completed run or job counts as red.
+// failure, timed_out, cancelled and action_required all do.
+func failedConclusion(conclusion string) bool {
+	switch conclusion {
+	case "success", "neutral", "skipped":
+		return false
 	}
-	return ""
+	return true
+}
+
+// workflowJob is one Actions job as FailedJobLogs reads it.
+type workflowJob struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+}
+
+func (c *Client) runJobs(ctx context.Context, runID int64) ([]workflowJob, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", c.owner, c.repo, runID)
+	var data struct {
+		Jobs []workflowJob `json:"jobs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return nil, err
+	}
+	return data.Jobs, nil
 }
 
 // jobLog fetches one job's log. The endpoint answers with a redirect to

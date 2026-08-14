@@ -248,13 +248,94 @@ func TestTailBoundsByLinesAndBytes(t *testing.T) {
 	}
 }
 
-func TestJobIDComesFromTheCheckRunURL(t *testing.T) {
-	if got := jobID("https://github.com/o/r/actions/runs/123/job/456"); got != "456" {
-		t.Errorf("jobID = %q, want 456", got)
+// The path this exercises is the one an agent reads at claim time, under
+// AGENT_GITHUB_TOKEN. It deliberately touches no check-runs endpoint: a
+// fine-grained PAT has no check-runs permission to grant, so a rework run
+// that reached for one got a 403 and worked the ticket log-blind.
+func TestFailedJobLogsReadsTheActionsAPI(t *testing.T) {
+	srv := logServer(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.Contains(r.URL.Path, "check-runs") {
+			t.Errorf("reached the check-runs API, which the agent token cannot read: %s", r.URL.Path)
+		}
+		return false
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).FailedJobLogs(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A third-party check is not an Actions job and has no log to fetch;
-	// it is still named, so "failed and unreadable" never reads as "passed".
-	if got := jobID("https://example.com/some-other-check"); got != "" {
-		t.Errorf("jobID on a non-Actions check = %q, want empty", got)
+	if len(got) != 1 {
+		t.Fatalf("jobs = %d, want 1 (only the failing job of the failing run)", len(got))
 	}
+	if got[0].Name != "ci" {
+		t.Errorf("name = %q, want ci", got[0].Name)
+	}
+	if !strings.Contains(got[0].Log, "undefined function farwell/1") {
+		t.Errorf("log = %q, want the job's output", got[0].Log)
+	}
+}
+
+// A job whose log cannot be read is still named — silence would read as
+// "it passed" — and the error carries GitHub's own explanation, which is
+// the difference between a fixable answer and another debugging round.
+func TestFailedJobLogsNamesAJobItCannotRead(t *testing.T) {
+	srv := logServer(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/logs") {
+			return false
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": "Resource not accessible by personal access token",
+		})
+		return true
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).FailedJobLogs(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "ci" {
+		t.Fatalf("a job with an unreadable log must still be named: %+v", got)
+	}
+	if !strings.Contains(got[0].Log, "Resource not accessible by personal access token") {
+		t.Errorf("log = %q, want GitHub's own reason for the 403", got[0].Log)
+	}
+	if !strings.Contains(got[0].Log, "AGENT_GITHUB_TOKEN") {
+		t.Errorf("log = %q, want the hint naming which token's permissions apply", got[0].Log)
+	}
+}
+
+// logServer serves one failing run with one failing job. override runs
+// first and reports whether it handled the request itself.
+func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if override != nil && override(w, r) {
+			return
+		}
+		switch {
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/runs":
+			if got := r.URL.Query().Get("head_sha"); got != "sha1" {
+				t.Errorf("head_sha = %q, want sha1", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []map[string]any{
+				{"id": 1, "status": "completed", "conclusion": "success"},
+				{"id": 2, "status": "completed", "conclusion": "failure"},
+				{"id": 3, "status": "in_progress", "conclusion": ""},
+			}})
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/runs/2/jobs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []map[string]any{
+				{"id": 20, "name": "ci", "status": "completed", "conclusion": "failure",
+					"html_url": "https://gh/runs/2/job/20"},
+				{"id": 21, "name": "lint", "status": "completed", "conclusion": "success"},
+			}})
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/jobs/20/logs":
+			_, _ = w.Write([]byte("** (CompileError) undefined function farwell/1"))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
 }

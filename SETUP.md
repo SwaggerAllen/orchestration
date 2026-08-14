@@ -55,7 +55,20 @@ able to do exactly one job and nothing else.
   requests → Read and write**, **Actions → Read and write**,
   **Deployments → Read and write**. Leave **Workflows** unset — that is
   what keeps agents unable to edit `.github/workflows/`, the same blast
-  radius the in-workflow `GITHUB_TOKEN` has.
+  radius the in-workflow `GITHUB_TOKEN` has. A dev run proved the point
+  by writing a correct `ci.yml` fix it could not push; the run died at
+  the push and took its hand-back with it, which is the trade this
+  setting makes and is meant to make.
+- **There is no check-runs permission to add, and this is why the plane
+  reads CI two different ways.** A fine-grained token cannot be granted
+  the check-runs API at all — the endpoint appears nowhere in GitHub's
+  fine-grained permissions reference, and "Commit statuses" is a
+  different API (`/statuses`, not `/check-runs`). So the sweep reads
+  check runs under the workflow's own `GITHUB_TOKEN`, where
+  `checks: read` is grantable from the `permissions:` block, while
+  anything running under this token reads the Actions API instead.
+  Watch for this when adding a call: a `permissions:` block in a stub
+  grants nothing to the token the agent actions are handed.
 - Named without a `GITHUB_` prefix because Actions reserves it.
 
 **Why this exists, and why the default token is not enough.** Every
