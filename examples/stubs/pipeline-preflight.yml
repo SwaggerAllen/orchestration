@@ -9,7 +9,10 @@
 # ticket mid-flight and every sweep dying before it could act.
 #
 # Run it after changing any workflow's permissions block, after rotating
-# a token, and when setting a project up for the first time.
+# a token, and when setting a project up for the first time. Nothing
+# runs it on a schedule and no other job calls it: it is a thing you
+# reach for when something is wrong, and it makes no writes, so reaching
+# for it costs nothing but a minute.
 name: pipeline-preflight
 run-name: "pipeline: preflight"
 

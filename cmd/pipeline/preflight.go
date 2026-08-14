@@ -31,6 +31,20 @@ import (
 // The point is that every call runs on every invocation, whether or not
 // the project currently happens to have a ticket in the state that would
 // trigger it. A check you only reach by luck is the thing this replaces.
+//
+// Reads only, and it says so. Every write the pipeline makes has a
+// side effect somebody would have to undo — a dispatched run, an opened
+// PR, a recorded deployment, a moved ticket — and a diagnostic that
+// leaves litter is one nobody runs. The cost is real and named rather
+// than hidden: the most expensive 403 of the lot was reconcile's
+// POST /deployments, a write, and a green preflight would not have
+// caught it. So the write scopes are listed as unexercised at the end,
+// where a reader deciding "am I safe now" can see the half that was not
+// checked.
+//
+// Nothing runs this on a schedule or as a step in another job. It is a
+// thing you invoke when something is wrong, or once when wiring a
+// project up.
 type check struct {
 	name  string // what the pipeline calls it for
 	scope string // the permission it needs, as the workflow spells it
@@ -160,7 +174,28 @@ func cmdPreflight(args []string) error {
 		return fmt.Errorf("preflight: %d of %d checks failed — fix these before a ticket is in flight, not after", failed, len(checks))
 	}
 	fmt.Printf("preflight: %d checks, all green\n", len(checks))
+	reportUnexercised()
 	return nil
+}
+
+// unexercised is every scope the pipeline needs that preflight does not
+// probe, because probing it would mean making the write. Printed on a
+// green run specifically: "all green" is the moment a reader is most
+// likely to conclude the permissions are fine, and this is the half that
+// sentence does not cover.
+var unexercised = []struct{ scope, why string }{
+	{"actions: write", "dispatching agent workflows"},
+	{"contents: write", "pushing the agent's commits to the ticket branch"},
+	{"pull-requests: write", "opening the PR and flipping the draft off"},
+	{"deployments: write", "recording the stand-in deployment after a merge"},
+	{"LINEAR_API_KEY (write)", "every transition, comment and label the harness makes"},
+}
+
+func reportUnexercised() {
+	fmt.Println("\nnot exercised — these are writes, and a diagnostic that leaves litter is one nobody runs:")
+	for _, u := range unexercised {
+		fmt.Printf("  %-24s %s\n", u.scope, u.why)
+	}
 }
 
 // headSHA picks a commit to probe the per-commit endpoints with. An open

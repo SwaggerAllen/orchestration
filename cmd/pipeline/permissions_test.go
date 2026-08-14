@@ -479,3 +479,42 @@ func TestPreflightProbesEveryScopeTheSnapshotNeeds(t *testing.T) {
 		}
 	}
 }
+
+// A green preflight must not read as "the permissions are fine". It
+// probes reads; every write the pipeline makes has a side effect
+// somebody would have to undo, so none of them are probed — and the most
+// expensive 403 of the lot was reconcile's POST /deployments, a write.
+// The unexercised list is what keeps the green line honest, so it has to
+// name every write scope the stubs actually grant.
+func TestPreflightNamesTheWritesItDoesNotProbe(t *testing.T) {
+	body, err := os.ReadFile("preflight.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	stubs, err := filepath.Glob(filepath.Join("..", "..", "examples", "stubs", "*.yml"))
+	if err != nil || len(stubs) == 0 {
+		t.Fatalf("found no stubs: %v", err)
+	}
+	granted := map[string]bool{}
+	for _, f := range stubs {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for scope, level := range permissionsOf(stripComments(string(raw))) {
+			if level == "write" {
+				granted[scope] = true
+			}
+		}
+	}
+	if len(granted) == 0 {
+		t.Fatal("no stub grants any write — the scan has drifted")
+	}
+	for scope := range granted {
+		if !strings.Contains(src, scope+": write") {
+			t.Errorf("a stub grants %s: write and preflight neither probes it nor names it as unexercised — a green run would imply it was checked", scope)
+		}
+	}
+}

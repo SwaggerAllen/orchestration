@@ -65,7 +65,10 @@ A project also needs:
   whatever moment first needs the scope, which for the deploy read was
   the first ticket ever to reach `Merged`, four rehearsals later, with
   the ticket mid-flight. Run it after changing any permissions block,
-  after rotating a token, and when setting a project up.
+  after rotating a token, and when setting a project up. Reads only —
+  it names the write scopes it did not exercise rather than making
+  writes somebody would have to undo, so a green run means "the reads
+  are fine", not "the permissions are fine".
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
 - Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch
