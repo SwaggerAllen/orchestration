@@ -31,6 +31,9 @@ type Plane struct {
 	// resolved lazily, once per Plane: tracker state id <-> protocol state.
 	stateByID map[string]protocol.State
 	idByState map[protocol.State]string
+	// triageStates are the team's Linear intake states, which the
+	// protocol deliberately does not map.
+	triageStates map[string]bool
 	// keyByID is filled by Build; Execute needs keys for dispatch inputs.
 	keyByID map[string]string
 }
@@ -69,6 +72,18 @@ func (p *Plane) resolveStates(ctx context.Context) error {
 	}
 	p.stateByID = map[string]protocol.State{}
 	p.idByState = map[protocol.State]string{}
+	// Triage is Linear's intake type, and the protocol table has no
+	// entry for it on purpose: a proposal awaiting the author's accept
+	// or decline is not a pipeline ticket and must never be swept. It is
+	// recorded here so the unmapped-state guard below can tell "the
+	// boundary agent just filed a finding" from "a protocol state was
+	// renamed in Linear".
+	p.triageStates = map[string]bool{}
+	for _, s := range states {
+		if s.Category == protocol.CategoryTriage {
+			p.triageStates[s.ID] = true
+		}
+	}
 	for _, ps := range protocol.AllStates {
 		name := p.Config.StateName(ps)
 		info, ok := byName[name]
@@ -120,6 +135,19 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 	for _, i := range issues {
 		st, ok := p.stateByID[i.StateID]
 		if !ok {
+			if p.triageStates[i.StateID] {
+				// Not a pipeline ticket yet. The boundary agent files
+				// its findings here (DESIGN §10) and the author accepts
+				// or declines them; until then there is no state for the
+				// sweep to reason about. Skipped rather than mapped,
+				// because mapping it would make findings dispatchable.
+				//
+				// This was fatal, which meant the boundary agent broke
+				// its own next snapshot by doing its job: it filed three
+				// proposals and then died on the first one it read back,
+				// after all three steps had already succeeded.
+				continue
+			}
 			// A state outside the protocol's table (a leftover team
 			// default) makes the ticket unreadable; failing loudly beats
 			// sweeping around it as if it weren't there.
