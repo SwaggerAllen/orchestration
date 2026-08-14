@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
-
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
@@ -180,4 +180,70 @@ func seedBoundary(t *testing.T, tr *tracker.Memory, cfg *config.Config) tracker.
 		t.Fatal(err)
 	}
 	return i
+}
+
+// The live suite has three outcomes, not two. A test runner given a tag
+// filter that matches nothing exits non-zero — an `--only` filter with
+// no match is an error, not an empty pass — so a project that has not
+// written its first :live test reported a FAILING live suite at every
+// boundary. The first real boundary spent an investigation on exactly
+// that, and a gate that is red for structural reasons is a gate the
+// author learns to skip.
+//
+// "no-tests" is neither verdict on purpose. Reporting it as a pass would
+// claim the world was checked when nothing ran, which is the failure
+// mode the gate exists to prevent (DESIGN §10).
+func TestLiveSuiteReportsNoTestsAsItsOwnOutcome(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	now := time.Now()
+
+	boundary, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Milestone boundary — M: alpha", Description: "machinery",
+		StateID: stateID(t, tr, cfg, protocol.InProgress),
+		Labels:  []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := LiveSuiteReport(ctx, p, boundary.Key, "no-tests", "https://gh/run/1", now); err != nil {
+		t.Fatalf("no-tests is a legal outcome and was refused: %v", err)
+	}
+	if err := LiveSuiteReport(ctx, p, boundary.Key, "inconclusive", "https://gh/run/1", now); err == nil {
+		t.Error("an unknown result was accepted; the marker's vocabulary is its contract")
+	}
+
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body string
+	for _, i := range issues {
+		if i.ID != boundary.ID {
+			continue
+		}
+		for _, c := range i.Comments {
+			m, ok, err := marker.Parse(c.Body)
+			if err == nil && ok && m.Kind == marker.LiveSuite {
+				if got := m.Fields["result"]; got != "no-tests" {
+					t.Errorf("marker result = %q, want no-tests", got)
+				}
+				body = c.Body
+			}
+		}
+	}
+	if body == "" {
+		t.Fatal("no live-suite marker on the boundary ticket")
+	}
+	// The author reads this at the boundary and has to be able to tell
+	// "nothing was checked" from "everything passed" without opening the
+	// run.
+	if !strings.Contains(body, "NO tests") || !strings.Contains(body, "nothing was checked") {
+		t.Errorf("the comment does not say plainly that nothing ran:\n%s", body)
+	}
+	if strings.Contains(body, "FAILED") {
+		t.Errorf("no-tests reads as a failure, which is the thing that trains the signal into noise:\n%s", body)
+	}
 }
