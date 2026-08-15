@@ -155,7 +155,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 		}
 		p.keyByID[i.ID] = i.Key
 		t := &core.Ticket{
-			ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description,
+			ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description, URL: i.URL,
 			State: st, StateSince: i.StateSince, CreatedAt: i.CreatedAt,
 			Labels: i.Labels, Priority: i.Priority, Milestone: i.Milestone,
 			AssigneeID: i.AssigneeID,

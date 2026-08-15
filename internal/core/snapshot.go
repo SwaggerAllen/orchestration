@@ -111,7 +111,9 @@ type Ticket struct {
 	// Description is the immutable original argument (DESIGN §2.3). The
 	// sweep never reads it; the agent harness serves it as scope.
 	Description string
-	State       protocol.State
+	// URL is the tracker's link to this ticket, for output a human reads.
+	URL   string
+	State protocol.State
 	// StateSince is when the ticket entered its current state; grace
 	// periods and timeouts measure from here.
 	StateSince time.Time

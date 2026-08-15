@@ -203,6 +203,11 @@ func cloneIssue(i *Issue) Issue {
 	return c
 }
 
+// memoryIssueURL stands in for the tracker's own link. Shaped like a real
+// one so anything formatting output is exercised against a realistic
+// value rather than an empty string.
+func memoryIssueURL(key string) string { return "https://tracker.invalid/issue/" + key }
+
 func (m *Memory) CreateIssue(_ context.Context, n NewIssue) (Issue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -231,10 +236,11 @@ func (m *Memory) CreateIssue(_ context.Context, n NewIssue) (Issue, error) {
 	}
 	now := m.Now()
 	id := m.id("issue")
+	key := fmt.Sprintf("MEM-%d", m.nextID)
 	i := &Issue{
-		ID: id, Key: fmt.Sprintf("MEM-%d", m.nextID), Title: n.Title, Description: n.Description,
+		ID: id, Key: key, Title: n.Title, Description: n.Description,
 		StateID: n.StateID, Labels: append([]string(nil), n.Labels...),
-		Priority: 3, Milestone: milestone,
+		Priority: 3, Milestone: milestone, URL: memoryIssueURL(key),
 		CreatedAt: now, StateSince: now,
 	}
 	m.issues = append(m.issues, i)
