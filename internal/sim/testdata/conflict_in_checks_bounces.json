@@ -1,0 +1,18 @@
+{
+  "name": "a conflicted branch in Checks goes to rework, and never waits for a verdict that cannot come",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks"},
+
+    {"kind": "ci", "key": "T1", "status": "", "mergeable": "conflicted"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "runKind": "dev", "runLive": true, "markers": {"merge-conflict": 1}},
+
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/run/1", "mergeable": "clean"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "reconciling", "runKind": "reconcile", "runLive": true}
+  ]
+}

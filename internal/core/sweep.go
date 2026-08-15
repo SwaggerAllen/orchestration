@@ -270,12 +270,74 @@ func block(t *Ticket, m *marker.Marker, prose, reason string) []Action {
 	}}
 }
 
+// conflictBounce sends a ticket whose branch conflicts back to the queue.
+//
+// Deliberately the same marker and the same argument as reconcile's
+// bounce (internal/agent/reconcile.go), because it is the same event
+// seen from a different place: a branch that went stale while the ticket
+// was in flight. Sharing the marker is what keeps the third-conflict
+// escalation counting across both — three conflicts on one ticket is a
+// sequencing problem whichever half of the pipeline noticed them, and
+// two separate counters would each stop at two.
+//
+// Back to the queue rather than straight to Reworking, for the reason
+// the writer matrix gives (DESIGN §9): Reworking is the dev agent's own
+// claim, and a state written by anyone else is reverted.
+func conflictBounce(t *Ticket) []Action {
+	attempt := len(markersOf(t, marker.MergeConflict)) + 1
+	m := &marker.Marker{Kind: marker.MergeConflict, Fields: map[string]string{
+		"attempt": fmt.Sprintf("%d", attempt),
+		// Where it was seen. The two detection points have different
+		// evidence behind them — this one never got a CI verdict at all
+		// — and a marker that hides which is which makes the history
+		// unreadable.
+		"at": "checks",
+	}}
+	if t.CI.PRNumber > 0 {
+		m.Fields["pr"] = fmt.Sprintf("%d", t.CI.PRNumber)
+	}
+	// The newest comment is the scope (DESIGN §2.3), so it has to say
+	// plainly that the work is not what is wrong. A dev agent handed a
+	// bounce reads it as a finding about the diff unless told otherwise,
+	// and would start re-litigating a design that nothing has questioned.
+	prose := "This branch conflicts with something that merged into main while the ticket was in flight. " +
+		"CI cannot run on it at all — GitHub builds no merge commit for a conflicted pull request, so no verdict was coming and the ticket would have sat here.\n\n" +
+		"**Nothing about the work is in question.** Do not revisit the design, the argument or the diff. " +
+		"The scope is exactly this: merge `origin/main` into the branch, resolve the conflicts, keep both sides' intent, run the quality gates, and finish. " +
+		"If a conflict cannot be resolved without changing what this ticket decided, that is a push-back rather than a guess (DESIGN §2.4)."
+	return []Action{{
+		Kind: ActTransition, TicketID: t.ID, To: protocol.ReadyForRework, Marker: m,
+		Prose:  prose,
+		Reason: "branch conflicts with main; no CI verdict can arrive",
+	}}
+}
+
 // ciFor turns CI results on a Checks ticket into transitions (DESIGN §12,
 // §13). In production the project stub delivers these event-driven; the
 // sweep computes the same answers so the polled loop backstops lost events.
 func ciFor(s *Snapshot, t *Ticket) []Action {
 	if t.State != protocol.Checks || t.IsBoundary() {
 		return nil
+	}
+	// A conflicted branch is checked first, and before CI, because it is
+	// the reason there is no verdict to wait for. GitHub cannot build
+	// the merge ref for a conflicted PR, so the `pull_request` run never
+	// starts — the ticket does not fail here, it stops. Checks has no
+	// agent and so no stale-claim timeout, so nothing else would ever
+	// move it.
+	//
+	// This catches the green case too, which reconcile's bounce would
+	// also have caught: promoting a branch that cannot merge spends a
+	// full model-driven reconcile pass to arrive at the same state.
+	// Reconcile's bounce stays, for the case no snapshot can see — main
+	// moving between the read and the merge attempt.
+	//
+	// Except when CI is red: then a run did happen and did report, the
+	// scope naming the failing jobs is the more specific one, and it
+	// sends the ticket to the same place. Resolving the conflict is part
+	// of that rework either way.
+	if t.CI.Mergeable == MergeConflicted && t.CI.Status != CIRed {
+		return conflictBounce(t)
 	}
 	switch t.CI.Status {
 	case CIGreen:

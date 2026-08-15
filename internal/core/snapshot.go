@@ -101,7 +101,35 @@ type CIInfo struct {
 	// can open the run — which the dev agent, holding no GitHub
 	// credential by design, cannot.
 	FailedJobs []string
+	// Mergeable is whether the branch can still land on main, which is a
+	// fact about the ticket's future that no CI verdict carries.
+	//
+	// It is here rather than discovered at merge time because a
+	// conflicted PR never reaches merge time: GitHub cannot build the
+	// merge ref, so the `pull_request` run never happens, so no verdict
+	// ever arrives, so the ticket sits in Checks — a state with no agent
+	// and therefore no stale-claim timeout — indefinitely. The bounce
+	// that already existed (reconcile's, on ErrNotMergeable) is
+	// downstream of the verdict that will not come.
+	//
+	// Empty means "GitHub has not said", which is not a conflict.
+	Mergeable MergeState
+	// PRNumber names the PR in the conflict marker, so the comment reads
+	// the same whichever half of the pipeline noticed.
+	PRNumber int
 }
+
+// MergeState mirrors the host port's tri-state (host.MergeState). The
+// core imports no adapter, and the third value is load-bearing: GitHub
+// answers "not computed yet" and "conflicted" differently, and only one
+// of them is a reason to move a ticket.
+type MergeState string
+
+const (
+	MergeUnknown    MergeState = ""
+	MergeClean      MergeState = "clean"
+	MergeConflicted MergeState = "conflicted"
+)
 
 // Ticket is one issue as the sweep sees it.
 type Ticket struct {

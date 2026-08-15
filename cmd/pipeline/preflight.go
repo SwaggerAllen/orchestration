@@ -116,6 +116,22 @@ func cmdPreflight(args []string) error {
 				_, err = gh.ChecksFor(ctx, sha)
 				return err
 			}},
+			// A different endpoint from the PR list, and that is the
+			// point: the list response does not carry `mergeable` at
+			// all, so this is the single-PR GET and it can fail on its
+			// own. With no open PR there is nothing to ask about, which
+			// is a skip rather than a pass.
+			check{"a PR's merge state", "pull-requests: read", func(ctx context.Context) error {
+				prs, err := gh.ListOpenPRs(ctx)
+				if err != nil {
+					return err
+				}
+				if len(prs) == 0 {
+					return nil
+				}
+				_, err = gh.MergeStateFor(ctx, prs[0].Number)
+				return err
+			}},
 			check{"commit ancestry", "contents: read", func(ctx context.Context) error {
 				sha, err := headSHA(ctx, gh)
 				if err != nil {

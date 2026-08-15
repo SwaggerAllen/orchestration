@@ -229,6 +229,10 @@ func (w *World) stepCI(raw json.RawMessage) error {
 		Key    string `json:"key"`
 		Status string `json:"status"`
 		Run    string `json:"run"`
+		// Mergeable is the branch's merge state, empty meaning "GitHub
+		// has not computed it" — which is what a scenario says when it
+		// is not about conflicts at all, and is correctly inert.
+		Mergeable string `json:"mergeable"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
@@ -242,7 +246,17 @@ func (w *World) stepCI(raw json.RawMessage) error {
 	default:
 		return fmt.Errorf("ci %s: unknown status %q", p.Key, p.Status)
 	}
-	t.CI = core.CIInfo{Status: core.CIStatus(p.Status), RunURL: p.Run}
+	switch core.MergeState(p.Mergeable) {
+	case core.MergeUnknown, core.MergeClean, core.MergeConflicted:
+	default:
+		return fmt.Errorf("ci %s: unknown mergeable %q", p.Key, p.Mergeable)
+	}
+	t.CI = core.CIInfo{
+		Status:    core.CIStatus(p.Status),
+		RunURL:    p.Run,
+		Mergeable: core.MergeState(p.Mergeable),
+		PRNumber:  1,
+	}
 	return nil
 }
 

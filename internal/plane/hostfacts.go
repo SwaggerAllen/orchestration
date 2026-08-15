@@ -61,6 +61,19 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 			case host.ChecksPending:
 				t.CI = core.CIInfo{Status: core.CIPending}
 			}
+			// Asked for every Checks ticket, not only the ones with no
+			// verdict. A green PR that conflicts is reconcile's bounce
+			// and works already; a ticket with no verdict is this one's,
+			// and the two are told apart by the core rather than by
+			// which facts the snapshot bothered to gather — a snapshot
+			// that answers different questions depending on what it
+			// found is one the pure core cannot be tested against.
+			ms, err := p.Host.MergeStateFor(ctx, pr.Number)
+			if err != nil {
+				return err
+			}
+			t.CI.Mergeable = core.MergeState(ms)
+			t.CI.PRNumber = pr.Number
 		}
 	}
 	return nil

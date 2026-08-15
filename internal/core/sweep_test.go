@@ -540,3 +540,98 @@ func TestThirdMergeConflictBlocks(t *testing.T) {
 		t.Errorf("the comment blames the ticket rather than the ordering:\n%s", a.Prose)
 	}
 }
+
+// The hole this closes. A conflicted PR gets no CI run at all — GitHub
+// builds no merge commit for one, so the `pull_request` event never
+// fires — and Checks has no agent, so no stale-claim timeout applies.
+// Before this, such a ticket had no exit whatsoever: not blocked, not
+// timing out, just parked. The bounce that existed lived in reconcile,
+// downstream of the verdict that was never coming.
+func TestAConflictedBranchWithNoVerdictGoesToRework(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Mergeable: MergeConflicted, PRNumber: 20}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForRework {
+		t.Fatalf("want Ready for rework, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Kind != marker.MergeConflict {
+		t.Fatalf("want a merge-conflict marker so the escalation counts it, got %v", a.Marker)
+	}
+	if a.Marker.Fields["pr"] != "20" || a.Marker.Fields["at"] != "checks" {
+		t.Errorf("the marker does not say which PR or where it was seen: %v", a.Marker.Fields)
+	}
+	// The newest comment is the scope (DESIGN §2.3). A dev agent handed
+	// a bounce reads it as a finding about the diff unless told
+	// otherwise, and would re-litigate a design nothing has questioned.
+	if !strings.Contains(a.Prose, "Nothing about the work is in question") {
+		t.Errorf("the scope does not exempt the work:\n%s", a.Prose)
+	}
+}
+
+// Unknown is GitHub saying "not computed yet", which it says about every
+// freshly pushed branch. Reading it as a conflict would bounce healthy
+// tickets out of Checks the moment they arrived.
+func TestUnknownMergeabilityIsNotAConflict(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIPending, Mergeable: MergeUnknown}
+	}))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
+		t.Errorf("an uncomputed merge state moved the ticket: %v", *a)
+	}
+}
+
+// A green PR that conflicts does not get promoted, even though
+// reconcile's own bounce would have caught it. Promotion would spend a
+// full model-driven reconcile pass on a merge that cannot land, and end
+// in the same place. Reconcile's bounce stays for the case this cannot
+// see: main moving between the snapshot and the merge attempt.
+func TestAConflictOnAGreenPRBouncesWithoutSpendingAReconcilePass(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1", Mergeable: MergeConflicted}
+	}))
+	acts := Sweep(s)
+	a := find(acts, ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForRework {
+		t.Fatalf("want Ready for rework, got %v", a)
+	}
+	if d := find(acts, ActDispatch, "T1"); d != nil && d.Agent == AgentReconcile {
+		t.Errorf("a reconcile pass was dispatched onto a branch that cannot merge: %v", *d)
+	}
+}
+
+// Red CI is a report that happened, naming failing jobs, and that is the
+// more specific scope. It lands in the same state, and merging main is
+// part of the rework either way.
+func TestRedCIKeepsItsOwnScopeEvenWhenTheBranchConflicts(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/9", Mergeable: MergeConflicted}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForRework {
+		t.Fatalf("want Ready for rework, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Kind != marker.CIRed {
+		t.Errorf("the conflict swallowed the CI failure: %v", a.Marker)
+	}
+}
+
+// One ticket, two detection points, one counter. Two conflicts already
+// recorded by reconcile plus this one is the third, and the third is a
+// sequencing problem rather than a stale branch — separate counters
+// would each stop at two and it would never escalate.
+func TestConflictsCountAcrossBothDetectionPoints(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks,
+		withComment(marker.MergeConflict, map[string]string{"pr": "20", "attempt": "1"}),
+		withComment(marker.MergeConflict, map[string]string{"pr": "20", "attempt": "2"}),
+		func(t *Ticket) { t.CI = CIInfo{Mergeable: MergeConflicted, PRNumber: 20} }))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.Marker.Fields["attempt"] != "3" {
+		t.Fatalf("want attempt 3 continuing reconcile's count, got %v", a)
+	}
+	// It still goes to the queue; the escalation fires on the next sweep,
+	// from Ready for rework, where that rule lives.
+	if a.To != protocol.ReadyForRework {
+		t.Errorf("want Ready for rework, got %v", a.To)
+	}
+}
