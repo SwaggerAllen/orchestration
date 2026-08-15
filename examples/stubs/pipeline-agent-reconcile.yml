@@ -41,6 +41,16 @@ permissions:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
+    # Uncomment and match ci.yml when the project's tests need a service.
+    # It belongs here, at job level, not among the steps above.
+    # services:
+    #   postgres:
+    #     image: postgres:16
+    #     env: { POSTGRES_USER: app, POSTGRES_PASSWORD: app, POSTGRES_DB: app_test }
+    #     ports: ["5432:5432"]
+    #     options: >-
+    #       --health-cmd pg_isready --health-interval 5s
+    #       --health-timeout 5s --health-retries 10
     steps:
       # fetch-depth: 0 — the verdict compares the PR branch to main.
       # Checked out with the agent token so the push carries it. The
@@ -54,16 +64,30 @@ jobs:
           token: ${{ secrets.AGENT_GITHUB_TOKEN || github.token }}
           fetch-depth: 0
 
-      # ---- this project's toolchain, before the agent runs --------------
-      # The whole reason the pipeline ships composite actions rather than
-      # reusable workflows: a reusable workflow cannot accept `uses:`
-      # steps, so there was nowhere to put this and agents ran without
-      # the language they were being asked to write in. Replace with
+      # ---- this project's environment, before the pipeline runs --------
+      # Everything the project's OWN commands need, not just its
+      # toolchain. An agent runs the config's `qualityGates` before it
+      # finishes; the live suite runs the project's test command. So this
+      # job needs whatever those need: the language, the dependencies,
+      # and any service the tests talk to.
+      #
+      # The rule that keeps this right: THIS IS YOUR ci.yml JOB'S
+      # ENVIRONMENT. The live suite is that job with a different filter;
+      # an agent run is that job plus a model. Copy ci.yml's setup steps
+      # and its `services:` block across rather than reconstructing them,
+      # and when ci.yml gains one, this gains it too.
+      #
+      # Two runs have already been lost to the narrower reading, both
+      # with a correct toolchain: a dev agent found `mix test` unable to
+      # reach a database CI provides and started one by hand, and a
+      # design pass found the live suite unable to start at all because
+      # nothing had installed dependencies. Replace the steps below with
       # whatever this project needs.
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: "1.16"
           otp-version: "26"
+      - run: mix deps.get
       # ------------------------------------------------------------------
 
       # Pin to a pipeline release tag (@v1) once one exists; main while

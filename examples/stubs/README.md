@@ -12,7 +12,22 @@ bindings live.
 | `pipeline-preview-cleanup.yml` | Deletes a branch's previews when its PR closes |
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
-| `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass |
+| `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass. Its job must be able to *run* that command — dependencies and services included, not just the toolchain |
+
+**Every stub that runs the project's own commands carries the same
+environment block, and it is your `ci.yml` job's environment.** An agent
+runs the config's `qualityGates` before it finishes and the live suite
+runs the project's test command, so those jobs need whatever those
+commands need — the language, the dependencies, and any service the
+tests talk to. Copy `ci.yml`'s setup steps and its `services:` block
+across rather than reconstructing them; when `ci.yml` gains one, these
+gain it too. Two runs were lost to reading the block as "toolchain
+only", both with a correct toolchain: `mix test` could not reach a
+database CI provides, and a live suite could not start because nothing
+had installed dependencies. The second is the sharper one — a suite that
+aborts before loading a test reports a red `fail`, not the honest
+`no-tests`, so a project's first `:live` test appears to have broken the
+build it was written to fix.
 
 A project also needs:
 
