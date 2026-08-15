@@ -579,3 +579,27 @@ func TestStubsShareOneEnvironmentBlock(t *testing.T) {
 		}
 	}
 }
+
+// The kill switch has to stop the job, not only the planning inside it.
+//
+// The binary refuses when the flag is set, which is correct and is not
+// free: Actions bills each job rounded up to the minute, so a parked
+// project on the hourly beat spends ~730 minutes a month producing
+// nothing. A skipped job costs nothing. Without the condition, "parked"
+// still bills, and the rehearsal repo quietly consumes the allowance the
+// live project needs.
+func TestTheSweepStubSkipsItselfWhenKilled(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "examples", "stubs", "pipeline-sweep.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	if !strings.Contains(body, "if: vars.PIPELINE_KILL_SWITCH != 'true'") {
+		t.Error("the sweep job has no kill-switch condition — a parked project still pays for every beat")
+	}
+	// And the binary keeps its own refusal, so a hand-dispatched run with
+	// the flag set does not sail past the guard the workflow provides.
+	if !strings.Contains(body, "PIPELINE_KILL_SWITCH: ${{ vars.PIPELINE_KILL_SWITCH }}") {
+		t.Error("the flag no longer reaches the binary; the workflow would be the only guard")
+	}
+}

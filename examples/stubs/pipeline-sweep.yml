@@ -43,6 +43,21 @@ concurrency:
 
 jobs:
   sweep:
+    # The kill switch stops the job, not just the work inside it.
+    #
+    # `PIPELINE_KILL_SWITCH` already halted planning — the binary builds
+    # a snapshot, sees the flag and produces nothing (DESIGN §13). That
+    # is correct and it is not free: Actions bills each job rounded up to
+    # the nearest minute, so an idle project on the hourly beat spends
+    # roughly 730 minutes a month doing nothing. A job whose `if` is
+    # false never starts and is billed nothing at all.
+    #
+    # This is what lets a project be genuinely parked. A rehearsal repo
+    # between rehearsals, or a project paused for a week, costs zero
+    # instead of most of a plan's allowance. The env var below stays: a
+    # hand-dispatched run with the flag on still refuses inside the
+    # binary, so the two agree rather than one guarding the other.
+    if: vars.PIPELINE_KILL_SWITCH != 'true'
     runs-on: ubuntu-latest
     env:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
