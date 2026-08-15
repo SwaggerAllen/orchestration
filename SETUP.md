@@ -510,11 +510,25 @@ git -C orchestration-dummy push -f origin seed
 ```
 
 Add `REHEARSAL_REPO_TOKEN` to this repo's secrets: a fine-grained PAT
-with **Contents → Read and write** on `orchestration-dummy` only. The
-reset commits reverts to `main` and deletes last run's branches, which
-the read-only `PIPELINE_REPO_TOKEN` cannot do — and which is exactly
-why it is a separate, narrower token rather than a widening of that
-one.
+with **Contents → Read and write** and **Variables → Read** on
+`orchestration-dummy` only. The reset commits reverts to `main` and
+deletes last run's branches, which the read-only `PIPELINE_REPO_TOKEN`
+cannot do — and which is exactly why it is a separate, narrower token
+rather than a widening of that one. The variables read is the parked
+check below; without it the rehearsal warns and carries on rather than
+failing, since an unreadable flag is not evidence of a parked project.
+
+**Park the dummy between rehearsals.** Set repo variable
+`PIPELINE_KILL_SWITCH=true` on `orchestration-dummy` when a rehearsal
+ends, and clear it before starting the next one. Parked, the sweep job
+is skipped rather than merely halted, and a skipped job is billed
+nothing — against roughly 730 Actions minutes a month for an idle
+project on the hourly beat. Forgetting to clear it produces the
+pipeline's least legible failure: the tickets seed and then nothing
+whatsoever happens, no dispatch and no error, which reads exactly like
+a broken pipeline. So `rehearse` reads the flag first and refuses, on
+every phase but `reset` — resetting a parked project is the ordinary
+way to tidy up after a run.
 
 **Each rehearsal:** Actions → **rehearse** → Run workflow.
 

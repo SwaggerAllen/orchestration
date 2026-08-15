@@ -13,6 +13,7 @@ bindings live.
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
 | `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass. Its job must be able to *run* that command — dependencies and services included, not just the toolchain |
+| `pipeline-order.yml` | What to start next and what can run beside it, on demand, rendered to the run summary. Reads the tracker; writes nothing |
 
 **Every stub that runs the project's own commands carries the same
 environment block, and it is your `ci.yml` job's environment.** An agent
@@ -92,6 +93,13 @@ A project also needs:
   it names the write scopes it did not exercise rather than making
   writes somebody would have to undo, so a green run means "the reads
   are fine", not "the permissions are fine".
+- `pipeline-order.yml` (recommended). Answers "what goes into
+  `Designing` next, and what can run beside it" from the ticket graph,
+  on demand — the question that comes up away from a terminal. The
+  ordering is derived and never stored, deliberately (DESIGN §6): the
+  mutex labels that decide what parallelises do not exist until the
+  design pass writes them, so any saved order is wrong by construction
+  rather than by neglect. Re-run it rather than keeping a copy.
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
 - Repo variable `PIPELINE_KILL_SWITCH=true` to park the project. It

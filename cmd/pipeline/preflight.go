@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
@@ -161,21 +163,71 @@ func cmdPreflight(args []string) error {
 		return err
 	}})
 
+	// Printed as they run — some of these are slow, and a reader
+	// watching a live log wants the failures as they land. Collected as
+	// well, because the summary can only be written once the last one
+	// is in.
+	type result struct {
+		check
+		err error
+	}
+	results := make([]result, 0, len(checks))
 	failed := 0
 	for _, c := range checks {
-		if err := c.run(ctx); err != nil {
+		err := c.run(ctx)
+		results = append(results, result{c, err})
+		if err != nil {
 			failed++
 			fmt.Printf("FAIL  %-28s needs %-22s %v\n", c.name, c.scope, err)
 			continue
 		}
 		fmt.Printf("ok    %-28s (%s)\n", c.name, c.scope)
 	}
+
+	// The summary matters more here than anywhere else in the CLI: this
+	// command is run by someone who suspects a permission is wrong, and
+	// the answer they need is which line of which workflow to edit.
+	// Putting that on the run page means they never open a step.
+	summarize(func(w io.Writer) {
+		summaryHeading(w, "Preflight")
+		if failed > 0 {
+			fmt.Fprintf(w, "**%d of %d checks failed.** Fix these before a ticket is in flight, not after — a missing scope surfaces at whatever moment first needs it, which is generally the worst one.\n\n", failed, len(checks))
+		} else {
+			fmt.Fprintf(w, "**All %d checks green.**\n\n", len(checks))
+		}
+		fmt.Fprintln(w, "| | Check | Needs | Result |")
+		fmt.Fprintln(w, "|---|---|---|---|")
+		for _, r := range results {
+			if r.err != nil {
+				fmt.Fprintf(w, "| ❌ | %s | `%s` | %s |\n", r.name, r.scope, mdCell(r.err.Error()))
+				continue
+			}
+			fmt.Fprintf(w, "| ✅ | %s | `%s` | |\n", r.name, r.scope)
+		}
+		// On a green run especially: "all green" is the moment a reader
+		// is most likely to conclude the permissions are fine, and this
+		// is the half of the sentence that is not covered.
+		fmt.Fprintf(w, "\n### Not exercised\n\nThese are writes, and a diagnostic that leaves litter is one nobody runs. A green preflight means *the reads are fine*, not *the permissions are fine* — the most expensive gap found so far was a write.\n\n")
+		fmt.Fprintln(w, "| Scope | Needed for |")
+		fmt.Fprintln(w, "|---|---|")
+		for _, u := range unexercised {
+			fmt.Fprintf(w, "| `%s` | %s |\n", u.scope, u.why)
+		}
+	})
+
 	if failed > 0 {
 		return fmt.Errorf("preflight: %d of %d checks failed — fix these before a ticket is in flight, not after", failed, len(checks))
 	}
 	fmt.Printf("preflight: %d checks, all green\n", len(checks))
 	reportUnexercised()
 	return nil
+}
+
+// mdCell makes an error safe to drop into a table cell: a pipe ends the
+// cell early and a newline ends the row, and API errors carry both.
+func mdCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // unexercised is every scope the pipeline needs that preflight does not

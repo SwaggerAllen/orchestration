@@ -80,6 +80,55 @@ jobs:
           echo "::error::${{ env.CONFIG }} does not set \"disposable\": true — this workflow archives every ticket in the project and reverts commits on its main, and only a rehearsal project may carry that flag"
           exit 1
 
+      # Parking the project is what makes an idle rehearsal repo free:
+      # PIPELINE_KILL_SWITCH skips the sweep job outright, and a skipped
+      # job is billed nothing. The cost is that a rehearsal seeded into a
+      # parked project sits there doing nothing at all — no dispatches,
+      # no transitions, no error — which is indistinguishable from a
+      # pipeline that has broken. That silence is worth minutes of
+      # someone's afternoon, so it is spent here instead.
+      #
+      # Not on `reset`: clearing the tracker while the project is parked
+      # is the ordinary way to tidy up after a run, and the flag is no
+      # obstacle to it. Only starting or judging a rehearsal needs the
+      # beat running.
+      - name: refuse to rehearse against a parked project
+        if: inputs.phase != 'reset'
+        env:
+          GH_TOKEN: ${{ secrets.REHEARSAL_REPO_TOKEN }}
+        run: |
+          set -uo pipefail
+          API="https://api.github.com/repos/SwaggerAllen/orchestration-dummy/actions/variables/PIPELINE_KILL_SWITCH"
+          BODY="$RUNNER_TEMP/killswitch.json"
+          CODE="$(curl -sS -o "$BODY" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$API")"
+
+          case "$CODE" in
+          404)
+            echo "PIPELINE_KILL_SWITCH is not set — the project is live."
+            ;;
+          200)
+            VALUE="$(jq -r .value "$BODY")"
+            if [ "$VALUE" = "true" ]; then
+              echo "::error::orchestration-dummy is parked (PIPELINE_KILL_SWITCH=true), so its sweep job is skipped and nothing will move the tickets this run seeds. Clear the variable — Settings → Secrets and variables → Actions → Variables — and run this again. Set it back when the rehearsal is over; an idle project on the hourly beat costs about 730 Actions minutes a month."
+              exit 1
+            fi
+            echo "PIPELINE_KILL_SWITCH=$VALUE — the project is live."
+            ;;
+          *)
+            # Reading the flag needs Variables → Read on the token, which
+            # a PAT minted for the reset alone will not carry. Warn
+            # rather than fail: an unreadable flag is not evidence of a
+            # parked project, and blocking every rehearsal on a scope
+            # this workflow does not otherwise need would trade a silent
+            # failure for a loud one that is usually wrong.
+            echo "::warning::could not read PIPELINE_KILL_SWITCH (HTTP $CODE) — proceeding without the check. Add Variables → Read to REHEARSAL_REPO_TOKEN to arm it."
+            cat "$BODY"
+            ;;
+          esac
+
       - name: checkout the project repo
         uses: actions/checkout@v4
         with:
@@ -171,9 +220,27 @@ jobs:
 
           # What survived, so a stale baseline is visible rather than
           # assumed. The seed tag is the anchor this is measured from.
+          #
+          # Into the run summary as well as the log: the whole point of
+          # this list is to be *noticed*, and a line nobody expands is a
+          # line nobody reads. A rehearsal started from a scaffold that
+          # has quietly drifted still reports a pass.
+          KEPT="$(git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD || true)"
           echo "kept on main since the seed tag:"
-          git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD \
-            | sed 's/^/  /' || true
+          echo "$KEPT" | sed 's/^/  /'
+          {
+            echo "## Baseline"
+            echo
+            if [ -z "$KEPT" ]; then
+              echo "Nothing on \`main\` since the seed tag — this rehearsal starts from the scaffold itself."
+            else
+              echo "Kept on \`main\` since the seed tag. These are infrastructure commits the reset deliberately did not revert, and they are the tree this rehearsal starts from:"
+              echo
+              echo '```'
+              echo "$KEPT"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           git push origin main
 

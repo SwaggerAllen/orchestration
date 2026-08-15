@@ -8,7 +8,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
@@ -122,19 +124,44 @@ func cmdSetup(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(actions) == 0 {
-		fmt.Println("nothing to do: team is already provisioned")
-		return checkDeploy(context.Background(), cfg)
-	}
 	verb := "applied"
 	if *dryRun {
 		verb = "planned (dry run, nothing applied)"
 	}
-	fmt.Printf("%d actions %s:\n", len(actions), verb)
-	for _, a := range actions {
-		fmt.Println("  " + a.String())
+	if len(actions) == 0 {
+		fmt.Println("nothing to do: team is already provisioned")
+	} else {
+		fmt.Printf("%d actions %s:\n", len(actions), verb)
+		for _, a := range actions {
+			fmt.Println("  " + a.String())
+		}
 	}
-	return checkDeploy(context.Background(), cfg)
+
+	// Setup is run from a workflow precisely because the person running
+	// it is not at a terminal, so the report of what changed has to be
+	// somewhere they can see it. The deploy check below is the part
+	// worth surfacing: it is the one that fails.
+	deployErr := checkDeploy(context.Background(), cfg)
+	summarize(func(w io.Writer) {
+		summaryHeading(w, "Setup")
+		if len(actions) == 0 {
+			fmt.Fprint(w, "Nothing to do — the team is already provisioned.\n\n")
+		} else {
+			fmt.Fprintf(w, "**%d actions %s:**\n\n", len(actions), verb)
+			for _, a := range actions {
+				fmt.Fprintln(w, "- "+a.String())
+			}
+			fmt.Fprintln(w)
+		}
+		if deployErr != nil {
+			fmt.Fprintf(w, "### Deploy check failed\n\nNothing exercises deploy detection again until a ticket reaches `Merged`, hours later, where the symptom is \"stuck in Merged\" and names neither the endpoint nor the token. So it is worth fixing now.\n\n```\n%v\n```\n", deployErr)
+			return
+		}
+		if cfg.Deploy.Provider != "" {
+			fmt.Fprintf(w, "Deploy endpoint `%s` answered.\n", cfg.Deploy.Endpoint)
+		}
+	})
+	return deployErr
 }
 
 // deployPort builds the deploy port the config names, or returns nil plus
@@ -249,10 +276,19 @@ func cmdSweep(args []string) error {
 	acts := core.Sweep(snap)
 	if killOn {
 		fmt.Println("kill switch is on: nothing planned, nothing applied")
+		summarize(func(w io.Writer) {
+			summaryHeading(w, "Sweep — parked")
+			fmt.Fprintln(w, "`PIPELINE_KILL_SWITCH` is on: the snapshot was read, nothing was planned and nothing was applied. Clear the repo variable to resume.")
+		})
 		return nil
 	}
 	if len(acts) == 0 {
 		fmt.Printf("nothing to do (%d tickets read, milestone %q)\n", len(snap.Tickets), snap.CurrentMilestone)
+		summarize(func(w io.Writer) {
+			summaryHeading(w, "Sweep — nothing to do")
+			fmt.Fprintf(w, "%d tickets read, milestone %s. Every ticket is either waiting on something outside the pipeline or already where it should be.\n",
+				len(snap.Tickets), mdOrNone(snap.CurrentMilestone))
+		})
 		return nil
 	}
 	if *dryRun {
@@ -260,10 +296,44 @@ func cmdSweep(args []string) error {
 		for _, a := range acts {
 			fmt.Println("  " + a.String())
 		}
+		summarize(func(w io.Writer) {
+			summaryHeading(w, fmt.Sprintf("Sweep — %d actions planned", len(acts)))
+			fmt.Fprint(w, "Dry run; nothing was applied.\n\n")
+			for _, a := range acts {
+				fmt.Fprintln(w, "- "+a.String())
+			}
+		})
 		return nil
 	}
 	fmt.Printf("%d actions:\n", len(acts))
-	return p.Execute(ctx, acts, os.Stdout)
+
+	// Executed actions are teed rather than re-rendered from `acts`:
+	// Execute stops at the first failure, so the plan and what actually
+	// happened are different lists, and the summary has to show the
+	// second one or it will claim work the tracker never saw.
+	var done strings.Builder
+	err = p.Execute(ctx, acts, teeTo(os.Stdout, &done))
+	summarize(func(w io.Writer) {
+		summaryHeading(w, fmt.Sprintf("Sweep — %d actions", len(acts)))
+		for _, line := range strings.Split(strings.TrimSpace(done.String()), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				fmt.Fprintln(w, "- "+line)
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(w, "\n**Stopped on an error.** Anything above this line was applied; anything in the plan below it was not.\n\n```\n%v\n```\n", err)
+		}
+	})
+	return err
+}
+
+// mdOrNone renders an empty string as something a reader can tell apart
+// from a value that happens to look blank.
+func mdOrNone(s string) string {
+	if s == "" {
+		return "_(none)_"
+	}
+	return "**" + s + "**"
 }
 
 func cmdIDs(args []string) error {

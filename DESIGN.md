@@ -513,6 +513,11 @@ outside it is held out of the startable layers and says why — the alternative 
 confidently recommending work that must not be started yet, which is the one failure that would
 make it cost more than it saves.
 
+It answers a question that gets asked between sessions, away from a keyboard, so each project
+also carries a dispatch-only `pipeline-order` workflow that runs it and renders the layers to
+the run summary with every key linked. Same computation, same lack of storage: the run is a
+snapshot of a moment, and the log of past runs is a log of past moments, not a plan.
+
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
 
@@ -1050,6 +1055,22 @@ mean parked — a rehearsal repo between rehearsals, or a project paused for a w
 consuming an allowance the active project needs. The flag is still passed into the binary as
 well, so a hand-dispatched run refuses for the same reason rather than relying on the workflow
 alone to guard it.
+
+**Run summaries carry what a human is meant to read.** Actions renders `$GITHUB_STEP_SUMMARY`
+on the run page itself, above the job list, so what goes there has been read by the time
+somebody has found the run — where a log is something you go and open. The commands that write
+one are the ones whose output is a report for a person and is otherwise buried a step deep:
+`order`, `preflight`, `setup`, `audit` when it is red, `sweep`, and the rehearsal's reset, seed
+and check.
+
+**The agent commands deliberately write none**, which is the load-bearing half. An agent's
+outcome belongs on the ticket, because the tracker is the record (§9) and every state the
+pipeline acts on is read back from it. A summary restating that would be a second rendering,
+authoritative-looking and not authoritative, and the first time the two disagreed somebody
+would have to work out which one lied. The agent's run log stays what it is — a debugging
+artifact for when the ticket does not explain itself. A failed run is not an exception: the
+abort path puts the failure on the ticket too. The live-suite verdict is excluded for the same
+reason, since it lands on the boundary ticket where the author is already looking.
 
 **The tracker hops are webhook-driven** (the escalation this section used to hold in reserve,
 taken). The same Worker receives Linear webhooks and dispatches on the event, so a state change

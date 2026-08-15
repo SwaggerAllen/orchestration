@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,17 @@ func cmdAudit(args []string) error {
 	for _, v := range violations {
 		fmt.Fprintln(os.Stderr, "  "+v)
 	}
+	// A red audit is read by whoever has to fix it, and until now the
+	// only place saying *what* was violated was stderr inside a
+	// collapsed step of a workflow the pipeline runs on its own. The
+	// check name on the PR says "ci failed"; this says which rule.
+	summarize(func(w io.Writer) {
+		summaryHeading(w, fmt.Sprintf("Audit — %d violations", len(violations)))
+		for _, v := range violations {
+			fmt.Fprintln(w, "- "+v)
+		}
+		fmt.Fprintln(w, "\nA mutex nobody took is a collision nobody could prevent (DESIGN §9).")
+	})
 	return fmt.Errorf("audit: %d violations — a mutex nobody took is a collision nobody could prevent (DESIGN §9)", len(violations))
 }
 
