@@ -38,7 +38,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 	    first: $first, after: $after
 	  ) {
 	    nodes {
-	      id identifier title description priority createdAt
+	      id identifier title description priority createdAt url
 	      state { id }
 	      assignee { id }
 	      projectMilestone { name }
@@ -73,6 +73,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 				Description string    `json:"description"`
 				Priority    int       `json:"priority"`
 				CreatedAt   time.Time `json:"createdAt"`
+				URL         string    `json:"url"`
 				State       actorRef  `json:"state"`
 				Assignee    *actorRef `json:"assignee"`
 				Milestone   *struct {
@@ -155,7 +156,7 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 			issue := tracker.Issue{
 				ID: n.ID, Key: n.Identifier, Title: n.Title, Description: n.Description,
 				StateID: n.State.ID, Priority: n.Priority, CreatedAt: n.CreatedAt,
-				StateSince: n.CreatedAt,
+				StateSince: n.CreatedAt, URL: n.URL,
 			}
 			if n.Assignee != nil {
 				issue.AssigneeID = n.Assignee.ID

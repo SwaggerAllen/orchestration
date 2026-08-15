@@ -490,6 +490,29 @@ and nothing is re-evaluated.
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
 
+**Ordering is derived, never stored.** Which ticket to start next, and what can run beside it,
+is a pure function of the graph the tracker already holds: open blocking relations, mutex
+labels, states, priority, age. `pipeline order` computes it and prints it in layers — in
+flight, ready now, freed by what is in flight, freed by those two together, and everything
+whose depth is not yet decidable — each ticket with its blockers and what it blocks.
+
+Nothing writes that ordering down, and the reason is not tidiness. The inputs change from
+several directions at once, and one of them is decisive: **the mutex labels do not exist until
+the design pass produces them** (§4). An order computed when tickets are pulled into `Todo`
+therefore cannot know what parallelises — it would be wrong by construction rather than by
+neglect, and a stale ordering is worse than none because it is the kind of thing that gets
+acted on. What is *chosen* rather than derived stays in the two fields that already hold it:
+priority for preference between two legal orders, a blocking relation for sequencing that is
+real. If a sequencing constraint is worth remembering, it is worth recording as a blocker.
+
+One constraint deliberately lives outside the graph: **milestones are worked in sequence**
+(§2.9), and a later milestone's tickets are commonly filed with no dependencies at all, because
+the milestone *is* the dependency. Read literally, such a ticket has nothing blocking it. So
+the ordering is scoped to the current milestone by default, and across a wider scope anything
+outside it is held out of the startable layers and says why — the alternative is a report
+confidently recommending work that must not be started yet, which is the one failure that would
+make it cost more than it saves.
+
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
 

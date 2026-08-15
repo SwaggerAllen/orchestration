@@ -79,6 +79,10 @@ type Issue struct {
 	AssigneeID  string // "" = unassigned
 	Milestone   string // milestone name; "" if none
 	CreatedAt   time.Time
+	// URL is the tracker's own link to the issue. Carried so anything
+	// printed for a human can be clicked rather than reconstructed from
+	// a workspace slug the pipeline would otherwise have to be told.
+	URL string
 	// StateSince is when the issue entered its current state, from
 	// history; falls back to CreatedAt when history has no state change.
 	StateSince time.Time
