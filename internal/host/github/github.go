@@ -116,7 +116,9 @@ func hint(status int, method, path string) string {
 			" Settings → Actions → General → \"Allow GitHub Actions to create and approve pull requests\"" +
 			" on the repository; the second is not grantable from a workflow file"
 	}
-	return " — check the calling workflow's permissions: block, which drops every permission it does not name"
+	return " — if this ran as the in-workflow GITHUB_TOKEN, check the calling workflow's permissions:" +
+		" block, which drops every permission it does not name; if it ran as AGENT_GITHUB_TOKEN, the" +
+		" permissions are the PAT's own repository permissions instead and no workflow file affects them"
 }
 
 // pathOnly trims a query string so a suffix match is not defeated by one.
@@ -282,36 +284,103 @@ const (
 )
 
 func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobLog, error) {
-	runs, err := c.checkRuns(ctx, headSHA)
+	runs, err := c.failedRunsFor(ctx, headSHA)
 	if err != nil {
 		return nil, err
 	}
 	var out []host.JobLog
 	for _, r := range runs {
+		jobs, err := c.failedJobs(ctx, r.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, j := range jobs {
+			if len(out) >= maxFailedJobs {
+				return out, nil
+			}
+			log, err := c.jobLog(ctx, fmt.Sprintf("%d", j.ID))
+			jl := host.JobLog{Name: j.Name, URL: j.HTMLURL}
+			if err != nil {
+				jl.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
+			} else {
+				jl.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+			}
+			out = append(out, jl)
+		}
+	}
+	return out, nil
+}
+
+type actionsRun struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+}
+
+// failedRunsFor reads the failing Actions runs for a head SHA.
+//
+// Deliberately the Actions API and not `/commits/{sha}/check-runs`,
+// which is the natural way to ask this and the way this was first
+// written. Reading check runs needs the "Checks" permission, and a
+// fine-grained PAT has no such permission to grant — it is not in
+// GitHub's list. Agent runs act as AGENT_GITHUB_TOKEN, which is exactly
+// such a PAT, so the evidence a rework needs most was fetched through
+// the one door its credential can never open: HTTP 403 "Resource not
+// accessible by personal access token", and a rework handed an empty
+// section. The Actions API answers the same question through
+// `actions: read`, which that token does hold.
+//
+// The cost, named because it is a real narrowing: this sees GitHub
+// Actions runs only. A third-party check that fails is invisible here,
+// where check-runs would have listed it. The sweep's own verdict still
+// goes through ChecksFor, so the state machine is unaffected; what
+// narrows is the evidence attached to a rework prompt.
+func (c *Client) failedRunsFor(ctx context.Context, headSHA string) ([]actionsRun, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", c.owner, c.repo, url.QueryEscape(headSHA))
+	var data struct {
+		WorkflowRuns []actionsRun `json:"workflow_runs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return nil, err
+	}
+	var out []actionsRun
+	for _, r := range data.WorkflowRuns {
 		if r.Status != "completed" {
 			continue
 		}
 		switch r.Conclusion {
 		case "success", "neutral", "skipped":
-			continue
+		default:
+			out = append(out, r)
 		}
-		if len(out) >= maxFailedJobs {
-			break
+	}
+	return out, nil
+}
+
+type actionsJob struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Conclusion string `json:"conclusion"`
+	HTMLURL    string `json:"html_url"`
+}
+
+func (c *Client) failedJobs(ctx context.Context, runID int64) ([]actionsJob, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", c.owner, c.repo, runID)
+	var data struct {
+		Jobs []actionsJob `json:"jobs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return nil, err
+	}
+	var out []actionsJob
+	for _, j := range data.Jobs {
+		switch j.Conclusion {
+		case "success", "neutral", "skipped", "":
+		default:
+			out = append(out, j)
 		}
-		j := host.JobLog{Name: r.Name, URL: r.HTMLURL}
-		// A check run that is not an Actions job — a third-party check —
-		// has no log to fetch here. Named without one rather than
-		// dropped: "this check failed and I could not read it" is a fact
-		// the agent needs, and silence would read as "it passed".
-		if id := jobID(r.HTMLURL); id != "" {
-			log, err := c.jobLog(ctx, id)
-			if err != nil {
-				j.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
-			} else {
-				j.Log = tail(log, maxLogTailLines, maxLogTailBytes)
-			}
-		}
-		out = append(out, j)
 	}
 	return out, nil
 }

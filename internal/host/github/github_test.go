@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -256,5 +257,47 @@ func TestJobIDComesFromTheCheckRunURL(t *testing.T) {
 	// it is still named, so "failed and unreadable" never reads as "passed".
 	if got := jobID("https://example.com/some-other-check"); got != "" {
 		t.Errorf("jobID on a non-Actions check = %q, want empty", got)
+	}
+}
+
+// The failing-build evidence must never go through the checks API.
+// Agent runs act as AGENT_GITHUB_TOKEN, a fine-grained PAT, and GitHub
+// offers no Checks permission to grant one — so that call answers 403
+// for a reason no scope can fix. It cost a rework its evidence before
+// anyone noticed, because the sweep (in-workflow GITHUB_TOKEN, with
+// checks: read) makes the same call successfully every hour.
+func TestFailingBuildEvidenceNeverAsksTheChecksAPI(t *testing.T) {
+	body, err := os.ReadFile("github.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (c *Client) FailedJobLogs")
+	if start < 0 {
+		t.Fatal("FailedJobLogs is gone; this guard has drifted")
+	}
+	end := strings.Index(src[start:], "\nfunc (c *Client) ChecksFor")
+	region := src[start:]
+	if end > 0 {
+		region = src[start : start+end]
+	}
+	// Comments stripped first: the region deliberately *explains* why it
+	// does not use check-runs, and a scan that reads prose would fail on
+	// the explanation for the rule it is enforcing.
+	var code strings.Builder
+	for _, line := range strings.Split(region, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "//") {
+			continue
+		}
+		code.WriteString(line + "\n")
+	}
+	region = code.String()
+	for _, fn := range []string{"checkRuns(", "check-runs"} {
+		if strings.Contains(region, fn) {
+			t.Errorf("the evidence path reaches %q — a PAT cannot read it and no permission exists to grant", fn)
+		}
+	}
+	if !strings.Contains(region, "actions/runs") {
+		t.Error("the evidence path no longer uses the Actions API; that is the only door the agent token has")
 	}
 }

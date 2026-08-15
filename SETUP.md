@@ -56,6 +56,16 @@ able to do exactly one job and nothing else.
   **Deployments → Read and write**. Leave **Workflows** unset — that is
   what keeps agents unable to edit `.github/workflows/`, the same blast
   radius the in-workflow `GITHUB_TOKEN` has.
+- There is **no Checks permission to grant** on a fine-grained PAT, and
+  nothing here needs one. It is worth stating because the obvious way to
+  ask "did CI pass for this commit" is `/commits/{sha}/check-runs`,
+  which needs exactly that permission — so a run reading it as this
+  token gets HTTP 403 "Resource not accessible by personal access
+  token" and no scope you can add will fix it. The harness reads
+  failing builds through the Actions API instead (`actions: read`),
+  which this token does hold. Do not reintroduce a check-runs call on
+  any path an agent run takes; the sweep, which runs as the in-workflow
+  `GITHUB_TOKEN` with `checks: read`, is the only caller that may.
 - Named without a `GITHUB_` prefix because Actions reserves it.
 
 **Why this exists, and why the default token is not enough.** Every
