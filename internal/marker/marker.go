@@ -78,6 +78,15 @@ const (
 	// agent filing whatever it noticed is how a backlog stops being
 	// trusted (DESIGN §4). Fields: id=<dedupe>, title=<one line>.
 	HarnessFinding Kind = "harness-finding"
+	// MergeConflict records a reconciliation that passed and could not
+	// land: the branch conflicts with something that merged while this
+	// ticket was in flight. Counted separately from ReconcileBounce on
+	// purpose — that count escalates to Blocked because "two failures to
+	// land the same scope is a design problem" (DESIGN §12), and a
+	// conflict is not a finding about the work at all. It is a stale
+	// branch, and the verdict that preceded it was PASS. Fields:
+	// pr=<number>, attempt=<n>.
+	MergeConflict Kind = "merge-conflict"
 	// Base records the merge-base the design was drawn against
 	// (DESIGN §2.4, §4). The description names it as the place this
 	// lives, and nothing ever wrote it there: descriptions are the

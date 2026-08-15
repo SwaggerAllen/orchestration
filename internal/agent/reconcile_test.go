@@ -10,6 +10,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
@@ -219,5 +220,60 @@ func TestReconcileStillReachesMergedWhenTheDeployRecordFails(t *testing.T) {
 	}
 	if !said {
 		t.Error("the failure must be on the ticket in words — a silent one looks like a deploy that never happened")
+	}
+}
+
+// A branch that conflicts with main is a stale branch, not bad work.
+// The verdict passed; something else landed first. Before this, the
+// merge error aborted the run and the abort sent the ticket to Blocked —
+// where only the author can move it — for the one failure in this
+// pipeline a dev agent is unambiguously equipped to fix.
+func TestUnmergeablePassGoesBackToTheQueue(t *testing.T) {
+	w := seedReconciling(t)
+	w.h.Unmergeable[5] = true
+
+	err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{
+		Outcome: "pass", Report: "PASS — the diff says what the ticket asked for.",
+	})
+	if err != nil {
+		t.Fatalf("a conflict must not fail the run: %v", err)
+	}
+	w.check(t, protocol.ReadyForRework)
+
+	issues, _ := w.tr.ListIssues(w.ctx, w.cfg.Tracker.TeamID, w.cfg.Tracker.ProjectID)
+	var body string
+	var bounces int
+	for _, c := range issues[0].Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok {
+			continue
+		}
+		switch m.Kind {
+		case marker.MergeConflict:
+			body = c.Body
+		case marker.ReconcileBounce:
+			bounces++
+		}
+	}
+	if body == "" {
+		t.Fatal("no merge-conflict marker; the rework has no scope and the count has nothing to read")
+	}
+	// Counted apart from a reconcile bounce on purpose: that count
+	// escalates at two because "two failures to land the same scope is a
+	// design problem", and this is not a finding about the work at all.
+	if bounces != 0 {
+		t.Errorf("a conflict wrote %d reconcile-bounce marker(s) — it would escalate as if the design were wrong", bounces)
+	}
+	// The dev agent reads a bounce as a finding about the diff unless
+	// told otherwise, and would re-litigate a design that just passed.
+	if !strings.Contains(body, "Nothing about the work is in question") {
+		t.Errorf("the scope does not say the work is fine:\n%s", body)
+	}
+	if !strings.Contains(body, "origin/main") {
+		t.Errorf("the scope does not say what to actually do:\n%s", body)
+	}
+	// And the PR is still open to push the resolution to.
+	if w.h.Merged[5] != "" {
+		t.Error("the PR was merged despite the conflict")
 	}
 }

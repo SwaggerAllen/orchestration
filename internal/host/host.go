@@ -7,6 +7,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -69,6 +70,18 @@ type JobLog struct {
 	Log string
 }
 
+// ErrNotMergeable is returned by MergePR when the branch cannot merge
+// into its base — a conflict with something that landed while this
+// ticket was in flight.
+//
+// A sentinel rather than a string match, because the caller acts on it:
+// a conflict is not a failed run, it is a stale branch, and the ticket
+// goes back to the dev agent to merge and resolve. Treating it as any
+// other merge error sent the ticket to Blocked, where only the author
+// could move it, for the one problem in this pipeline an agent is
+// unambiguously equipped to fix.
+var ErrNotMergeable = errors.New("pull request is not mergeable")
+
 // Host is the port.
 type Host interface {
 	DispatchWorkflow(ctx context.Context, workflowFile string, inputs map[string]string) error
@@ -84,6 +97,8 @@ type Host interface {
 	MarkPRReady(ctx context.Context, number int) error
 	// MergePR squash-merges and returns the merge commit SHA — the value
 	// the post-deploy check compares against the platform (DESIGN §13).
+	// Returns an error wrapping ErrNotMergeable when the branch conflicts
+	// with its base, which is an ordinary outcome rather than a failure.
 	MergePR(ctx context.Context, number int) (string, error)
 	// IsAncestor reports whether ancestor is reachable from descendant:
 	// the real meaning of the design's `>=` (DESIGN §13).
