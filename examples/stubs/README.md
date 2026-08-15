@@ -94,8 +94,14 @@ A project also needs:
   are fine", not "the permissions are fine".
 - The Actions repo setting "Allow GitHub Actions to create and approve
   pull requests" enabled, so the harness can open PRs
-- Optional repo variable `PIPELINE_KILL_SWITCH=true` to halt dispatch
-  (DESIGN §13)
+- Repo variable `PIPELINE_KILL_SWITCH=true` to park the project. It
+  halts dispatch (DESIGN §13) *and* skips the sweep job itself, so a
+  parked project costs nothing — Actions bills each job rounded up to
+  the minute, and an idle project on the hourly beat otherwise spends
+  around 730 minutes a month producing no actions. Set it on a rehearsal
+  repo between rehearsals and clear it before starting one; a rehearsal
+  run against a parked project will sit there doing nothing, which looks
+  exactly like a broken pipeline.
 - Branch protection on `main`: require the `ci` checks and pull
   requests; within the pipeline only reconciliation merges (DESIGN §5),
   and the branch protection is what turns that from convention into a

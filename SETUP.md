@@ -165,8 +165,13 @@ Settings → Actions → General:
 - Workflow permissions → ✅ **Allow GitHub Actions to create and
   approve pull requests** (the harness opens PRs)
 
-Optional: repo **variable** `PIPELINE_KILL_SWITCH` = `true` halts all
-planning and dispatch (DESIGN §13); delete or set `false` to resume.
+Repo **variable** `PIPELINE_KILL_SWITCH` = `true` parks the project:
+it halts all planning and dispatch (DESIGN §13) and skips the sweep job
+itself, so a parked project costs no Actions minutes. Delete it or set
+`false` to resume. Worth setting on the rehearsal repo between
+rehearsals — and worth clearing before starting one, because a
+rehearsal against a parked project sits there doing nothing, which
+looks exactly like a broken pipeline.
 
 **On `orchestration` (this repo):**
 
@@ -456,9 +461,12 @@ no matching project. That last one means `trackerProject` in
 
 Halting stays per-project and outside the Worker: `PIPELINE_KILL_SWITCH`
 is a repo variable the sweep reads, so stopping one project leaves the
-others running and un-killing never redeploys anything. Note it stops
-the sweep from *planning*, not from *running* — the job still starts
-and spends its minute.
+others running and un-killing never redeploys anything. It gates the
+job as well as the planning: Actions bills each job rounded up to the
+minute, so a flag that only stopped the *work* still cost about 730
+minutes a month per parked project on the hourly beat. A skipped job
+costs nothing, which is what lets a rehearsal repo sit idle between
+rehearsals without spending the allowance the live project needs.
 
 ## 7b. Rehearsals
 

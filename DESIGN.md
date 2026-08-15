@@ -1042,6 +1042,15 @@ The `≥` is shorthand for *is an ancestor of* — a compare-API call, not SHA a
 **Kill switch:** a single flag halting dispatch without revoking credentials or leaving a ticket
 mid-claim. In-flight runs finish; nothing new starts.
 
+It gates the sweep *job*, not only the planning inside it. The binary already refuses when the
+flag is set, which is correct and is not free: Actions bills each job rounded up to the minute,
+so a parked project on the hourly beat spends around 730 minutes a month producing no actions.
+A job whose condition is false never starts and costs nothing, which is what makes "parked"
+mean parked — a rehearsal repo between rehearsals, or a project paused for a week, stops
+consuming an allowance the active project needs. The flag is still passed into the binary as
+well, so a hand-dispatched run refuses for the same reason rather than relying on the workflow
+alone to guard it.
+
 **The tracker hops are webhook-driven** (the escalation this section used to hold in reserve,
 taken). The same Worker receives Linear webhooks and dispatches on the event, so a state change
 reaches the sweep in seconds rather than averaging half the poll interval. It gained exactly one
