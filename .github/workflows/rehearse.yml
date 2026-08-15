@@ -220,9 +220,27 @@ jobs:
 
           # What survived, so a stale baseline is visible rather than
           # assumed. The seed tag is the anchor this is measured from.
+          #
+          # Into the run summary as well as the log: the whole point of
+          # this list is to be *noticed*, and a line nobody expands is a
+          # line nobody reads. A rehearsal started from a scaffold that
+          # has quietly drifted still reports a pass.
+          KEPT="$(git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD || true)"
           echo "kept on main since the seed tag:"
-          git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD \
-            | sed 's/^/  /' || true
+          echo "$KEPT" | sed 's/^/  /'
+          {
+            echo "## Baseline"
+            echo
+            if [ -z "$KEPT" ]; then
+              echo "Nothing on \`main\` since the seed tag — this rehearsal starts from the scaffold itself."
+            else
+              echo "Kept on \`main\` since the seed tag. These are infrastructure commits the reset deliberately did not revert, and they are the tree this rehearsal starts from:"
+              echo
+              echo '```'
+              echo "$KEPT"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           git push origin main
 

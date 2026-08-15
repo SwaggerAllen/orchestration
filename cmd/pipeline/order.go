@@ -68,6 +68,10 @@ func cmdOrder(args []string) error {
 		return nil
 	}
 	printOrder(os.Stdout, o, want)
+	// In Actions the report is the reason the run exists, so it goes
+	// where it can be read without opening a step — in the markdown
+	// form, since that is where the keys become tappable links.
+	summarize(func(w io.Writer) { printOrderMarkdown(w, o, want) })
 	return nil
 }
 

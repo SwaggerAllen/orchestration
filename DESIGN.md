@@ -1056,6 +1056,22 @@ consuming an allowance the active project needs. The flag is still passed into t
 well, so a hand-dispatched run refuses for the same reason rather than relying on the workflow
 alone to guard it.
 
+**Run summaries carry what a human is meant to read.** Actions renders `$GITHUB_STEP_SUMMARY`
+on the run page itself, above the job list, so what goes there has been read by the time
+somebody has found the run — where a log is something you go and open. The commands that write
+one are the ones whose output is a report for a person and is otherwise buried a step deep:
+`order`, `preflight`, `setup`, `audit` when it is red, `sweep`, and the rehearsal's reset, seed
+and check.
+
+**The agent commands deliberately write none**, which is the load-bearing half. An agent's
+outcome belongs on the ticket, because the tracker is the record (§9) and every state the
+pipeline acts on is read back from it. A summary restating that would be a second rendering,
+authoritative-looking and not authoritative, and the first time the two disagreed somebody
+would have to work out which one lied. The agent's run log stays what it is — a debugging
+artifact for when the ticket does not explain itself. A failed run is not an exception: the
+abort path puts the failure on the ticket too. The live-suite verdict is excluded for the same
+reason, since it lands on the boundary ticket where the author is already looking.
+
 **The tracker hops are webhook-driven** (the escalation this section used to hold in reserve,
 taken). The same Worker receives Linear webhooks and dispatches on the event, so a state change
 reaches the sweep in seconds rather than averaging half the poll interval. It gained exactly one

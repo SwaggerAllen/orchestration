@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/scenario"
@@ -105,6 +107,16 @@ func cmdScenarioReset(args []string) error {
 			return err
 		}
 	}
+	summarize(func(w io.Writer) {
+		summaryHeading(w, "Rehearsal reset")
+		if res.Archived == 0 {
+			fmt.Fprintln(w, "The project was already empty; nothing was archived.")
+		} else {
+			fmt.Fprintf(w, "Archived **%d** ticket(s), carrying **%d** merge commit(s) for the repo half to revert. Milestones were left in place. Tickets are archived rather than deleted — Linear keeps them recoverable.\n",
+				res.Archived, len(res.Merges))
+		}
+	})
+
 	if res.Archived == 0 {
 		fmt.Println("nothing to do: the project is already empty")
 		return nil
@@ -150,6 +162,24 @@ func cmdScenarioSeed(args []string) error {
 		return err
 	}
 	fmt.Printf("seeded %d ticket(s) for %q; wrote %s\n", len(seeded.Keys), s.Name, *out)
+
+	// The keys are the thing to keep: from here the metronome, the
+	// webhooks and the agents carry the tickets, and watching that
+	// happen means knowing which tickets to watch. Nothing else in the
+	// run tells you — the tracker's own list mixes them with whatever
+	// the last rehearsal left behind.
+	summarize(func(w io.Writer) {
+		summaryHeading(w, "Seeded — "+s.Name)
+		refs := make([]string, 0, len(seeded.Keys))
+		for ref := range seeded.Keys {
+			refs = append(refs, ref)
+		}
+		sort.Strings(refs)
+		for _, ref := range refs {
+			fmt.Fprintf(w, "- `%s` → **%s**\n", ref, seeded.Keys[ref])
+		}
+		fmt.Fprint(w, "\nThe metronome and the webhooks take it from here. Your touchpoints are the designed ones: sign off at `Design review`, and the boundary pass. When it settles, run this workflow again with `phase=check`.\n")
+	})
 	return nil
 }
 
@@ -202,6 +232,22 @@ func cmdScenarioCheck(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The rehearsal's verdict, and the one output of this whole workflow
+	// a human is waiting on. It is read hours after the seed, often from
+	// a phone, to answer one question: did the run do what the scenario
+	// said it would.
+	summarize(func(w io.Writer) {
+		summaryHeading(w, "Rehearsal check — "+s.Name)
+		if len(failures) == 0 {
+			fmt.Fprintln(w, "**All expectations met.**")
+			return
+		}
+		fmt.Fprintf(w, "**%d unmet expectation(s).**\n\n", len(failures))
+		for _, f := range failures {
+			fmt.Fprintln(w, "- "+f.String())
+		}
+	})
+
 	if len(failures) == 0 {
 		fmt.Printf("%s: all expectations met\n", s.Name)
 		return nil

@@ -46,9 +46,9 @@ jobs:
         with:
           pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
 
-      # The summary is the deliverable — it is what renders in the
-      # Actions UI on a phone, with every key a tappable link. The log
-      # copy is for when a run needs quoting somewhere plain.
+      # The command writes the run summary itself — that is where this
+      # gets read, in the Actions UI, with every key a tappable link.
+      # The log keeps the plain-text copy for quoting somewhere else.
       - name: order
         # Through the environment, not through `${{ }}` in the script:
         # an expression is pasted in before bash sees the line, so a
@@ -59,10 +59,10 @@ jobs:
           ALL: ${{ inputs.all }}
         run: |
           set -euo pipefail
-          ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json" --format markdown)
+          ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json")
           if [ "$ALL" = "true" ]; then
             ARGS+=(--all)
           elif [ -n "$MILESTONE" ]; then
             ARGS+=(--milestone "$MILESTONE")
           fi
-          pipeline order "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+          pipeline order "${ARGS[@]}"
