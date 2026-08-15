@@ -636,6 +636,14 @@ signal that was missing.
    marker is the author's to re-run — the sweep does not resurrect it, for the same reason
    stale claims are detected rather than silently retried.
 
+   **The job must be able to run the command.** The live suite is the project's CI job with a
+   different filter — same dependencies, same services — and a stub carrying only a toolchain
+   cannot start it. That failure is worse than it looks: a suite that aborts before loading a
+   test is a red `fail`, not the honest `no-tests` below, so the first `:live` test a project
+   writes appears to have broken the build it was written to fix, and the workflow edit that
+   would fix it is one agents may not push (§5). Land that edit with or before the first live
+   test.
+
    **Three results, not two: `pass`, `fail`, `no-tests`.** A test runner handed a tag filter
    that matches nothing exits non-zero — an `--only` filter with no match is an error, not an
    empty pass — so a project that has not written its first `:live` test reported a *failing*

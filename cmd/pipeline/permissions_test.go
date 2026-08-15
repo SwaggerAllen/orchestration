@@ -518,3 +518,64 @@ func TestPreflightNamesTheWritesItDoesNotProbe(t *testing.T) {
 		}
 	}
 }
+
+// Every stub that runs the project's own commands must carry the same
+// environment block, byte for byte.
+//
+// They drifted into saying "toolchain", which is true and not enough:
+// an agent runs the config's quality gates before finishing and the live
+// suite runs the project's test command, so the job needs whatever those
+// need. Two runs were lost to the narrower reading — `mix test` with no
+// database CI provides, and a live suite that could not start because
+// nothing had installed dependencies — and in both the toolchain was
+// correct. Identical text is the cheap way to keep one lesson from
+// landing in one stub and not the other four.
+func TestStubsShareOneEnvironmentBlock(t *testing.T) {
+	stubs, err := filepath.Glob(filepath.Join("..", "..", "examples", "stubs", "pipeline-agent-*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join("..", "..", "examples", "stubs", "pipeline-live-suite.yml")
+	stubs = append(stubs, live)
+
+	const open = "# ---- this project's environment, before the pipeline runs"
+	blocks := map[string][]string{}
+	for _, f := range stubs {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(raw), "\n")
+		start := -1
+		for i, l := range lines {
+			if strings.Contains(l, open) {
+				start = i
+				break
+			}
+		}
+		if start < 0 {
+			t.Errorf("%s has no environment block — it runs the project's commands and must say what that needs", filepath.Base(f))
+			continue
+		}
+		end := start
+		for end < len(lines) && !strings.HasPrefix(strings.TrimSpace(lines[end]), "# ------") || end == start {
+			end++
+		}
+		blocks[filepath.Base(f)] = lines[start : end+1]
+	}
+	if len(blocks) < 2 {
+		t.Fatal("found fewer than two stubs to compare; the glob has drifted")
+	}
+	var first string
+	var firstName string
+	for name, b := range blocks {
+		joined := strings.Join(b, "\n")
+		if first == "" {
+			first, firstName = joined, name
+			continue
+		}
+		if joined != first {
+			t.Errorf("%s's environment block differs from %s's; one of them is missing a lesson the other learned", name, firstName)
+		}
+	}
+}
