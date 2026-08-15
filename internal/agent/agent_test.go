@@ -414,3 +414,29 @@ func TestHarnessFindingsRefuseTheUnusable(t *testing.T) {
 		t.Errorf("an absent findings file must be silence, got %v / %v", got, err)
 	}
 }
+
+// A rework bounced by reconciliation, not by CI, gets no failing-build
+// section. This is what ORC-40 actually hit: the claim asked the checks
+// API to find out whether CI was red, that call 403'd under the agent's
+// PAT, and a rework whose scope was a fully-argued reconcile bounce was
+// handed a section saying the harness could not read logs — for a build
+// that had never failed.
+func TestReconcileBounceReworkHasNoFailingBuildSection(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "Original argument", protocol.ReadyForRework)
+	if err := tr.CommentOnIssue(ctx, i.ID, "[pipeline:v1:reconcile-bounce] pr=4\n\nThe claim about deploy detection is false."); err != nil {
+		t.Fatal(err)
+	}
+	branch := strings.ToLower(i.Key) + "-cap-screen"
+	h.PRs = append(h.PRs, host.PR{Number: 4, Branch: branch, HeadSHA: "deadbee"})
+	// No failing jobs: CI is not why this bounced.
+
+	res, err := Claim(ctx, p, i.Key, "run_9", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CIFailure != nil {
+		t.Errorf("a reconcile bounce carries a CI failure section: %+v", res.CIFailure)
+	}
+}

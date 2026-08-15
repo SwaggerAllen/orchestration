@@ -109,21 +109,27 @@ func claimCIFailure(ctx context.Context, h host.Host, headSHA string) *CIFailure
 	if h == nil || headSHA == "" {
 		return nil
 	}
-	checks, err := h.ChecksFor(ctx, headSHA)
+	// FailedJobLogs alone, deliberately. This used to ask ChecksFor
+	// first and only fetch logs when it said red — a reasonable shape
+	// that fetched the answer through the checks API, which needs the
+	// "Checks" permission. A fine-grained PAT has no such permission to
+	// grant, and agent runs act as exactly that token, so the gate in
+	// front of the evidence was the thing that 403'd. Asking only for
+	// failing jobs answers "was it red" and "what broke" in one call,
+	// through actions: read, which the token does hold.
+	//
+	// It also narrows the section to when it is true: a rework bounced
+	// by reconciliation rather than by CI now gets no failing-build
+	// section at all, instead of one reporting that the harness could
+	// not read logs for a build that never failed.
+	jobs, err := h.FailedJobLogs(ctx, headSHA)
 	if err != nil {
 		return &CIFailure{Err: err.Error()}
 	}
-	if checks.Status != host.ChecksRed {
+	if len(jobs) == 0 {
 		return nil
 	}
-	f := &CIFailure{RunURL: checks.RunURL}
-	jobs, err := h.FailedJobLogs(ctx, headSHA)
-	if err != nil {
-		f.Err = err.Error()
-		return f
-	}
-	f.Jobs = jobs
-	return f
+	return &CIFailure{RunURL: jobs[0].URL, Jobs: jobs}
 }
 
 // NonAsks is the confirmed non-asks document as the claim found it.

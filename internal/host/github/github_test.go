@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -338,4 +340,47 @@ func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) b
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
+}
+
+// The evidence path must never reach the checks API. Agent runs act as
+// AGENT_GITHUB_TOKEN, a fine-grained PAT, and GitHub offers no Checks
+// permission to grant one — so that call answers 403 for a reason no
+// scope can fix. It cost a rework its evidence before anyone noticed,
+// because the sweep (in-workflow GITHUB_TOKEN, with checks: read) makes
+// the same call successfully every hour.
+//
+// Written as "only ChecksFor may touch it" rather than as a scan of one
+// function's body, so moving code between helpers cannot quietly move
+// the call back onto the agent's path.
+func TestOnlyChecksForReachesTheChecksAPI(t *testing.T) {
+	body, err := os.ReadFile("github.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{"ChecksFor": true, "checkRuns": true}
+	name := regexp.MustCompile(`^func (?:\(c \*Client\) )?(\w+)`)
+
+	checked := 0
+	for _, chunk := range strings.Split(string(body), "\nfunc ") {
+		m := name.FindStringSubmatch("func " + chunk)
+		if m == nil || allowed[m[1]] {
+			continue
+		}
+		var code strings.Builder
+		for _, line := range strings.Split(chunk, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue // the rationale for the rule is not a breach of it
+			}
+			code.WriteString(line + "\n")
+		}
+		checked++
+		for _, bad := range []string{"checkRuns(", "check-runs"} {
+			if strings.Contains(code.String(), bad) {
+				t.Errorf("%s reaches %q — only ChecksFor may, and only because the sweep runs it as GITHUB_TOKEN", m[1], bad)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("scanned no functions; the split has drifted")
+	}
 }

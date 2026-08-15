@@ -89,6 +89,12 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 			plan.Done[m.Fields["step"]] = true
 		}
 	}
+	// A resumed run collects fewer findings than the first pass did, or
+	// none: the tickets carrying them may already be archived by this
+	// boundary's own archive step. Union rather than either alone —
+	// live tickets are the source on a first pass, and the archive
+	// step's carry is the source once it has run.
+	plan.HarnessFindings = mergeFindings(plan.HarnessFindings, RecoverHarnessFindings(plan.Comments))
 
 	milestones, err := p.Milestones(ctx)
 	if err != nil {
@@ -171,6 +177,17 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 	if !created {
 		prose += " (already existed — resumed run)"
 	}
+	// The findings ride out on this step's marker, because this step is
+	// what destroys them. They live in comments on the tickets just
+	// archived, and an archived issue vanishes from listings — so a run
+	// that dies between here and the scan comes back to a claim that
+	// collects nothing, and the milestone's harness findings are gone
+	// with no trace that there were any. The same shape as the
+	// rehearsal reset's merge list: the information exists at exactly
+	// one moment, and the step that ends that moment owns preserving it.
+	if carried := carryFindings(plan.HarnessFindings); carried != "" {
+		prose += "\n\n" + carried
+	}
 	return stepDone(ctx, p, plan, StepArchive, prose)
 }
 
@@ -249,6 +266,60 @@ func RecoverProposals(plan *BoundaryPlan) (*Proposals, error) {
 		return ParseProposals([]byte(prose))
 	}
 	return nil, fmt.Errorf("no scan step comment to recover proposals from")
+}
+
+// findingsCarry introduces the harness findings preserved on the archive
+// step's comment. A sentinel rather than a fenced code block: the
+// harness parses only its own writes here, and a fixed line is a
+// cheaper contract than a markdown shape the retro path could collide
+// with.
+const findingsCarry = "Harness findings carried past the archive (they lived on the tickets this step removed):"
+
+func carryFindings(fs []HarnessFinding) string {
+	if len(fs) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(fs)
+	if err != nil {
+		return ""
+	}
+	return findingsCarry + "\n" + string(raw)
+}
+
+// RecoverHarnessFindings reads back what the archive step preserved.
+// Absent is not an error: a milestone with no findings writes none, and
+// a boundary that has not archived yet has nothing to recover.
+func RecoverHarnessFindings(comments []string) []HarnessFinding {
+	for i := len(comments) - 1; i >= 0; i-- {
+		m, ok, err := marker.Parse(comments[i])
+		if err != nil || !ok || m.Kind != marker.BoundaryStep || m.Fields["step"] != StepArchive {
+			continue
+		}
+		_, payload, found := strings.Cut(comments[i], findingsCarry)
+		if !found {
+			return nil
+		}
+		var fs []HarnessFinding
+		if err := json.Unmarshal([]byte(strings.TrimSpace(payload)), &fs); err != nil {
+			return nil
+		}
+		return fs
+	}
+	return nil
+}
+
+// mergeFindings unions two lists on the dedupe key, keeping order.
+func mergeFindings(a, b []HarnessFinding) []HarnessFinding {
+	seen := map[string]bool{}
+	out := make([]HarnessFinding, 0, len(a)+len(b))
+	for _, f := range append(append([]HarnessFinding{}, a...), b...) {
+		if f.Dedupe == "" || seen[f.Dedupe] {
+			continue
+		}
+		seen[f.Dedupe] = true
+		out = append(out, f)
+	}
+	return out
 }
 
 // BoundaryFile records the scan, files proposals with dedupe, applies the
