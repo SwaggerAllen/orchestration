@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,7 +92,8 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("github: %s %s: HTTP %d%s", method, path, resp.StatusCode, hint(resp.StatusCode, method, path))
+		return fmt.Errorf("github: %s %s: HTTP %d%s%s", method, path, resp.StatusCode,
+			apiMessage(resp), hint(resp.StatusCode, method, path))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -116,9 +118,34 @@ func hint(status int, method, path string) string {
 			" Settings → Actions → General → \"Allow GitHub Actions to create and approve pull requests\"" +
 			" on the repository; the second is not grantable from a workflow file"
 	}
-	return " — if this ran as the in-workflow GITHUB_TOKEN, check the calling workflow's permissions:" +
-		" block, which drops every permission it does not name; if it ran as AGENT_GITHUB_TOKEN, the" +
-		" permissions are the PAT's own repository permissions instead and no workflow file affects them"
+	return " — 403 is a permissions answer, but which permissions depends on which token the run was" +
+		" given: under GITHUB_TOKEN it is the calling workflow's permissions: block, which drops every" +
+		" permission it does not name; under AGENT_GITHUB_TOKEN it is that token's own repository" +
+		" permissions, which no workflow file can widen. Naming only the first sent a rework run to a" +
+		" permissions: block that was already correct"
+}
+
+// apiMessage returns GitHub's own explanation for a failed response.
+// That explanation is the whole difference between two 403s that are
+// otherwise identical on the wire — "Resource not accessible by personal
+// access token" and "Resource not accessible by integration" point at
+// different credentials. Discarding the body left callers with a bare
+// "403 Forbidden" and a guess, and the guess cost a full rework run.
+//
+// Bounded, because an error body is not a payload; the caller has
+// already given up on the response by the time this is reached.
+func apiMessage(r *http.Response) string {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 4<<10))
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var body struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(raw, &body); err == nil && body.Message != "" {
+		return ": " + body.Message
+	}
+	return ": " + strings.TrimSpace(string(raw))
 }
 
 // pathOnly trims a query string so a suffix match is not defeated by one.
@@ -283,35 +310,76 @@ const (
 	maxLogTailBytes = 20000
 )
 
+// FailedJobLogs reads the Actions API rather than the check-runs API that
+// ChecksFor uses, and the difference is which credential each call can be
+// made with. ChecksFor runs in the sweep, under the workflow's own
+// GITHUB_TOKEN, where `checks: read` is grantable from the permissions
+// block. This runs at claim time in an agent workflow, under
+// AGENT_GITHUB_TOKEN — and a fine-grained PAT has no check-runs
+// permission to grant: the endpoint appears nowhere in GitHub's
+// fine-grained permissions reference, so no setting fixes it. The first
+// rework run to need a log got a bare 403 and worked the ticket blind.
+//
+// Actions runs and jobs are grantable (`Actions`, which agent tokens
+// already hold to dispatch), and they are the only thing with a log to
+// read anyway. Third-party checks are lost here and not missed: the
+// ci-red marker already names every failing check, from ChecksFor.
 func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobLog, error) {
-	runs, err := c.failedRunsFor(ctx, headSHA)
-	if err != nil {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", c.owner, c.repo, headSHA)
+	var runs struct {
+		WorkflowRuns []struct {
+			ID         int64  `json:"id"`
+			Status     string `json:"status"`
+			Conclusion string `json:"conclusion"`
+		} `json:"workflow_runs"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &runs); err != nil {
 		return nil, err
 	}
 	var out []host.JobLog
-	for _, r := range runs {
-		jobs, err := c.failedJobs(ctx, r.ID)
+	for _, r := range runs.WorkflowRuns {
+		if r.Status != "completed" || !failedConclusion(r.Conclusion) {
+			continue
+		}
+		jobs, err := c.runJobs(ctx, r.ID)
 		if err != nil {
 			return nil, err
 		}
 		for _, j := range jobs {
+			if j.Status != "completed" || !failedConclusion(j.Conclusion) {
+				continue
+			}
 			if len(out) >= maxFailedJobs {
 				return out, nil
 			}
-			log, err := c.jobLog(ctx, fmt.Sprintf("%d", j.ID))
-			jl := host.JobLog{Name: j.Name, URL: j.HTMLURL}
+			entry := host.JobLog{Name: j.Name, URL: j.HTMLURL}
+			log, err := c.jobLog(ctx, strconv.FormatInt(j.ID, 10))
 			if err != nil {
-				jl.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
+				// Named without a log rather than dropped: "this job failed
+				// and I could not read it" is a fact the agent needs, and
+				// silence would read as "it passed".
+				entry.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
 			} else {
-				jl.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+				entry.Log = tail(log, maxLogTailLines, maxLogTailBytes)
 			}
-			out = append(out, jl)
+			out = append(out, entry)
 		}
 	}
 	return out, nil
 }
 
-type actionsRun struct {
+// failedConclusion reports whether a completed run or job counts as red.
+// failure, timed_out, cancelled and action_required all do.
+func failedConclusion(conclusion string) bool {
+	switch conclusion {
+	case "success", "neutral", "skipped":
+		return false
+	}
+	return true
+}
+
+// workflowJob is one Actions job as FailedJobLogs reads it.
+type workflowJob struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	Status     string `json:"status"`
@@ -319,81 +387,15 @@ type actionsRun struct {
 	HTMLURL    string `json:"html_url"`
 }
 
-// failedRunsFor reads the failing Actions runs for a head SHA.
-//
-// Deliberately the Actions API and not `/commits/{sha}/check-runs`,
-// which is the natural way to ask this and the way this was first
-// written. Reading check runs needs the "Checks" permission, and a
-// fine-grained PAT has no such permission to grant — it is not in
-// GitHub's list. Agent runs act as AGENT_GITHUB_TOKEN, which is exactly
-// such a PAT, so the evidence a rework needs most was fetched through
-// the one door its credential can never open: HTTP 403 "Resource not
-// accessible by personal access token", and a rework handed an empty
-// section. The Actions API answers the same question through
-// `actions: read`, which that token does hold.
-//
-// The cost, named because it is a real narrowing: this sees GitHub
-// Actions runs only. A third-party check that fails is invisible here,
-// where check-runs would have listed it. The sweep's own verdict still
-// goes through ChecksFor, so the state machine is unaffected; what
-// narrows is the evidence attached to a rework prompt.
-func (c *Client) failedRunsFor(ctx context.Context, headSHA string) ([]actionsRun, error) {
-	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", c.owner, c.repo, url.QueryEscape(headSHA))
-	var data struct {
-		WorkflowRuns []actionsRun `json:"workflow_runs"`
-	}
-	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
-		return nil, err
-	}
-	var out []actionsRun
-	for _, r := range data.WorkflowRuns {
-		if r.Status != "completed" {
-			continue
-		}
-		switch r.Conclusion {
-		case "success", "neutral", "skipped":
-		default:
-			out = append(out, r)
-		}
-	}
-	return out, nil
-}
-
-type actionsJob struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	Conclusion string `json:"conclusion"`
-	HTMLURL    string `json:"html_url"`
-}
-
-func (c *Client) failedJobs(ctx context.Context, runID int64) ([]actionsJob, error) {
+func (c *Client) runJobs(ctx context.Context, runID int64) ([]workflowJob, error) {
 	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", c.owner, c.repo, runID)
 	var data struct {
-		Jobs []actionsJob `json:"jobs"`
+		Jobs []workflowJob `json:"jobs"`
 	}
 	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
 		return nil, err
 	}
-	var out []actionsJob
-	for _, j := range data.Jobs {
-		switch j.Conclusion {
-		case "success", "neutral", "skipped", "":
-		default:
-			out = append(out, j)
-		}
-	}
-	return out, nil
-}
-
-// jobIDRe pulls the Actions job id out of a check run's html_url, which
-// looks like .../actions/runs/<run>/job/<job>.
-var jobIDRe = regexp.MustCompile(`/job/(\d+)`)
-
-func jobID(htmlURL string) string {
-	if m := jobIDRe.FindStringSubmatch(htmlURL); m != nil {
-		return m[1]
-	}
-	return ""
+	return data.Jobs, nil
 }
 
 // jobLog fetches one job's log. The endpoint answers with a redirect to
@@ -412,7 +414,12 @@ func (c *Client) jobLog(ctx context.Context, jobID string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("job log %s: %s", jobID, resp.Status)
+		// This error is read by a model, not by a maintainer with the repo
+		// open: it lands verbatim in the rework prompt as the reason the
+		// build's logs are missing. "403 Forbidden" told one dev agent
+		// nothing it could act on, so it worked the ticket log-blind.
+		return "", fmt.Errorf("job log %s: %s%s%s", jobID, resp.Status,
+			apiMessage(resp), hint(resp.StatusCode, http.MethodGet, url))
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {

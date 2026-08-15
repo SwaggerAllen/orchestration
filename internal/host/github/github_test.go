@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -249,55 +250,137 @@ func TestTailBoundsByLinesAndBytes(t *testing.T) {
 	}
 }
 
-func TestJobIDComesFromTheCheckRunURL(t *testing.T) {
-	if got := jobID("https://github.com/o/r/actions/runs/123/job/456"); got != "456" {
-		t.Errorf("jobID = %q, want 456", got)
+// The path this exercises is the one an agent reads at claim time, under
+// AGENT_GITHUB_TOKEN. It deliberately touches no check-runs endpoint: a
+// fine-grained PAT has no check-runs permission to grant, so a rework run
+// that reached for one got a 403 and worked the ticket log-blind.
+func TestFailedJobLogsReadsTheActionsAPI(t *testing.T) {
+	srv := logServer(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if strings.Contains(r.URL.Path, "check-runs") {
+			t.Errorf("reached the check-runs API, which the agent token cannot read: %s", r.URL.Path)
+		}
+		return false
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).FailedJobLogs(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
 	}
-	// A third-party check is not an Actions job and has no log to fetch;
-	// it is still named, so "failed and unreadable" never reads as "passed".
-	if got := jobID("https://example.com/some-other-check"); got != "" {
-		t.Errorf("jobID on a non-Actions check = %q, want empty", got)
+	if len(got) != 1 {
+		t.Fatalf("jobs = %d, want 1 (only the failing job of the failing run)", len(got))
+	}
+	if got[0].Name != "ci" {
+		t.Errorf("name = %q, want ci", got[0].Name)
+	}
+	if !strings.Contains(got[0].Log, "undefined function farwell/1") {
+		t.Errorf("log = %q, want the job's output", got[0].Log)
 	}
 }
 
-// The failing-build evidence must never go through the checks API.
-// Agent runs act as AGENT_GITHUB_TOKEN, a fine-grained PAT, and GitHub
-// offers no Checks permission to grant one — so that call answers 403
-// for a reason no scope can fix. It cost a rework its evidence before
-// anyone noticed, because the sweep (in-workflow GITHUB_TOKEN, with
-// checks: read) makes the same call successfully every hour.
-func TestFailingBuildEvidenceNeverAsksTheChecksAPI(t *testing.T) {
+// A job whose log cannot be read is still named — silence would read as
+// "it passed" — and the error carries GitHub's own explanation, which is
+// the difference between a fixable answer and another debugging round.
+func TestFailedJobLogsNamesAJobItCannotRead(t *testing.T) {
+	srv := logServer(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/logs") {
+			return false
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": "Resource not accessible by personal access token",
+		})
+		return true
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).FailedJobLogs(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "ci" {
+		t.Fatalf("a job with an unreadable log must still be named: %+v", got)
+	}
+	if !strings.Contains(got[0].Log, "Resource not accessible by personal access token") {
+		t.Errorf("log = %q, want GitHub's own reason for the 403", got[0].Log)
+	}
+	if !strings.Contains(got[0].Log, "AGENT_GITHUB_TOKEN") {
+		t.Errorf("log = %q, want the hint naming which token's permissions apply", got[0].Log)
+	}
+}
+
+// logServer serves one failing run with one failing job. override runs
+// first and reports whether it handled the request itself.
+func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) bool) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if override != nil && override(w, r) {
+			return
+		}
+		switch {
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/runs":
+			if got := r.URL.Query().Get("head_sha"); got != "sha1" {
+				t.Errorf("head_sha = %q, want sha1", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []map[string]any{
+				{"id": 1, "status": "completed", "conclusion": "success"},
+				{"id": 2, "status": "completed", "conclusion": "failure"},
+				{"id": 3, "status": "in_progress", "conclusion": ""},
+			}})
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/runs/2/jobs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []map[string]any{
+				{"id": 20, "name": "ci", "status": "completed", "conclusion": "failure",
+					"html_url": "https://gh/runs/2/job/20"},
+				{"id": 21, "name": "lint", "status": "completed", "conclusion": "success"},
+			}})
+		case r.URL.Path == "/repos/swaggerallen/dummy/actions/jobs/20/logs":
+			_, _ = w.Write([]byte("** (CompileError) undefined function farwell/1"))
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// The evidence path must never reach the checks API. Agent runs act as
+// AGENT_GITHUB_TOKEN, a fine-grained PAT, and GitHub offers no Checks
+// permission to grant one — so that call answers 403 for a reason no
+// scope can fix. It cost a rework its evidence before anyone noticed,
+// because the sweep (in-workflow GITHUB_TOKEN, with checks: read) makes
+// the same call successfully every hour.
+//
+// Written as "only ChecksFor may touch it" rather than as a scan of one
+// function's body, so moving code between helpers cannot quietly move
+// the call back onto the agent's path.
+func TestOnlyChecksForReachesTheChecksAPI(t *testing.T) {
 	body, err := os.ReadFile("github.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(body)
-	start := strings.Index(src, "func (c *Client) FailedJobLogs")
-	if start < 0 {
-		t.Fatal("FailedJobLogs is gone; this guard has drifted")
-	}
-	end := strings.Index(src[start:], "\nfunc (c *Client) ChecksFor")
-	region := src[start:]
-	if end > 0 {
-		region = src[start : start+end]
-	}
-	// Comments stripped first: the region deliberately *explains* why it
-	// does not use check-runs, and a scan that reads prose would fail on
-	// the explanation for the rule it is enforcing.
-	var code strings.Builder
-	for _, line := range strings.Split(region, "\n") {
-		if t := strings.TrimSpace(line); strings.HasPrefix(t, "//") {
+	allowed := map[string]bool{"ChecksFor": true, "checkRuns": true}
+	name := regexp.MustCompile(`^func (?:\(c \*Client\) )?(\w+)`)
+
+	checked := 0
+	for _, chunk := range strings.Split(string(body), "\nfunc ") {
+		m := name.FindStringSubmatch("func " + chunk)
+		if m == nil || allowed[m[1]] {
 			continue
 		}
-		code.WriteString(line + "\n")
-	}
-	region = code.String()
-	for _, fn := range []string{"checkRuns(", "check-runs"} {
-		if strings.Contains(region, fn) {
-			t.Errorf("the evidence path reaches %q — a PAT cannot read it and no permission exists to grant", fn)
+		var code strings.Builder
+		for _, line := range strings.Split(chunk, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue // the rationale for the rule is not a breach of it
+			}
+			code.WriteString(line + "\n")
+		}
+		checked++
+		for _, bad := range []string{"checkRuns(", "check-runs"} {
+			if strings.Contains(code.String(), bad) {
+				t.Errorf("%s reaches %q — only ChecksFor may, and only because the sweep runs it as GITHUB_TOKEN", m[1], bad)
+			}
 		}
 	}
-	if !strings.Contains(region, "actions/runs") {
-		t.Error("the evidence path no longer uses the Actions API; that is the only door the agent token has")
+	if checked == 0 {
+		t.Fatal("scanned no functions; the split has drifted")
 	}
 }

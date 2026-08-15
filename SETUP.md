@@ -55,17 +55,20 @@ able to do exactly one job and nothing else.
   requests → Read and write**, **Actions → Read and write**,
   **Deployments → Read and write**. Leave **Workflows** unset — that is
   what keeps agents unable to edit `.github/workflows/`, the same blast
-  radius the in-workflow `GITHUB_TOKEN` has.
-- There is **no Checks permission to grant** on a fine-grained PAT, and
-  nothing here needs one. It is worth stating because the obvious way to
-  ask "did CI pass for this commit" is `/commits/{sha}/check-runs`,
-  which needs exactly that permission — so a run reading it as this
-  token gets HTTP 403 "Resource not accessible by personal access
-  token" and no scope you can add will fix it. The harness reads
-  failing builds through the Actions API instead (`actions: read`),
-  which this token does hold. Do not reintroduce a check-runs call on
-  any path an agent run takes; the sweep, which runs as the in-workflow
-  `GITHUB_TOKEN` with `checks: read`, is the only caller that may.
+  radius the in-workflow `GITHUB_TOKEN` has. A dev run proved the point
+  by writing a correct `ci.yml` fix it could not push; the run died at
+  the push and took its hand-back with it, which is the trade this
+  setting makes and is meant to make.
+- **There is no check-runs permission to add, and this is why the plane
+  reads CI two different ways.** A fine-grained token cannot be granted
+  the check-runs API at all — the endpoint appears nowhere in GitHub's
+  fine-grained permissions reference, and "Commit statuses" is a
+  different API (`/statuses`, not `/check-runs`). So the sweep reads
+  check runs under the workflow's own `GITHUB_TOKEN`, where
+  `checks: read` is grantable from the `permissions:` block, while
+  anything running under this token reads the Actions API instead.
+  Watch for this when adding a call: a `permissions:` block in a stub
+  grants nothing to the token the agent actions are handed.
 - Named without a `GITHUB_` prefix because Actions reserves it.
 
 **Why this exists, and why the default token is not enough.** Every
@@ -587,6 +590,19 @@ step 5 already covered them.
    `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
+
+   Then run `pipeline setup` once against the project's config **with
+   the provider token in the environment** (`DIGITALOCEAN_TOKEN=… \
+   LINEAR_API_KEY=… pipeline setup`). Beyond provisioning states and
+   labels, it probes `deploy.endpoint` and fails loudly if that app is
+   not one the token can read. Do not skip the token: without it the
+   command prints `deploy check SKIPPED` and provisions anyway, which
+   is the case this step exists to avoid. Nothing else touches deploy
+   detection until a ticket reaches `Merged` — design, dev, CI and
+   reconcile all pass without it — so a wrong app id survives an entire
+   first ticket and then presents as "stuck in Merged", a symptom that
+   names neither the endpoint nor the token. This happened; the check
+   is why it takes one command now.
 6. Metronome: add the repo to `PROJECTS` in `worker/wrangler.toml`,
    with its Linear project id as `trackerProject`, and add the repo to
    `DISPATCH_TOKEN`'s repository list. Merging the `PROJECTS` edit
