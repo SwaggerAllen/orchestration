@@ -24,8 +24,8 @@ import (
 func cmdOrder(args []string) error {
 	fs := flag.NewFlagSet("order", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
-	milestone := fs.String("milestone", "", "limit to one milestone by name (default: the whole project)")
-	current := fs.Bool("current", false, "limit to the current milestone")
+	milestone := fs.String("milestone", "", "scope to one milestone by name (default: the current one)")
+	all := fs.Bool("all", false, "span every milestone; anything outside the current one is held out of the startable layers and says so")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -43,16 +43,27 @@ func cmdOrder(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The current milestone by default. Milestones are worked in
+	// sequence, so a later one's tickets are commonly filed with no
+	// dependencies — the milestone is the dependency — and a
+	// project-wide default would put them in "Ready now" beside work
+	// that can genuinely start today.
 	want := *milestone
-	if *current {
+	if want == "" && !*all {
 		want = snap.CurrentMilestone
+		if want == "" {
+			fmt.Fprintln(os.Stderr, "order: no current milestone in the tracker; spanning the whole project")
+		}
+	}
+	if *all {
+		want = ""
 	}
 	printOrder(os.Stdout, core.ComputeOrder(snap, want), want)
 	return nil
 }
 
 func printOrder(w io.Writer, o *core.Order, milestone string) {
-	scope := "the whole project"
+	scope := "every milestone"
 	if milestone != "" {
 		scope = "milestone " + milestone
 	}
@@ -67,7 +78,14 @@ func printOrder(w io.Writer, o *core.Order, milestone string) {
 		for _, t := range l.Tickets {
 			fmt.Fprintf(w, "\n  %s  %s\n", t.Key, t.Title)
 			fmt.Fprintf(w, "    %s\n", t.URL)
-			fmt.Fprintf(w, "    state: %s\n", t.State)
+			if t.Milestone != "" {
+				fmt.Fprintf(w, "    state: %s   milestone: %s\n", t.State, t.Milestone)
+			} else {
+				fmt.Fprintf(w, "    state: %s\n", t.State)
+			}
+			if t.Note != "" {
+				fmt.Fprintf(w, "    note:  %s\n", t.Note)
+			}
 			if len(t.BlockedBy) > 0 {
 				fmt.Fprintf(w, "    blocked by: %s\n", neighbours(t.BlockedBy))
 			}

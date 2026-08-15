@@ -46,6 +46,14 @@ type OrderedTicket struct {
 	// future, and listing it would make a ready ticket look held up.
 	BlockedBy []Neighbour
 	Blocks    []Neighbour
+	// Milestone is the ticket's own, printed when the scope spans more
+	// than one so a reader can see why something is held back by
+	// scheduling rather than by the graph.
+	Milestone string
+	// Note explains a placement the blocker graph alone does not, which
+	// today means exactly one thing: the ticket is outside the current
+	// milestone.
+	Note string
 	// MutexHeldBy names an in-flight ticket sharing a mutex label with
 	// this one. Not a blocker and not printed as one — design may run on
 	// both at once — but promotion into Ready for dev would be reverted
@@ -73,8 +81,21 @@ const (
 	LayerRest        = "Everything else"
 )
 
-// ComputeOrder builds the layering. Tickets already resolved are absent
-// entirely — they are not waiting on anything and nothing waits on them.
+// ComputeOrder builds the layering.
+//
+// Scope: a milestone name limits the answer to it; "" spans the project.
+// The wide case needs care, because milestones are worked in sequence
+// and that constraint lives nowhere in the blocker graph — a ticket in a
+// later milestone is commonly filed with no dependencies at all, since
+// the milestone itself is the dependency. Read literally, such a ticket
+// has nothing blocking it and lands in "Ready now" beside work that
+// genuinely can start today, which is the report confidently
+// recommending something that must not be started. So across a wide
+// scope, anything outside the current milestone is held out of the
+// startable layers and says why.
+//
+// Tickets already resolved are absent entirely — they are not waiting on
+// anything and nothing waits on them.
 func ComputeOrder(s *Snapshot, milestone string) *Order {
 	byID := map[string]*Ticket{}
 	var considered []*Ticket
@@ -137,18 +158,32 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 		}
 	}
 
+	// Only when the scope spans milestones: asking for one by name is
+	// asking about that one, and demoting all of it would answer a
+	// question nobody put.
+	gated := map[string]bool{}
+	if milestone == "" && s.CurrentMilestone != "" {
+		for _, t := range considered {
+			if t.Milestone != s.CurrentMilestone && !started[t.ID] {
+				gated[t.ID] = true
+			}
+		}
+	}
+
 	o := &Order{Layers: []Layer{
 		{Name: LayerStarted, Why: "already past Todo — the pipeline is working these now."},
 		{Name: LayerReady, Why: "nothing outstanding blocks them; these are the candidates to start."},
 		{Name: LayerAfterFlight, Why: "every blocker is in flight, so these free themselves as those land."},
 		{Name: LayerAfterReady, Why: "blocked only by the two layers above; they need something started first."},
-		{Name: LayerRest, Why: "blocked by something that is itself still blocked — depth beyond this is not yet decidable."},
+		{Name: LayerRest, Why: "blocked by something itself blocked, or held back by a milestone rather than by the graph."},
 	}}
 	for _, t := range considered {
 		i := 4
 		switch {
 		case started[t.ID]:
 			i = 0
+		case gated[t.ID]:
+			i = 4
 		case ready[t.ID]:
 			i = 1
 		case afterFlight[t.ID]:
@@ -156,7 +191,14 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 		case afterReady[t.ID]:
 			i = 3
 		}
-		o.Layers[i].Tickets = append(o.Layers[i].Tickets, describe(t, byID, openBlockers, considered))
+		d := describe(t, byID, openBlockers, considered)
+		if milestone == "" {
+			d.Milestone = t.Milestone
+		}
+		if gated[t.ID] {
+			d.Note = "outside the current milestone (" + s.CurrentMilestone + ") — milestones are worked in sequence, so nothing here starts until that one drains, whatever its blockers say"
+		}
+		o.Layers[i].Tickets = append(o.Layers[i].Tickets, d)
 	}
 	for i := range o.Layers {
 		ts := o.Layers[i].Tickets

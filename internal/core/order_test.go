@@ -194,3 +194,64 @@ func TestEveryLayerSaysWhatItMeans(t *testing.T) {
 		}
 	}
 }
+
+// Milestones are worked in sequence, and that constraint lives nowhere
+// in the blocker graph: a later milestone's tickets are commonly filed
+// with no dependencies at all, because the milestone is the dependency.
+// Read literally they have nothing blocking them, so a project-wide
+// ordering put them in "Ready now" beside work that can genuinely start
+// today — the report recommending something that must not be started.
+func TestOrderHoldsBackLaterMilestonesAcrossAWideScope(t *testing.T) {
+	now := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "M1" })
+	later := tk("B", protocol.Todo, func(t *Ticket) { t.Milestone = "M2" }) // no blockers at all
+	s := snap(now, later)
+	s.CurrentMilestone = "M1"
+
+	o := ComputeOrder(s, "")
+	if got := layerOf(o, "A"); got != LayerReady {
+		t.Errorf("the current milestone's ticket is in %q, want %q", got, LayerReady)
+	}
+	if got := layerOf(o, "B"); got == LayerReady {
+		t.Error("a later milestone's unblocked ticket reads as startable now")
+	}
+	ot := ticketIn(o, "B")
+	if ot == nil {
+		t.Fatal("B vanished; held back is not the same as hidden")
+	}
+	if !strings.Contains(ot.Note, "M1") || !strings.Contains(ot.Note, "sequence") {
+		t.Errorf("B does not say why it is held back: %q", ot.Note)
+	}
+	// The milestone is printed in this mode, since it is the reason.
+	if ot.Milestone != "M2" {
+		t.Errorf("milestone = %q, want M2", ot.Milestone)
+	}
+}
+
+// Asking for one milestone by name is asking about that one. Demoting
+// all of it would answer a question nobody put.
+func TestScopingToAMilestoneDoesNotHoldItBack(t *testing.T) {
+	later := tk("B", protocol.Todo, func(t *Ticket) { t.Milestone = "M2" })
+	s := snap(later)
+	s.CurrentMilestone = "M1"
+
+	o := ComputeOrder(s, "M2")
+	if got := layerOf(o, "B"); got != LayerReady {
+		t.Errorf("B is in %q, want %q — the scope was the question", got, LayerReady)
+	}
+	if ot := ticketIn(o, "B"); ot != nil && ot.Note != "" {
+		t.Errorf("a scoped report explains a constraint it is not applying: %q", ot.Note)
+	}
+}
+
+// Work already started outside the current milestone is not held back —
+// it is started, and pretending otherwise would hide it from the layer
+// that says what the pipeline is doing.
+func TestStartedWorkIsNeverHeldBackByItsMilestone(t *testing.T) {
+	stray := tk("A", protocol.InProgress, func(t *Ticket) { t.Milestone = "M2" })
+	s := snap(stray)
+	s.CurrentMilestone = "M1"
+
+	if got := layerOf(ComputeOrder(s, ""), "A"); got != LayerStarted {
+		t.Errorf("in-flight work from another milestone is in %q, want %q", got, LayerStarted)
+	}
+}

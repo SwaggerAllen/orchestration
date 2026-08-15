@@ -81,7 +81,8 @@ commands:
   agent    run-harness protocol steps: claim, finish, abort
            (used by the agent workflows, not by hand)
   order    what to start next: the ticket graph in layers, with each
-           ticket's blockers and what it blocks (requires LINEAR_API_KEY)
+           ticket's blockers and what it blocks. Scoped to the current
+           milestone unless --milestone or --all (requires LINEAR_API_KEY)
   preflight exercise every credential-bearing call the pipeline makes,
            so a missing scope fails here rather than mid-ticket
            (requires LINEAR_API_KEY; GITHUB_TOKEN adds the host checks)

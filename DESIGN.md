@@ -505,6 +505,14 @@ acted on. What is *chosen* rather than derived stays in the two fields that alre
 priority for preference between two legal orders, a blocking relation for sequencing that is
 real. If a sequencing constraint is worth remembering, it is worth recording as a blocker.
 
+One constraint deliberately lives outside the graph: **milestones are worked in sequence**
+(§2.9), and a later milestone's tickets are commonly filed with no dependencies at all, because
+the milestone *is* the dependency. Read literally, such a ticket has nothing blocking it. So
+the ordering is scoped to the current milestone by default, and across a wider scope anything
+outside it is held out of the startable layers and says why — the alternative is a report
+confidently recommending work that must not be started yet, which is the one failure that would
+make it cost more than it saves.
+
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
 
