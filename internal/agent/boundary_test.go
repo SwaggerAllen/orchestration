@@ -247,3 +247,73 @@ func TestLiveSuiteReportsNoTestsAsItsOwnOutcome(t *testing.T) {
 		t.Errorf("no-tests reads as a failure, which is the thing that trains the signal into noise:\n%s", body)
 	}
 }
+
+// Harness findings live in comments on the milestone's tickets, and the
+// archive step removes those tickets. A boundary that dies between
+// archiving and scanning comes back to a claim that collects nothing —
+// so the findings the milestone recorded vanish, with no trace that
+// there ever were any. Same shape as the rehearsal reset's merge list:
+// the information exists at exactly one moment, and the step that ends
+// that moment owns preserving it.
+func TestFindingsSurviveTheArchiveOnAResumedBoundary(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M: alpha", 1)
+	done := seed(t, tr, cfg, "Shipped thing", "d", protocol.Done)
+	if err := tr.Mutate(done.ID, func(i *tracker.Issue) { i.Milestone = "M: alpha" }); err != nil {
+		t.Fatal(err)
+	}
+	// The finding, recorded by the run that hit it, on a ticket this
+	// boundary is about to archive.
+	if err := PostHarnessFindings(ctx, p, done.ID, []HarnessFinding{{
+		Title:  "Dev runner has no Postgres",
+		Detail: "mix test is a configured gate and the runner cannot satisfy it.",
+		Dedupe: "dev-runner-no-postgres",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	boundary, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Milestone boundary — M: alpha", Description: "machinery",
+		StateID: stateID(t, tr, cfg, protocol.InProgress),
+		Labels:  []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Mutate(boundary.ID, func(i *tracker.Issue) { i.Milestone = "M: alpha" }); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_1", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.HarnessFindings) != 1 {
+		t.Fatalf("the first claim collected %d findings, want 1", len(plan.HarnessFindings))
+	}
+	if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// The run dies here. The author moves the ticket back to In progress
+	// and it is dispatched again — a fresh claim, against a world where
+	// the ticket carrying the finding no longer appears in any listing.
+	resumed, err := ClaimBoundary(ctx, p, boundary.Key, "run_2", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resumed.Done[StepArchive] {
+		t.Fatal("the resumed plan does not see the archive step as done; this test is not exercising a resume")
+	}
+	if len(resumed.HarnessFindings) != 1 {
+		t.Fatalf("the resumed claim has %d findings, want 1 — the milestone's findings died with the archive", len(resumed.HarnessFindings))
+	}
+	got := resumed.HarnessFindings[0]
+	if got.Dedupe != "dev-runner-no-postgres" || !strings.Contains(got.Detail, "configured gate") {
+		t.Errorf("the recovered finding lost its content: %+v", got)
+	}
+}

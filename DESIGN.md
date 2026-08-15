@@ -665,6 +665,15 @@ signal that was missing.
    recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
    invented findings.
 
+   **The archive step carries the findings out.** They live in comments on the milestone's
+   tickets, and step 6 archives exactly those tickets — an archived issue vanishes from
+   listings, so a boundary that dies between archiving and scanning resumes into a claim that
+   collects nothing and reports a milestone with no findings rather than a milestone whose
+   findings it lost. The archive step therefore writes them onto its own step marker before
+   removing the tickets, and a resumed claim unions what it can still collect with what that
+   marker preserved. Same rule as the rehearsal reset's merge list (§14): the information
+   exists at exactly one moment, and the step that ends that moment owns preserving it.
+
    Harness findings are the pipeline's own problems, filed by the runs that hit them
    (`kind: "harness"`, labelled `harness`). Every other input describes the project; this one
    describes the machine, and the author is the only person who can fix it while the agents are
