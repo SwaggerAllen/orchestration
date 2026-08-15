@@ -1,0 +1,68 @@
+# Project stub: order. Copy into the project repo's .github/workflows/.
+#
+# "What should go into Designing next, and what can run beside it?" —
+# answered from the ticket graph, on demand, from a phone.
+#
+# The answer is derived rather than stored, and deliberately so: the
+# inputs move constantly and from several directions, and the mutex
+# labels that decide what parallelises do not exist until the design
+# pass that writes them has run. Any written-down ordering is a cached
+# copy of a pure function over all that, and a stale ordering is worse
+# than none, because it is the one people act on. So this recomputes and
+# prints; it writes nothing, to the repo or to the tracker.
+#
+# It reads the tracker and nothing else. No host calls, no deploy calls,
+# no GITHUB_TOKEN beyond the checkout — a read-only report should not be
+# able to fail on a permission it never uses.
+name: pipeline-order
+run-name: "pipeline: order ${{ inputs.milestone }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      milestone:
+        description: Scope to one milestone by name (blank = the current one)
+        required: false
+        type: string
+      all:
+        description: Span every milestone. Anything outside the current one is held out of the startable layers and says why.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  order:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+    steps:
+      - name: checkout project (for pipeline.config.json)
+        uses: actions/checkout@v4
+
+      - uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+        with:
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+
+      # The summary is the deliverable — it is what renders in the
+      # Actions UI on a phone, with every key a tappable link. The log
+      # copy is for when a run needs quoting somewhere plain.
+      - name: order
+        # Through the environment, not through `${{ }}` in the script:
+        # an expression is pasted in before bash sees the line, so a
+        # milestone name containing a quote stops being a string and
+        # starts being shell. Harmless here and a habit worth keeping.
+        env:
+          MILESTONE: ${{ inputs.milestone }}
+          ALL: ${{ inputs.all }}
+        run: |
+          set -euo pipefail
+          ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json" --format markdown)
+          if [ "$ALL" = "true" ]; then
+            ARGS+=(--all)
+          elif [ -n "$MILESTONE" ]; then
+            ARGS+=(--milestone "$MILESTONE")
+          fi
+          pipeline order "${ARGS[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

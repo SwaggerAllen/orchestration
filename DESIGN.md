@@ -513,6 +513,11 @@ outside it is held out of the startable layers and says why — the alternative 
 confidently recommending work that must not be started yet, which is the one failure that would
 make it cost more than it saves.
 
+It answers a question that gets asked between sessions, away from a keyboard, so each project
+also carries a dispatch-only `pipeline-order` workflow that runs it and renders the layers to
+the run summary with every key linked. Same computation, same lack of storage: the run is a
+snapshot of a moment, and the log of past runs is a log of past moments, not a plan.
+
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
 
