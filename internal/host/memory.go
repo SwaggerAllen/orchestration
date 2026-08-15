@@ -24,6 +24,9 @@ type Memory struct {
 	Files map[string]string
 	// Deployments records RecordDeployment calls, in order.
 	Deployments []Deployment
+	// Unmergeable are PR numbers MergePR refuses with ErrNotMergeable,
+	// standing in for a branch that conflicts with its base.
+	Unmergeable map[int]bool
 	// FailRecordDeployment makes RecordDeployment error, standing in for
 	// the 403 a workflow without deployments: write actually gets.
 	FailRecordDeployment bool
@@ -46,11 +49,12 @@ var _ Host = (*Memory)(nil)
 
 func NewMemory() *Memory {
 	return &Memory{
-		CheckState: map[string]Checks{},
-		JobLogs:    map[string][]JobLog{},
-		Merged:     map[int]string{},
-		Ancestry:   map[string]bool{},
-		Files:      map[string]string{},
+		CheckState:  map[string]Checks{},
+		JobLogs:     map[string][]JobLog{},
+		Merged:      map[int]string{},
+		Ancestry:    map[string]bool{},
+		Files:       map[string]string{},
+		Unmergeable: map[int]bool{},
 	}
 }
 
@@ -118,6 +122,9 @@ func (m *Memory) MarkPRReady(_ context.Context, number int) error {
 func (m *Memory) MergePR(_ context.Context, number int) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.Unmergeable[number] {
+		return "", fmt.Errorf("%w: PR #%d", ErrNotMergeable, number)
+	}
 	for i, p := range m.PRs {
 		if p.Number == number {
 			sha := fmt.Sprintf("merge_%d", number)

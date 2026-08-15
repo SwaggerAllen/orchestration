@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -102,6 +103,49 @@ func LoadVerdict(path string) (*Verdict, error) {
 	return &v, nil
 }
 
+// bounceUnmergeable returns a passing ticket to the queue because its
+// branch conflicts with something that landed while it was in flight.
+//
+// The verdict stood: the work is right and the branch is stale, which
+// are different problems with different owners. Before this, the merge
+// error aborted the run and the abort sent the ticket to Blocked — and
+// Blocked is the author's, exclusively, with no automatic way out
+// (DESIGN §12). So the one failure in this pipeline that an agent is
+// unambiguously equipped to fix was the one that always needed a human.
+//
+// Back to the queue rather than straight to Reworking: Reworking is the
+// dev agent's own claim (DESIGN §3), and a state written by anyone else
+// is reverted by the writer matrix (§9). The queue is how work is
+// handed over here.
+func bounceUnmergeable(ctx context.Context, p *plane.Plane, res *ClaimResult, v *Verdict) error {
+	attempt := 1
+	for _, c := range res.Comments {
+		if m, ok, err := marker.Parse(c); err == nil && ok && m.Kind == marker.MergeConflict {
+			attempt++
+		}
+	}
+	m := marker.Marker{Kind: marker.MergeConflict, Fields: map[string]string{
+		"pr":      fmt.Sprintf("%d", res.PRNumber),
+		"attempt": fmt.Sprintf("%d", attempt),
+	}}
+	// This comment is the newest, so it is the scope (DESIGN §2.3), and
+	// it has to say plainly that the work is not what is wrong — a dev
+	// agent handed a bounce reads it as a finding about the diff unless
+	// told otherwise, and would start re-litigating a design that
+	// already passed.
+	prose := fmt.Sprintf(`Reconciliation PASSED and the merge could not land: this branch conflicts with something that merged into main while the ticket was in flight.
+
+**Nothing about the work is in question.** Do not revisit the design, the argument or the diff. The scope is exactly this: merge `+"`origin/main`"+` into the branch, resolve the conflicts, keep both sides' intent, run the quality gates, and finish. If a conflict cannot be resolved without changing what this ticket decided, that is a push-back rather than a guess (DESIGN §2.4).
+
+The verdict that stood, for context:
+
+%s`, v.Report)
+	if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
+		return err
+	}
+	return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework)
+}
+
 // FinishReconcile lands the three outcomes (DESIGN §11, §13):
 //
 //   - pass        -> merge, Merged, merged marker
@@ -123,6 +167,9 @@ func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *Clai
 
 	case "pass", "cannot-tell":
 		sha, err := h.MergePR(ctx, res.PRNumber)
+		if errors.Is(err, host.ErrNotMergeable) {
+			return bounceUnmergeable(ctx, p, res, v)
+		}
 		if err != nil {
 			return fmt.Errorf("reconcile %s: merging PR #%d: %w", res.TicketKey, res.PRNumber, err)
 		}

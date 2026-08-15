@@ -513,3 +513,30 @@ func TestCIRedCommentNamesTheFailingJobs(t *testing.T) {
 		t.Errorf("marker jobs = %q, want the failing set — a later pass reads markers, not prose", got)
 	}
 }
+
+// Three conflicts is a sequencing problem, not a stale branch. Without a
+// bound, an active main and a slow ticket loop between Reconciling and
+// the queue forever, burning a full agent run each pass. Looser than the
+// reconcile-bounce rule at two, because that one counts findings about
+// the work and this one counts other people's merges.
+func TestThirdMergeConflictBlocks(t *testing.T) {
+	conflict := func(n string) func(*Ticket) {
+		return withComment(marker.MergeConflict, map[string]string{"pr": "5", "attempt": n})
+	}
+	two := snap(tk("T1", protocol.ReadyForRework, conflict("1"), conflict("2")))
+	if a := find(Sweep(two), ActTransition, "T1"); a != nil && a.To == protocol.Blocked {
+		t.Error("blocked on the second conflict; main moving twice while one ticket lands is ordinary")
+	}
+
+	three := snap(tk("T1", protocol.ReadyForRework, conflict("1"), conflict("2"), conflict("3")))
+	a := find(Sweep(three), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want Blocked on the third conflict, got %v", a)
+	}
+	if got := a.Marker.Fields["from"]; got != string(protocol.ReadyForRework) {
+		t.Errorf("blocked marker from = %q, want ready_for_rework", got)
+	}
+	if !strings.Contains(a.Prose, "sequencing") {
+		t.Errorf("the comment blames the ticket rather than the ordering:\n%s", a.Prose)
+	}
+}

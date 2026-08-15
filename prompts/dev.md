@@ -53,6 +53,14 @@ the diff.
   could do and would rather not, and do not report it as a failure —
   a Blocked column where waiting and broken look the same stops telling
   anyone anything.
+- **A rework for a merge conflict is not a rework of the work.** When
+  the scope says reconciliation passed and the merge hit a conflict, the
+  diff already satisfied the ticket — something else landed first. Merge
+  `origin/main` in, resolve, keep both sides' intent, run the gates,
+  finish. Do not revisit the design, the argument or your own diff, and
+  do not take the conflict as evidence that something was wrong with
+  them. If a conflict cannot be resolved without changing what the
+  ticket decided, that is a push-back rather than a guess.
 - **A rework for red CI comes with the build's own output.** When the
   scope is a CI failure, the failing jobs and the tail of each one's log
   are in this prompt under their own heading — you do not have, and will

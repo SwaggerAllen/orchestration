@@ -335,6 +335,22 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 	// Second bounce from reconciliation: the queue ticket carries two
 	// bounce markers, and two failures to land the same scope is a design
 	// problem, not an implementation one.
+	// A branch that cannot land three times is not a stale branch any
+	// more: main is moving faster than this ticket can, and the fix is
+	// sequencing, which is the author's. Deliberately looser than the
+	// reconcile-bounce rule at two — that one counts findings about the
+	// work, and this one counts other people's merges, which is not the
+	// ticket's fault and should not be punished at the same rate. Some
+	// bound is needed all the same: without one, an active main and a
+	// slow ticket loop between Reconciling and the queue forever, with
+	// each pass burning a full agent run.
+	if t.State == protocol.ReadyForRework && len(markersOf(t, marker.MergeConflict)) >= 3 {
+		return block(t,
+			&marker.Marker{Kind: marker.MergeConflict, Fields: map[string]string{"escalated": "true"}},
+			"This branch has failed to merge three times: every reconciliation passed and every merge hit a conflict with work that landed first. That is a sequencing problem rather than a problem with the ticket — hold the competing work, or land this by hand (DESIGN §12).",
+			"third merge conflict")
+	}
+
 	if t.State == protocol.ReadyForRework && len(markersOf(t, marker.ReconcileBounce)) >= 2 {
 		return block(t, nil,
 			"Second bounce from reconciliation on the same ticket. This is a design problem, not an implementation one — Designing is the usual route from here (DESIGN §12).",

@@ -925,6 +925,21 @@ read and no author reliably remembers.
   plane's own failure-comment markers on the ticket — nothing else needs to be stored, and a
   marker can't be miscounted the way an agent's prose can. Two reds on one branch is rarely a
   flake; the author decides whether it's scope, design, or infrastructure.
+- **A passing reconciliation that cannot merge → the conflict comment, then `Ready for rework`.**
+  The branch conflicts with something that landed while the ticket was in flight. The verdict
+  stood: the work is right and the branch is stale, which are different problems with different
+  owners, and merging main into a branch is the one failure here a dev agent is unambiguously
+  equipped to fix. Previously the merge error aborted the run and the abort sent the ticket to
+  `Blocked` — the author's, exclusively, with no automatic way out. The comment is the scope
+  (§2.3) and says in as many words that the work is not in question, because a dev agent handed
+  a bounce reads it as a finding about the diff and will otherwise re-litigate a design that
+  just passed. Counted under its own marker, never as a reconcile bounce: that count escalates
+  because two failures to land the same scope is a design problem, and a conflict is not a
+  finding about the work at all. **Three conflicts on one ticket → `Blocked`**, looser than the
+  bounce rule on purpose — it counts other people's merges rather than this ticket's faults —
+  but bounded, because without a bound an active main and a slow ticket loop between
+  `Reconciling` and the queue forever, burning an agent run each pass. That one is sequencing,
+  and sequencing is the author's.
 - **Second bounce from reconciliation on the same ticket → `Blocked`**, not rework again. Two
   failures to land the same scope is a design problem, not an implementation one, and the
   author will usually route it to `Designing`. Counted the same way: reconciliation's bounce

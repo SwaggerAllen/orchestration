@@ -471,10 +471,19 @@ func (c *Client) MergePR(ctx context.Context, number int) (string, error) {
 		Merged bool   `json:"merged"`
 	}
 	if err := c.rest(ctx, http.MethodPut, path, map[string]any{"merge_method": "squash"}, &data); err != nil {
+		// 405 is GitHub's answer for "not mergeable"; 409 is the same
+		// answer when the head moved between the check and the merge.
+		// Recognised here rather than pre-checked with the `mergeable`
+		// field, which GitHub computes asynchronously and reports as
+		// null until it is ready — a pre-check races that, and the merge
+		// attempt does not.
+		if strings.Contains(err.Error(), "HTTP 405") || strings.Contains(err.Error(), "HTTP 409") {
+			return "", fmt.Errorf("%w: PR #%d: %v", host.ErrNotMergeable, number, err)
+		}
 		return "", err
 	}
 	if !data.Merged {
-		return "", fmt.Errorf("github: PR #%d not merged", number)
+		return "", fmt.Errorf("%w: PR #%d: GitHub reported it unmerged", host.ErrNotMergeable, number)
 	}
 	return data.SHA, nil
 }
