@@ -37,7 +37,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: check the secrets are present
+      # Kept as a lint on this repository's copies even though the
+      # deploy no longer uploads them (see the deploy step). They remain
+      # the reference values a human types into the dashboard and into
+      # each sender's webhook settings, and the whitespace check below
+      # caught a real one: a trailing newline that verified against
+      # nothing while looking identical to the eye in both places.
+      #
+      # It proves the copies are well-formed. It cannot prove the Worker
+      # holds the same values — nothing here can, now — so a webhook
+      # rejecting with correct-looking secrets on both sides means
+      # comparing against the dashboard by hand.
+      - name: check this repo's reference copies of the secrets
         env:
           DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
           LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
@@ -109,16 +120,25 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
-          # Uploaded on every deploy, so the secret is never set by hand
-          # and never drifts from the value in this repo's settings.
-          secrets: |
-            DISPATCH_TOKEN
-            LINEAR_WEBHOOK_SECRET
-            WEBHOOK_SECRET
-        env:
-          DISPATCH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-          LINEAR_WEBHOOK_SECRET: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
+          # No `secrets:` here, and it is not an oversight.
+          #
+          # This Worker has Worker Versions enabled, and under versions a
+          # secret belongs to a *version* rather than to the Worker. The
+          # patch that `wrangler secret bulk` performs is refused
+          # outright — Cloudflare error 10215, "secret modification with
+          # Worker versions" — so every deploy failed at the upload step
+          # with "0 secrets successfully uploaded, 3 failed" and never
+          # reached the deploy at all.
+          #
+          # https://developers.cloudflare.com/workers/observability/errors/#secret-modification-with-worker-versions-10215
+          #
+          # What this costs is the property the upload existed for: the
+          # Worker's secrets no longer come from this repository, so the
+          # two can drift. What replaces it is that secrets carry forward
+          # from the previous version automatically, so they are set once
+          # in the dashboard and survive every deploy — which is the same
+          # guarantee from the other direction, and the reason a failed
+          # deploy cannot clear them.
 
       - name: what was deployed
         run: |

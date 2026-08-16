@@ -109,12 +109,18 @@ warning naming all of it, so the degradation is at least loud.
   pipeline-sweep.yml/dispatches`. Write is required because starting a
   workflow is a write; the token can start sweeps and touch nothing
   else.
-- Lives **twice, from one source**: as an Actions secret on this repo,
-  which is where you set it, and as a Worker secret that the
-  `worker-deploy` workflow uploads from it on every deploy. Setting the
-  Worker's copy by hand is what lets the two drift; letting the deploy
-  carry it means there is only ever one value to change. Named without
-  a `GITHUB_` prefix because Actions reserves that prefix.
+- Lives **twice**: as an Actions secret on this repo, and as a Worker
+  secret set in the Cloudflare dashboard. The deploy used to upload the
+  first into the second, so there was only one value to change — that
+  stopped working when the Worker gained Worker Versions, under which a
+  secret belongs to a version and `wrangler secret bulk` is refused
+  (error 10215). Set the Worker's copy in the dashboard: Workers →
+  `pipeline-metronome` → Settings → Variables and Secrets. It carries
+  forward to every later version automatically, which is also why a
+  failed deploy can never clear it. The repo's copy is now a reference
+  value the deploy lints rather than a source it publishes, so changing
+  one means changing both. Named without a `GITHUB_` prefix because
+  Actions reserves that prefix.
 - One shared token is the recommended shape (see step 7). It is the
   least powerful credential in the system — the project repos' own
   workflows already hold contents:write, merge rights and the model
