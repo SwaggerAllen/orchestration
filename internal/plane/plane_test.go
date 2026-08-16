@@ -11,6 +11,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
+	"github.com/SwaggerAllen/orchestration/internal/state"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
@@ -23,7 +24,17 @@ func world(t *testing.T) (*tracker.Memory, *config.Config, *Plane) {
 	if _, err := setup.Run(context.Background(), tr, cfg, false); err != nil {
 		t.Fatal(err)
 	}
-	return tr, cfg, New(tr, cfg)
+	return tr, cfg, New(tr, cfg).WithState(state.NewMemory())
+}
+
+// recordSeed writes what the harness would have written when it put a
+// ticket in this state. Without it the ticket carries no record and is
+// judged on nothing, which is correct behaviour and a useless fixture.
+func recordSeed(t *testing.T, p *Plane, id string, s protocol.State) {
+	t.Helper()
+	if err := p.State.Record(context.Background(), id, core.RecordedMove{To: s, Role: core.RoleControlPlane}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func stateID(t *testing.T, tr *tracker.Memory, cfg *config.Config, s protocol.State) string {
@@ -139,6 +150,10 @@ func TestLiveShapedLoopRevertsIllegalPromotion(t *testing.T) {
 	}
 
 	victim := seedIssue(t, tr, cfg, "Collider", protocol.DesignReview)
+	// The design pass left it here, and said so. The author's move below
+	// is then a divergence from that record — which is the whole way the
+	// sweep now tells the two apart.
+	recordSeed(t, p, victim.ID, protocol.DesignReview)
 	if err := tr.AddIssueLabel(ctx, cfg.Tracker.TeamID, victim.ID, "screen:home"); err != nil {
 		t.Fatal(err)
 	}

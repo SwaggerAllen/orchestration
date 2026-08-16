@@ -173,6 +173,22 @@ type Snapshot struct {
 	// Empty turns assignment off rather than assigning nobody, so a
 	// project without the mapping keeps whatever a human set.
 	AuthorID        string
+	// Recorded is what the pipeline last did to each ticket, keyed by
+	// ticket id, from the state store it owns.
+	//
+	// It exists because the tracker cannot answer "who moved this". The
+	// harness authenticates to Linear as the author on a solo workspace,
+	// so every pipeline write arrives wearing the author's identity, and
+	// a role read off that identity said "control plane" for the human's
+	// moves too — which is the one role the revert rules trust, so every
+	// §9 invariant was silently off.
+	//
+	// A ticket absent from this map is not judged. Every ticket that
+	// existed before the store did is absent, and treating "I have no
+	// record" as "a human did it" would revert the whole backlog on the
+	// first sweep.
+	Recorded map[string]RecordedMove
+
 	KillSwitch      bool
 	StaleClaimGrace time.Duration
 	DeployTimeout   time.Duration
@@ -226,6 +242,22 @@ func (t *Ticket) InFlight() bool {
 		return true
 	}
 	return false
+}
+
+// RecordedMove is one transition the pipeline made, as the pipeline
+// recorded it before making it. Write-ahead, deliberately: a record
+// describing a transition that then failed is harmless — the tracker
+// still shows the old state, so nothing matches it — while a transition
+// that landed without its record reads as a human's and gets reverted,
+// then re-made, then reverted again.
+type RecordedMove struct {
+	From protocol.State
+	To   protocol.State
+	// Role is which part of the pipeline made the move. The writer
+	// matrix judges roles, and the agents' moves have to be judged: a
+	// design pass promoting straight past Design review is exactly the
+	// thing §9 exists to catch.
+	Role Role
 }
 
 // HoldsMutex reports whether this ticket's screen and system labels are

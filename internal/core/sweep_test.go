@@ -13,13 +13,40 @@ import (
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func snap(tickets ...*Ticket) *Snapshot {
-	return &Snapshot{
+	s := &Snapshot{
 		Now:              t0,
 		CurrentMilestone: "M1",
 		StaleClaimGrace:  20 * time.Minute,
 		DeployTimeout:    30 * time.Minute,
 		Tickets:          tickets,
+		Recorded:         map[string]RecordedMove{},
 	}
+	// arrived() states an arrival the way a reader thinks about it —
+	// "came from X, moved by R". The sweep no longer reads that from the
+	// tracker's history, so translate it into the pipeline's own record,
+	// which is where the answer now comes from.
+	for _, t := range tickets {
+		if t.Last == nil {
+			continue
+		}
+		if pipelineRole(t.Last.Actor) {
+			// The pipeline made the move, so its record describes it.
+			s.Recorded[t.ID] = RecordedMove{From: t.Last.From, To: t.Last.To, Role: t.Last.Actor}
+			continue
+		}
+		// Somebody outside the pipeline made it, so the record stops
+		// where the pipeline left the ticket and the tracker has moved on.
+		s.Recorded[t.ID] = RecordedMove{To: t.Last.From, Role: RoleControlPlane}
+	}
+	return s
+}
+
+func pipelineRole(r Role) bool {
+	switch r {
+	case RoleDesign, RoleDev, RoleReconcile, RoleBoundary, RoleControlPlane, RoleCI:
+		return true
+	}
+	return false
 }
 
 func tk(key string, state protocol.State, mut ...func(*Ticket)) *Ticket {
@@ -797,5 +824,61 @@ func TestAFoldedTicketIsNotActedOnTwice(t *testing.T) {
 	}
 	if transitions != 1 {
 		t.Errorf("got %d transitions for one ticket in one pass, want 1", transitions)
+	}
+}
+
+// The bug this whole mechanism exists for. On a solo workspace the
+// harness holds the author's Linear key, so a role read off the tracker
+// identity answered "control plane" for the human's moves too — and that
+// is the one role the revert rules trust. Every §9 invariant was off.
+// The record answers from what the pipeline did, not from who it looked
+// like.
+func TestAHumanMoveIsJudgedEvenWhenItWearsThePipelinesIdentity(t *testing.T) {
+	victim := tk("T1", protocol.InProgress)
+	s := snap(victim)
+	// The pipeline left it in the queue; the tracker says In progress.
+	s.Recorded["T1"] = RecordedMove{From: protocol.DesignReview, To: protocol.ReadyForDev, Role: RoleControlPlane}
+
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForDev || a.Marker.Fields["rule"] != "claim" {
+		t.Fatalf("a hand-moved claim was not reverted: %v", a)
+	}
+}
+
+// And the converse, which is the failure mode of getting this wrong in
+// the other direction: the pipeline's own moves must not be reverted.
+func TestThePipelinesOwnMoveIsNotJudgedAsAHumans(t *testing.T) {
+	moved := tk("T1", protocol.InProgress)
+	s := snap(moved)
+	s.Recorded["T1"] = RecordedMove{From: protocol.ReadyForDev, To: protocol.InProgress, Role: RoleDev}
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
+		t.Errorf("the dev agent's own claim was reverted: %v", *a)
+	}
+}
+
+// An agent's move is recorded, and being recorded is not being excused.
+// A design pass promoting straight past Design review is precisely what
+// §9 exists to catch, and it is the pipeline doing it.
+func TestARecordedAgentMoveIsStillJudged(t *testing.T) {
+	skipped := tk("T1", protocol.ReadyForDev)
+	s := snap(skipped)
+	s.Recorded["T1"] = RecordedMove{From: protocol.Designing, To: protocol.ReadyForDev, Role: RoleDesign}
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.Marker.Fields["rule"] != "sign-off" {
+		t.Errorf("a design pass skipping review was not caught: %v", a)
+	}
+}
+
+// Every ticket that existed before the store did has no record. Reading
+// that as "a human did it" would revert the entire backlog on the first
+// sweep after deploy, which is the one migration failure that cannot be
+// undone by waiting.
+func TestATicketWithNoRecordIsNotJudged(t *testing.T) {
+	s := snap(tk("T1", protocol.InProgress))
+	delete(s.Recorded, "T1")
+	for _, a := range Sweep(s) {
+		if a.Kind == ActTransition && a.TicketID == "T1" && strings.HasPrefix(a.Reason, "invariant") {
+			t.Errorf("an unrecorded ticket was judged: %v", a)
+		}
 	}
 }

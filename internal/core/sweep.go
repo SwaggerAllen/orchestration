@@ -130,6 +130,13 @@ func (s *Snapshot) working() *Snapshot {
 		c := *t
 		w.Tickets[i] = &c
 	}
+	// Copied too, and not an afterthought: fold writes it, and a shared
+	// map would have the pass rewriting the caller's record of what the
+	// pipeline has done.
+	w.Recorded = make(map[string]RecordedMove, len(s.Recorded))
+	for k, v := range s.Recorded {
+		w.Recorded[k] = v
+	}
 	return &w
 }
 
@@ -149,6 +156,12 @@ func (w *Snapshot) fold(acts []Action, moved map[string]bool) {
 				continue
 			}
 			t.Last = &Transition{From: t.State, To: a.To, Actor: RoleControlPlane, At: w.Now}
+			// The record moves with the state. A later rule reading a
+			// folded ticket must see the sweep's own move as the sweep's,
+			// not as a divergence from a record that no longer describes
+			// it — which is what the real store will hold once Execute
+			// writes the same thing ahead of the same transition.
+			w.Recorded[a.TicketID] = RecordedMove{From: t.State, To: a.To, Role: RoleControlPlane}
 			t.State = a.To
 			t.StateSince = w.Now
 		case ActRemoveLabel:
@@ -210,14 +223,16 @@ func pipelineDepth(s protocol.State) int {
 // pre-transition hook. Only the last transition is judged — once reverted,
 // the revert becomes the last transition and the rule cannot re-fire.
 func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
-	last := t.Last
+	last, known := arrival(s, t)
 	switch {
-	case last == nil, last.To != t.State:
-		// No arrival to judge, or the snapshot is mid-change; the next
-		// sweep sees a consistent picture.
+	case !known:
+		// Nothing recorded for this ticket, so there is no arrival this
+		// sweep can attribute. Not judged — see Snapshot.Recorded.
 		return nil, false
 	case last.Actor == RoleControlPlane:
 		// The sweep trusts its own writes, or reverts would oscillate.
+		// Meaningful now that the role comes from the record rather than
+		// from a tracker identity the pipeline shares with the author.
 		return nil, false
 	case t.IsBoundary():
 		// The boundary ticket has its own state meanings and its own
@@ -266,6 +281,40 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 		return revert(rule, prose), true
 	}
 	return nil, false
+}
+
+// arrival is the transition this sweep judges, and who made it.
+//
+// It reads the pipeline's own record rather than the tracker's history,
+// because the tracker cannot answer the question. On a solo workspace
+// the harness holds the author's API key, so every pipeline write is
+// stamped with the author's identity — and resolving a role from that
+// identity returned "control plane" for the human's moves too, which is
+// the one role these rules trust. Every §9 invariant was off, silently,
+// and a ticket promoted past a held mutex stood because of it.
+//
+// So the pipeline says what it did, and the tracker says where the
+// ticket is. Two facts, and the comparison is the answer:
+//
+//   - the record's destination is where the ticket is → the pipeline
+//     made the last move, and the record carries the edge and the role
+//   - it is not → someone else moved it, from where the pipeline left it
+//     to where it now is, and on a solo workspace that someone is the
+//     author
+//
+// Note what this is not: it is not "the pipeline's moves are legal".
+// An agent's move is recorded with the agent's role and then judged like
+// any other — a design pass promoting straight past Design review is
+// precisely what §9 exists to catch, and it is the pipeline doing it.
+func arrival(s *Snapshot, t *Ticket) (*Transition, bool) {
+	rec, ok := s.Recorded[t.ID]
+	if !ok {
+		return nil, false
+	}
+	if rec.To == t.State {
+		return &Transition{From: rec.From, To: rec.To, Actor: rec.Role, At: t.StateSince}, true
+	}
+	return &Transition{From: rec.To, To: t.State, Actor: RoleAuthor, At: t.StateSince}, true
 }
 
 // writerViolation applies the "written by" column of the state table. It
