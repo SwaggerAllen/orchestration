@@ -32,6 +32,24 @@ type PR struct {
 	URL     string
 }
 
+// MergeState is whether a PR's branch can land on its base.
+//
+// Tri-state, and the third value is the whole reason this is not a bool.
+// GitHub computes mergeability in the background and answers `null`
+// until it has — so "no" and "not yet" arrive as the same absence, and a
+// caller that reads absence as a conflict will bounce a healthy ticket
+// the first time it asks about a freshly pushed branch.
+type MergeState string
+
+const (
+	// MergeUnknown: GitHub has not computed it yet. Not a conflict, and
+	// must never be acted on as one.
+	MergeUnknown MergeState = ""
+	MergeClean   MergeState = "clean"
+	// MergeConflicted: the branch conflicts with its base.
+	MergeConflicted MergeState = "conflicted"
+)
+
 // CheckStatus aggregates a commit's check runs.
 type CheckStatus string
 
@@ -88,6 +106,14 @@ type Host interface {
 	ListAgentRuns(ctx context.Context) ([]AgentRun, error)
 	ListOpenPRs(ctx context.Context) ([]PR, error)
 	ChecksFor(ctx context.Context, headSHA string) (Checks, error)
+	// MergeStateFor reports whether a PR can land on its base.
+	//
+	// Separate from ListOpenPRs because the list endpoint does not carry
+	// the field at all — GitHub computes it per PR, on demand, and only
+	// the single-PR response has it. Called for the same narrow set as
+	// ChecksFor, tickets sitting in Checks, so the snapshot stays a
+	// bounded number of calls.
+	MergeStateFor(ctx context.Context, number int) (MergeState, error)
 	// FailedJobLogs returns the failing jobs for a head SHA with the tail
 	// of each one's log. Separate from ChecksFor because every sweep calls
 	// that one for every open PR, and logs are fetched for exactly one

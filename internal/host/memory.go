@@ -87,6 +87,19 @@ func (m *Memory) ChecksFor(_ context.Context, headSHA string) (Checks, error) {
 	return m.CheckState[headSHA], nil
 }
 
+// MergeStateFor answers from the same Unmergeable set MergePR refuses
+// from, so a fake cannot be set up to report a clean merge and then
+// refuse one — the state the sweep reads and the state the merge hits
+// are one fact.
+func (m *Memory) MergeStateFor(_ context.Context, number int) (MergeState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Unmergeable[number] {
+		return MergeConflicted, nil
+	}
+	return MergeClean, nil
+}
+
 func (m *Memory) FailedJobLogs(_ context.Context, headSHA string) ([]JobLog, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

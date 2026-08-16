@@ -241,6 +241,42 @@ func (c *Client) ListOpenPRs(ctx context.Context) ([]host.PR, error) {
 	return out, nil
 }
 
+// MergeStateFor reads the `mergeable` field, which only the single-PR
+// response carries.
+//
+// MergePR deliberately does not pre-check this, and the reason there
+// still holds: the field is computed asynchronously, so a pre-check
+// races a merge that would have succeeded. This call is not that. It
+// diagnoses a ticket that has been sitting in Checks — where the
+// question is not "may I merge now" but "is this branch ever going to
+// get a verdict", and by the time a sweep asks, GitHub computed the
+// answer long ago. `null` is still reported as unknown and acted on by
+// nobody.
+func (c *Client) MergeStateFor(ctx context.Context, number int) (host.MergeState, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls/%d", c.owner, c.repo, number)
+	var data struct {
+		Mergeable *bool `json:"mergeable"`
+		// "dirty" is GitHub's word for a conflict. Read as well as
+		// `mergeable`, because the two are not the same question:
+		// mergeable_state also carries "blocked" (a required check is
+		// failing) and "behind", neither of which is a conflict.
+		MergeableState string `json:"mergeable_state"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return host.MergeUnknown, err
+	}
+	if data.MergeableState == "dirty" {
+		return host.MergeConflicted, nil
+	}
+	if data.Mergeable == nil {
+		return host.MergeUnknown, nil
+	}
+	if !*data.Mergeable {
+		return host.MergeConflicted, nil
+	}
+	return host.MergeClean, nil
+}
+
 func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, error) {
 	runs, err := c.checkRuns(ctx, headSHA)
 	if err != nil {

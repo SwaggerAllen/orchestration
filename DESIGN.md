@@ -968,6 +968,21 @@ read and no author reliably remembers.
   but bounded, because without a bound an active main and a slow ticket loop between
   `Reconciling` and the queue forever, burning an agent run each pass. That one is sequencing,
   and sequencing is the author's.
+- **A conflicted branch in `Checks` → the same conflict comment, then `Ready for rework`**,
+  without waiting for CI. This is the same event as the rule above, caught earlier, and it has
+  to be caught earlier because a conflicted PR never reaches the merge attempt at all: GitHub
+  builds no merge commit for one, so the `pull_request` run never starts, so no verdict ever
+  arrives — and `Checks` has no agent, so the stale-claim rule does not cover it either. A
+  ticket in that position had no exit whatsoever. Not blocked, not timing out; parked. It is
+  read from the PR's own merge state, which is a **tri-state**: GitHub computes it in the
+  background and answers "not yet" the same way it answers nothing at all, so *unknown* must
+  never be acted on as a conflict, or every freshly pushed branch bounces the moment it arrives.
+  A green-but-conflicted PR is bounced here too rather than promoted, since promoting it spends
+  a whole reconcile pass to reach the same state; reconciliation's own bounce stays for the case
+  no snapshot can see, main moving between the read and the merge. Both paths write the **same
+  marker**, so the three-conflict escalation counts them together — three conflicts on one
+  ticket is a sequencing problem whichever half noticed them, and two counters would each stop
+  at two.
 - **Second bounce from reconciliation on the same ticket → `Blocked`**, not rework again. Two
   failures to land the same scope is a design problem, not an implementation one, and the
   author will usually route it to `Designing`. Counted the same way: reconciliation's bounce
