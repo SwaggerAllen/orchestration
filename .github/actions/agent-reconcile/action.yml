@@ -20,6 +20,14 @@ inputs:
   linear_api_key:
     description: Linear API key
     required: true
+  pipeline_state_token:
+    description: >
+      Secret for the pipeline's own move record (DESIGN 9). Every
+      transition is written down before it is made, and a project
+      without this records nothing — which turns the invariants off
+      rather than failing, so its absence is worth noticing.
+    required: false
+    default: ""
   github_token:
     # Described in prose, not as an expression: an action's metadata is
     # templated and the github context does not exist there, so an
@@ -68,6 +76,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         pipeline agent claim \
@@ -115,6 +124,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         pipeline agent finish \
@@ -128,6 +138,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         pipeline agent abort \

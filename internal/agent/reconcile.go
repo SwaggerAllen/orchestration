@@ -46,6 +46,7 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Mode:        "reconcile",
+		Role:        core.RoleReconcile,
 		State:       t.State,
 		Scope:       t.Description,
 		Description: t.Description,
@@ -143,7 +144,7 @@ The verdict that stood, for context:
 	if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
 		return err
 	}
-	return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework)
+	return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework, core.RoleReconcile)
 }
 
 // FinishReconcile lands the three outcomes (DESIGN §11, §13):
@@ -163,7 +164,7 @@ func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *Clai
 		// The bounce comment is now the newest comment, so it is the
 		// scope the rework claim will serve (DESIGN §2.3). The sweep
 		// escalates a second bounce to Blocked (DESIGN §12).
-		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework)
+		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework, core.RoleReconcile)
 
 	case "pass", "cannot-tell":
 		sha, err := h.MergePR(ctx, res.PRNumber)
@@ -214,7 +215,7 @@ func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *Clai
 			}
 			fmt.Fprintln(os.Stderr, "warning: "+note)
 		}
-		return p.TransitionTicket(ctx, res.TicketID, protocol.Merged)
+		return p.TransitionTicket(ctx, res.TicketID, protocol.Merged, core.RoleReconcile)
 	}
 	return fmt.Errorf("reconcile %s: unknown outcome %q", res.TicketKey, v.Outcome)
 }

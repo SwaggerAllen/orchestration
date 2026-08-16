@@ -134,6 +134,10 @@ func (w *World) stepSeed(raw json.RawMessage) error {
 		t.Run = &core.Run{ID: fmt.Sprintf("run_%d", w.nextRun), Kind: kind, Live: p.Run.Live, EndedAt: w.Clock}
 	}
 	w.Tickets = append(w.Tickets, t)
+	// Seeded by the harness, so the harness knows about it: a ticket
+	// with no record is not judged, and a scenario about the invariants
+	// needs its tickets judged.
+	w.Record(t.ID, core.RecordedMove{To: t.State, Role: core.RoleControlPlane})
 	return nil
 }
 
@@ -161,9 +165,28 @@ func (w *World) stepTransition(raw json.RawMessage) error {
 		return err
 	}
 	t.Last = &core.Transition{From: t.State, To: to, Actor: actor, At: w.Clock}
+	// The world models the state store too, because the sweep now reads
+	// it rather than the tracker's history. A pipeline actor writes its
+	// move down before making it; the author writes nothing, and that
+	// silence is exactly the divergence the sweep detects.
+	if pipelineRole(actor) {
+		w.Record(t.ID, core.RecordedMove{From: t.State, To: to, Role: actor})
+	}
 	t.State = to
 	t.StateSince = w.Clock
 	return nil
+}
+
+// pipelineRole reports whether a role is one the harness writes as. The
+// author is not: nothing the author does goes through the harness, which
+// is the whole reason the record can tell them apart.
+func pipelineRole(r core.Role) bool {
+	switch r {
+	case core.RoleDesign, core.RoleDev, core.RoleReconcile, core.RoleBoundary,
+		core.RoleControlPlane, core.RoleCI:
+		return true
+	}
+	return false
 }
 
 func (w *World) stepComment(raw json.RawMessage) error {

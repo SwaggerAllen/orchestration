@@ -76,7 +76,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	plan := &BoundaryPlan{
 		ClaimResult: ClaimResult{
 			TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-			Mode: "boundary", Description: t.Description, State: t.State,
+			Mode: "boundary", Role: core.RoleBoundary, Description: t.Description, State: t.State,
 		},
 		Milestone:       t.Milestone,
 		Done:            map[string]bool{},
@@ -114,7 +114,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	// non-asks the same way design is (DESIGN §4) — a debt scan that
 	// files work the author already refused is worse than one that files
 	// nothing.
-	plan.NonAsks = claimNonAsks(p.Config)
+	plan.NonAsks = ClaimNonAsks(p.Config)
 
 	dm := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
 		"id":   dispatchID,
@@ -204,6 +204,36 @@ type Proposal struct {
 	// Dedupe is milestone+finding; a re-run files nothing twice because
 	// this key is checked against existing issues (DESIGN §10).
 	Dedupe string `json:"dedupe"`
+	// Subject is the concrete thing this proposal is about, named as the
+	// repository names it: a file path, a config key, a mix task, a gate
+	// line, a doc section, a module. The key is derived from it.
+	//
+	// Dedupe alone was the model's phrasing for one scan, and phrasing is
+	// a choice rather than a fact — so two scans of one tree wrote two
+	// keys for one finding and both filed. Measured on ORC-45: four
+	// tickets for two findings, keyed `declared-gate-set-not-armed-in-ci`
+	// and `arm-the-unarmed-gate-set` for the same gate work.
+	//
+	// A subject is not immune to rewording, but it is a fact about the
+	// repository rather than a sentence about the finding, and two scans
+	// naming one gate agree far more readily than two scans describing
+	// it. Title similarity was measured as an alternative and rejected:
+	// on the real ORC-45 pairs it scores 0.08 and 0.19 against a maximum
+	// of 0.07 among unrelated proposals from the same scan, which is a
+	// margin of one hundredth on a sample of two — a coincidence rather
+	// than a threshold, and it vanishes entirely under stemming.
+	Subject string `json:"subject"`
+}
+
+// dedupeKey is the key a proposal is filed under: derived from the
+// subject when the scan named one, and falling back to the model's own
+// key when it did not, so an older scan replayed by a resume still
+// dedupes against what it filed.
+func dedupeKey(milestone string, p Proposal) string {
+	if strings.TrimSpace(p.Subject) == "" {
+		return p.Dedupe
+	}
+	return slug(milestone) + "/" + slug(p.Subject)
 }
 
 // RankEntry re-ranks one existing ticket (grooming, DESIGN §10 step 7).
@@ -348,26 +378,53 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		if err != nil {
 			return err
 		}
-		existing := map[string]bool{}
 		keyToID := map[string]string{}
 		for _, t := range snap.Tickets {
 			keyToID[t.Key] = t.ID
-			for _, line := range strings.Split(t.Description, "\n") {
-				m, ok, err := marker.Parse(line)
-				if err == nil && ok && m.Kind == marker.TriageProposal {
-					existing[m.Fields["dedupe"]] = true
-				}
+		}
+		// Read from the tracker, not from the snapshot. Build skips
+		// triage-category states and FileTriageProposal files into
+		// exactly those, so a dedupe set assembled from snap.Tickets
+		// could never contain a filed proposal — the check was inert
+		// rather than weak, and two identical keys would have made two
+		// tickets as readily as two different ones did.
+		filedAlready, err := p.ListTriageProposals(ctx)
+		if err != nil {
+			return fmt.Errorf("boundary file: reading open proposals: %w", err)
+		}
+		existing := map[string]bool{}
+		for _, tp := range filedAlready {
+			if tp.Dedupe != "" {
+				existing[tp.Dedupe] = true
 			}
 		}
 
 		filed, skipped := 0, 0
+		var failures []string
 		for _, prop := range ps.Proposals {
-			if existing[prop.Dedupe] {
+			key := dedupeKey(plan.Milestone, prop)
+			if existing[key] {
 				skipped++
 				continue
 			}
-			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, prop.Dedupe); err != nil {
-				return fmt.Errorf("boundary file: %q: %w", prop.Title, err)
+			// Held so the rest of this scan dedupes against it too: two
+			// proposals from one scan can name one subject.
+			existing[key] = true
+			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, key); err != nil {
+				// Collected, not returned. Returning on the first error
+				// left the tickets already filed in the tracker while the
+				// step comment said the step never ran — the audit trail
+				// and the tracker disagreeing, with no way to learn which
+				// proposals landed except reading the new tickets and
+				// matching dedupe markers by hand. It also made the blast
+				// radius arbitrary: a bad proposal first files nothing, a
+				// bad proposal last files everything, and nothing chooses
+				// where it sits.
+				//
+				// All problems at once, which is the posture the audit
+				// takes for the same reason.
+				failures = append(failures, fmt.Sprintf("%q: %v", prop.Title, err))
+				continue
 			}
 			filed++
 		}
@@ -379,7 +436,8 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 				continue
 			}
 			if err := p.Tracker.UpdateIssuePriority(ctx, id, r.Priority); err != nil {
-				return fmt.Errorf("boundary file: ranking %s: %w", r.Key, err)
+				failures = append(failures, fmt.Sprintf("ranking %s: %v", r.Key, err))
+				continue
 			}
 			ranked++
 		}
@@ -387,8 +445,21 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		if len(unknown) > 0 {
 			prose += fmt.Sprintf(" Unknown keys skipped: %v.", unknown)
 		}
+		if len(failures) > 0 {
+			prose += fmt.Sprintf("\n\n%d did not land, and this comment is the record of which:\n\n- %s",
+				len(failures), strings.Join(failures, "\n- "))
+		}
+		// Written whatever happened, because the step *did* run and the
+		// tracker already shows what it did. The failures ride in the
+		// same comment rather than aborting the run: everything above
+		// landed, and a resume would otherwise re-derive that from the
+		// tickets themselves.
 		if err := stepDone(ctx, p, plan, StepFile, prose); err != nil {
 			return err
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("boundary file: %d of %d proposals did not land (recorded on the ticket): %s",
+				len(failures), len(ps.Proposals), strings.Join(failures, "; "))
 		}
 	}
 
@@ -398,7 +469,7 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 	if err := ProposeComposition(ctx, p, plan, now); err != nil {
 		return fmt.Errorf("boundary file: composition: %w", err)
 	}
-	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview)
+	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview, core.RoleBoundary)
 }
 
 func slug(s string) string {

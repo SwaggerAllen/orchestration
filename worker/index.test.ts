@@ -11,6 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
+import { SweepDebounce } from "./debounce.ts";
 import {
   isFresh,
   parseProjects,
@@ -290,4 +291,131 @@ test("a failed signature says which failure it was", async (t) => {
     const got = await signatureDiagnosis(body, await ghSign(body, GH_SECRET), GH_SECRET + "\n");
     assert.match(got, /leading or trailing whitespace/);
   });
+});
+
+// ---------------------------------------------------------------------
+// The trailing debounce.
+//
+// A tiny stand-in for the Durable Object storage API: enough to assert
+// the two properties that matter, and nothing more. The real runtime is
+// exercised by deploying, which no unit test substitutes for.
+// ---------------------------------------------------------------------
+
+function fakeState() {
+  const map = new Map<string, unknown>();
+  let alarm: number | null = null;
+  return {
+    fired: 0,
+    storage: {
+      put: async (k: string, v: unknown) => void map.set(k, v),
+      get: async (k: string) => map.get(k),
+      delete: async (k: string) => void map.delete(k),
+      getAlarm: async () => alarm,
+      setAlarm: async (t: number) => void (alarm = t),
+    },
+    clearAlarm() {
+      alarm = null;
+    },
+    hasAlarm() {
+      return alarm !== null;
+    },
+  };
+}
+
+const pending = JSON.stringify({
+  repository: "owner/repo",
+  workflow: "pipeline-sweep.yml",
+  ref: "main",
+});
+
+function post() {
+  return new Request("https://debounce/sweep", { method: "POST", body: pending });
+}
+
+test("a burst arms one alarm, not one per event", async () => {
+  const state = fakeState();
+  const dobj = new SweepDebounce(state as never, { DISPATCH_TOKEN: "t" });
+
+  const first = await dobj.fetch(post());
+  assert.equal(await first.text(), "armed\n");
+  assert.ok(state.hasAlarm(), "the first event did not arm the window");
+
+  // Five more inside the window. Each is recorded; none arms anything.
+  for (let i = 0; i < 5; i++) {
+    const res = await dobj.fetch(post());
+    assert.equal(await res.text(), "coalesced\n", `event ${i + 2} was not coalesced`);
+  }
+});
+
+test("the alarm dispatches exactly once for the whole burst", async () => {
+  const state = fakeState();
+  const dobj = new SweepDebounce(state as never, { DISPATCH_TOKEN: "t" });
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls.push(String(url));
+    return new Response(null, { status: 204 });
+  }) as never;
+  try {
+    for (let i = 0; i < 6; i++) {
+      await dobj.fetch(post());
+    }
+    await dobj.alarm();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(calls.length, 1, "six webhooks produced more than one dispatch");
+  assert.match(calls[0], /owner\/repo\/actions\/workflows\/pipeline-sweep\.yml\/dispatches/);
+});
+
+// A rolling window would let a long enough burst defer the sweep
+// indefinitely — "wait for quiet" becoming "wait for the end of the
+// workday" on a busy project. The alarm fires a fixed time after the
+// FIRST event of a burst and later events must not push it back.
+test("later events in a burst do not push the alarm back", async () => {
+  const state = fakeState();
+  const dobj = new SweepDebounce(state as never, { DISPATCH_TOKEN: "t" });
+  await dobj.fetch(post());
+  const armedAt = await state.storage.getAlarm();
+  for (let i = 0; i < 3; i++) {
+    await dobj.fetch(post());
+  }
+  assert.equal(await state.storage.getAlarm(), armedAt, "the window was extended by a later event");
+});
+
+// After the alarm has fired, the next event starts a fresh window
+// rather than being swallowed by the one that already went.
+test("the window rearms after it fires", async () => {
+  const state = fakeState();
+  const dobj = new SweepDebounce(state as never, { DISPATCH_TOKEN: "t" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(null, { status: 204 })) as never;
+  try {
+    await dobj.fetch(post());
+    await dobj.alarm();
+    state.clearAlarm(); // the runtime clears a fired alarm
+    const res = await dobj.fetch(post());
+    assert.equal(await res.text(), "armed\n", "the next burst was swallowed");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// An alarm with nothing pending must not dispatch. It is how a fired
+// alarm and a lost write tell themselves apart.
+test("an alarm with no pending sweep dispatches nothing", async () => {
+  const state = fakeState();
+  const dobj = new SweepDebounce(state as never, { DISPATCH_TOKEN: "t" });
+  let called = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    called = true;
+    return new Response(null, { status: 204 });
+  }) as never;
+  try {
+    await dobj.alarm();
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(called, false, "an empty alarm dispatched a sweep");
 });

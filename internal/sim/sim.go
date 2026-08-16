@@ -51,8 +51,20 @@ type World struct {
 	Tickets          []*core.Ticket
 	CurrentMilestone string
 	KillSwitch       bool
+	// Recorded is the world's copy of the pipeline's own state store —
+	// the record of what the harness wrote, which is how the sweep tells
+	// its own moves from the author's now that both wear one identity.
+	Recorded map[string]core.RecordedMove
 
 	nextRun int
+}
+
+// Record writes the world's stand-in for the state store.
+func (w *World) Record(ticketID string, m core.RecordedMove) {
+	if w.Recorded == nil {
+		w.Recorded = map[string]core.RecordedMove{}
+	}
+	w.Recorded[ticketID] = m
 }
 
 // Result is what a run reports.
@@ -117,6 +129,7 @@ func (w *World) snapshot() *core.Snapshot {
 		StaleClaimGrace:  w.Config.StaleClaimGrace.Duration(),
 		DeployTimeout:    w.Config.Deploy.Timeout.Duration(),
 		Tickets:          w.Tickets,
+		Recorded:         w.Recorded,
 	}
 }
 
@@ -140,6 +153,9 @@ func (w *World) apply(acts []core.Action) error {
 			if err != nil {
 				return err
 			}
+			// Write-ahead, as the real Execute does: the record goes
+			// down before the move.
+			w.Record(t.ID, core.RecordedMove{From: t.State, To: a.To, Role: core.RoleControlPlane})
 			t.Last = &core.Transition{From: t.State, To: a.To, Actor: core.RoleControlPlane, At: w.Clock}
 			t.State = a.To
 			t.StateSince = w.Clock

@@ -1,0 +1,80 @@
+# Project stub: admin. Copy into the project repo's .github/workflows/.
+#
+# The operations the author runs by hand, from wherever they are. Both
+# are things that used to need a terminal against a checkout of the
+# project, which meant they did not happen while the person who needed
+# them was holding a phone — and both are things you reach for exactly
+# when something is already wrong.
+#
+# Dispatch-only, and idempotent by construction: setup creates what is
+# missing and touches nothing else, ingest adopts only tickets with no
+# record and never overwrites one.
+name: pipeline-admin
+run-name: "pipeline: ${{ inputs.task }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to run
+        required: true
+        type: choice
+        options: [setup, state-ingest]
+      apply:
+        description: >
+          Off is a dry run. Leave it off first — both tasks print exactly
+          what they would do, and reading that is cheaper than undoing it.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read # the config
+
+jobs:
+  admin:
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      PIPELINE_STATE_TOKEN: ${{ secrets.PIPELINE_STATE_TOKEN }}
+      # setup probes the deploy endpoint at the end, which is the whole
+      # reason it catches a wrong app id at hookup instead of on the
+      # first ticket to reach Merged.
+      DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+        with:
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+
+      # Both write their report to the run summary, so the answer is on
+      # the run page rather than a step deep in a log.
+      - name: run
+        env:
+          TASK: ${{ inputs.task }}
+          APPLY: ${{ inputs.apply }}
+        run: |
+          set -euo pipefail
+          CFG="$GITHUB_WORKSPACE/pipeline.config.json"
+          case "$TASK" in
+          setup)
+            if [ "$APPLY" = "true" ]; then
+              pipeline setup --config "$CFG"
+            else
+              pipeline setup --config "$CFG" --dry-run
+            fi
+            ;;
+          state-ingest)
+            if [ "$APPLY" = "true" ]; then
+              pipeline state ingest --config "$CFG"
+            else
+              pipeline state ingest --config "$CFG" --dry-run
+            fi
+            ;;
+          *)
+            echo "::error::unknown task $TASK"
+            exit 1
+            ;;
+          esac

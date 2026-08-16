@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -14,11 +16,28 @@ import (
 // TransitionTicket moves one ticket, resolving the protocol state through
 // the config's name table. The agent harness uses this for claims and
 // hand-offs; sweep actions go through Execute instead.
-func (p *Plane) TransitionTicket(ctx context.Context, ticketID string, to protocol.State) error {
+// The role is a parameter rather than a field on the Plane so that no
+// caller can move a ticket without saying who is moving it. Every
+// transition the pipeline makes is recorded under a role, and the
+// writer matrix judges roles — a move recorded as nobody is a move the
+// next sweep reads as the author's and reverts.
+func (p *Plane) TransitionTicket(ctx context.Context, ticketID string, to protocol.State, role core.Role) error {
 	if err := p.resolveStates(ctx); err != nil {
 		return err
 	}
-	return p.Tracker.UpdateIssueState(ctx, ticketID, p.idByState[to])
+	// Write-ahead, and fatal if it fails: see (*Plane).record.
+	if err := p.record(ctx, ticketID, to, role); err != nil {
+		return fmt.Errorf("transition %s: recording the move before making it: %w", ticketID, err)
+	}
+	if err := p.Tracker.UpdateIssueState(ctx, ticketID, p.idByState[to]); err != nil {
+		return err
+	}
+	// So a second transition in the same process records the right edge
+	// rather than the one the snapshot was built with.
+	if p.stateOf != nil {
+		p.stateOf[ticketID] = to
+	}
+	return nil
 }
 
 // CommentTicket posts one comment body verbatim.
@@ -150,4 +169,46 @@ func (p *Plane) PRForTicket(ctx context.Context, ticketKey string) *host.PR {
 		return nil
 	}
 	return prForTicket(prs, ticketKey)
+}
+
+// TriageProposal is a proposal already sitting in Triage.
+type TriageProposal struct {
+	Key    string
+	Title  string
+	Dedupe string
+}
+
+// ListTriageProposals reads the proposals already filed, straight from
+// the tracker rather than from a snapshot.
+//
+// It has to bypass the snapshot, and the reason is the whole bug. Build
+// skips tickets in a triage-category state — deliberately, because the
+// protocol does not map them — and FileTriageProposal files into exactly
+// those states. So a dedupe set assembled from snap.Tickets could never
+// contain a filed proposal: the check was not weak, it was inert, and
+// two identical keys would have produced two tickets just as readily as
+// two different ones did.
+func (p *Plane) ListTriageProposals(ctx context.Context) ([]TriageProposal, error) {
+	if err := p.resolveStates(ctx); err != nil {
+		return nil, err
+	}
+	issues, err := p.Tracker.ListIssues(ctx, p.Config.Tracker.TeamID, p.Config.Tracker.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	var out []TriageProposal
+	for _, i := range issues {
+		if !p.triageStates[i.StateID] {
+			continue
+		}
+		tp := TriageProposal{Key: i.Key, Title: i.Title}
+		for _, line := range strings.Split(i.Description, "\n") {
+			m, ok, err := marker.Parse(line)
+			if err == nil && ok && m.Kind == marker.TriageProposal {
+				tp.Dedupe = m.Fields["dedupe"]
+			}
+		}
+		out = append(out, tp)
+	}
+	return out, nil
 }

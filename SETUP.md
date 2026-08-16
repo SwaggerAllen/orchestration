@@ -10,10 +10,15 @@ scratch environment (ORC team → `orchestration-dummy`).
   per target repo (**Test orchestration** for the dummy; the first real
   project gets its own).
 - ✅ An API key: Settings → Security & access → **Personal API keys**.
-  One key is fine to start — the config's solo-workspace exception maps
-  it to both `author` and `controlplane`, which means the pipeline
-  trusts everything that identity does. Give agents their own
-  identities later if you want the writer matrix enforcing against you.
+  One key is fine, and stays fine. The config's solo-workspace exception
+  maps it to both `author` and `controlplane`, so every write the
+  pipeline makes wears your identity — which used to mean the writer
+  matrix trusted everything you did, silently, because "control plane"
+  is the one role the revert rules do not judge. It no longer does: the
+  pipeline records its own moves in the state store (§7c), and the sweep
+  compares that record against the tracker rather than asking who an
+  actor was. Separate Linear accounts per role would answer the same
+  question at a seat each per month.
 - ☐ **Milestones**: the boundary flow needs them. In the project,
   create at least one product milestone and assign the seed tickets to
   it. Nothing to configure — the pipeline queries the project's
@@ -517,6 +522,37 @@ cannot do — and which is exactly why it is a separate, narrower token
 rather than a widening of that one. The variables read is the parked
 check below; without it the rehearsal warns and carries on rather than
 failing, since an unreadable flag is not evidence of a parked project.
+
+**The move record.** Set `STATE_TOKEN` on the metronome Worker
+(`npx wrangler secret put STATE_TOKEN`), the same value as
+`PIPELINE_STATE_TOKEN` in each project repo's Actions secrets, and add
+to each `pipeline.config.json`:
+
+```json
+"state": {
+  "url": "https://pipeline-metronome.<your-subdomain>.workers.dev",
+  "project": "<a stable name for this project>"
+}
+```
+
+Two projects sharing that name share a row per ticket id, so pick it
+deliberately — the repository name is the obvious choice.
+
+This is what makes the §9 invariants enforceable. The tracker cannot
+answer "who moved this ticket": on a solo workspace the harness holds
+your Linear key, so every write the pipeline makes arrives wearing your
+identity, and a role resolved from that identity says "control plane"
+for your own moves too — which is the one role the revert rules trust.
+Every invariant is off until the store is wired, silently. Buying the
+pipeline its own Linear account fixes it instead, at a seat per role per
+month, to encode something the pipeline already knows about itself.
+
+Nothing breaks without it. A project with no store records nothing and
+judges nothing, which is exactly where every ticket that predates the
+store sits — and reading "I have no record" as "a human did this" would
+revert an entire backlog on the first sweep. Because that silence is
+indistinguishable from working, `preflight` names it and every `sweep`
+prints it.
 
 **Park the dummy between rehearsals.** Set repo variable
 `PIPELINE_KILL_SWITCH=true` on `orchestration-dummy` when a rehearsal

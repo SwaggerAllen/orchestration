@@ -96,6 +96,7 @@ jobs:
         with:
           ticket: ${{ inputs.ticket }}
           linear_api_key: ${{ secrets.LINEAR_API_KEY }}
+          pipeline_state_token: ${{ secrets.PIPELINE_STATE_TOKEN }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.AGENT_GITHUB_TOKEN || github.token }}

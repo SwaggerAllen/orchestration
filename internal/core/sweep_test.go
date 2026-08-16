@@ -13,13 +13,40 @@ import (
 var t0 = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 func snap(tickets ...*Ticket) *Snapshot {
-	return &Snapshot{
+	s := &Snapshot{
 		Now:              t0,
 		CurrentMilestone: "M1",
 		StaleClaimGrace:  20 * time.Minute,
 		DeployTimeout:    30 * time.Minute,
 		Tickets:          tickets,
+		Recorded:         map[string]RecordedMove{},
 	}
+	// arrived() states an arrival the way a reader thinks about it —
+	// "came from X, moved by R". The sweep no longer reads that from the
+	// tracker's history, so translate it into the pipeline's own record,
+	// which is where the answer now comes from.
+	for _, t := range tickets {
+		if t.Last == nil {
+			continue
+		}
+		if pipelineRole(t.Last.Actor) {
+			// The pipeline made the move, so its record describes it.
+			s.Recorded[t.ID] = RecordedMove{From: t.Last.From, To: t.Last.To, Role: t.Last.Actor}
+			continue
+		}
+		// Somebody outside the pipeline made it, so the record stops
+		// where the pipeline left the ticket and the tracker has moved on.
+		s.Recorded[t.ID] = RecordedMove{To: t.Last.From, Role: RoleControlPlane}
+	}
+	return s
+}
+
+func pipelineRole(r Role) bool {
+	switch r {
+	case RoleDesign, RoleDev, RoleReconcile, RoleBoundary, RoleControlPlane, RoleCI:
+		return true
+	}
+	return false
 }
 
 func tk(key string, state protocol.State, mut ...func(*Ticket)) *Ticket {
@@ -633,5 +660,260 @@ func TestConflictsCountAcrossBothDetectionPoints(t *testing.T) {
 	// from Ready for rework, where that rule lives.
 	if a.To != protocol.ReadyForRework {
 		t.Errorf("want Ready for rework, got %v", a.To)
+	}
+}
+
+// The run correlated to a ticket is the newest of any kind; the kind
+// expected comes from the state. When a dispatch is rejected outright —
+// an invalid workflow file, a missing secret — no run of the expected
+// kind ever exists, and the ticket used to report a dead run of that
+// kind naming a *different* agent's run id. That sentence sent a real
+// debugging session at a merge conflict for an hour while the actual
+// fault was a duplicate YAML key in the reconcile workflow.
+func TestAStaleClaimSaysSoWhenTheAgentWasNeverDispatched(t *testing.T) {
+	s := snap(tk("T1", protocol.Reconciling, func(t *Ticket) {
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "31912796533", Kind: AgentDev, Live: false, EndedAt: t0.Add(-2 * time.Hour)}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want Blocked, got %v", a)
+	}
+	if strings.Contains(a.Prose, "The reconcile run claiming this ticket") {
+		t.Errorf("a dev run is described as the reconcile run:\n%s", a.Prose)
+	}
+	for _, want := range []string{"No reconcile run was ever dispatched", "dev run `31912796533`", "workflow file"} {
+		if !strings.Contains(a.Prose, want) {
+			t.Errorf("the comment is missing %q:\n%s", want, a.Prose)
+		}
+	}
+	// The marker carries what was actually found, so the history is
+	// readable without re-deriving it from prose.
+	if a.Marker == nil || a.Marker.Fields["dispatched"] != string(AgentDev) {
+		t.Errorf("the marker does not record the run's real kind: %v", a.Marker)
+	}
+}
+
+// The ordinary case is unchanged: the run is the right kind and it died.
+func TestAStaleClaimOnTheRightAgentReadsAsBefore(t *testing.T) {
+	s := snap(tk("T1", protocol.Reconciling, func(t *Ticket) {
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "99", Kind: AgentReconcile, Live: false, EndedAt: t0.Add(-2 * time.Hour)}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want Blocked, got %v", a)
+	}
+	if !strings.Contains(a.Prose, "The reconcile run claiming this ticket is no longer live") {
+		t.Errorf("the ordinary stale-claim wording changed:\n%s", a.Prose)
+	}
+	if a.Marker.Fields["dispatched"] != "" {
+		t.Error("a matching run recorded a mismatch")
+	}
+}
+
+// The ORC-16 loop, in one test. A merged ticket whose deploy has landed
+// holds mutex labels a queued ticket needs. Before the fold, the pass
+// reasoned about the world as it was at the top of the sweep: ORC-21 was
+// still Merged for every rule, so the queue ticket was held — and on the
+// beats where it was dispatched anyway, the pickup assertion refused it,
+// at a full billed job each time.
+func TestADeployedTicketReleasesItsMutexWithinTheSamePass(t *testing.T) {
+	done := tk("T1", protocol.Merged, func(t *Ticket) {
+		t.Deploy = DeployDeployed
+		t.Labels = []string{"system:substrate"}
+	})
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+
+	acts := Sweep(snap(done, queued))
+	if a := find(acts, ActTransition, "T1"); a == nil || a.To != protocol.Done {
+		t.Fatalf("the deployed ticket did not retire: %v", a)
+	}
+	d := find(acts, ActDispatch, "T2")
+	if d == nil || d.Agent != AgentDev {
+		t.Errorf("the queued ticket was not dispatched once its label was free: %v", acts)
+	}
+}
+
+// The other half: while the holder is genuinely in flight, the sweep must
+// not dispatch into an assertion that can only refuse. Every one of those
+// cost a job with a checkout, a toolchain and a service container.
+func TestAHeldMutexStopsTheDispatchRatherThanThePickup(t *testing.T) {
+	holder := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+
+	s := snap(holder, queued)
+	if d := find(Sweep(s), ActDispatch, "T2"); d != nil {
+		t.Errorf("dispatched into a pickup that refuses: %v", *d)
+	}
+	// And the two agree, which is the reason they share a function.
+	if err := VerifyPickup(s, queued.ID, AgentDev); err == nil {
+		t.Error("the dispatcher declined but the pickup assertion would have allowed it")
+	}
+}
+
+// Merged is finished work: the branch is gone and its commits are on
+// main, so a ticket starting afterwards contains it rather than racing
+// it. Holding the labels through Merged meant holding them for the whole
+// deploy-detection window — on a platform with no deploy webhook, up to
+// an hour of a queue held by a ticket that was done.
+func TestMergedDoesNotHoldTheMutex(t *testing.T) {
+	merged := tk("T1", protocol.Merged, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+	if other, _ := MutexHolder(snap(merged, queued), queued); other != nil {
+		t.Errorf("a merged ticket still holds %q", "screen:home")
+	}
+	// Every earlier state still does.
+	for _, st := range []protocol.State{
+		protocol.ReadyForDev, protocol.InProgress, protocol.Checks,
+		protocol.Reconciling, protocol.ReadyForRework, protocol.Reworking,
+	} {
+		holder := tk("T3", st, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+		if other, _ := MutexHolder(snap(holder, queued), queued); other == nil {
+			t.Errorf("%s does not hold the mutex", st)
+		}
+	}
+}
+
+// The fold must not leak. A caller that sweeps the same snapshot twice
+// has to get the same answer — that property is what Ring 2's
+// convergence loop and every table test rest on.
+func TestSweepDoesNotMutateTheCallersSnapshot(t *testing.T) {
+	s := snap(
+		tk("T1", protocol.Merged, func(t *Ticket) { t.Deploy = DeployDeployed }),
+		tk("T2", protocol.Checks, func(t *Ticket) { t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"} }),
+	)
+	first := Sweep(s)
+	for _, tk := range s.Tickets {
+		if tk.Key == "T1" && tk.State != protocol.Merged {
+			t.Fatalf("the caller's snapshot was written: T1 is %s", tk.State)
+		}
+	}
+	second := Sweep(s)
+	if len(first) != len(second) {
+		t.Fatalf("sweeping twice gave %d then %d actions", len(first), len(second))
+	}
+	for i := range first {
+		if first[i].String() != second[i].String() {
+			t.Errorf("action %d differs between passes:\n%s\n%s", i, first[i], second[i])
+		}
+	}
+}
+
+// One transition per ticket per pass. The fold makes a ticket's new state
+// visible to later rules, and without this guard those rules would act on
+// it — a ticket promoted into Reconciling being judged, in the same pass,
+// as a Reconciling ticket whose claim is stale.
+func TestAFoldedTicketIsNotActedOnTwice(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "r1", Kind: AgentDev, Live: false, EndedAt: t0.Add(-time.Hour)}
+	}))
+	var transitions int
+	for _, a := range Sweep(s) {
+		if a.Kind == ActTransition && a.TicketID == "T1" {
+			transitions++
+		}
+	}
+	if transitions != 1 {
+		t.Errorf("got %d transitions for one ticket in one pass, want 1", transitions)
+	}
+}
+
+// The bug this whole mechanism exists for. On a solo workspace the
+// harness holds the author's Linear key, so a role read off the tracker
+// identity answered "control plane" for the human's moves too — and that
+// is the one role the revert rules trust. Every §9 invariant was off.
+// The record answers from what the pipeline did, not from who it looked
+// like.
+func TestAHumanMoveIsJudgedEvenWhenItWearsThePipelinesIdentity(t *testing.T) {
+	victim := tk("T1", protocol.InProgress)
+	s := snap(victim)
+	// The pipeline left it in the queue; the tracker says In progress.
+	s.Recorded["T1"] = RecordedMove{From: protocol.DesignReview, To: protocol.ReadyForDev, Role: RoleControlPlane}
+
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.ReadyForDev || a.Marker.Fields["rule"] != "claim" {
+		t.Fatalf("a hand-moved claim was not reverted: %v", a)
+	}
+}
+
+// And the converse, which is the failure mode of getting this wrong in
+// the other direction: the pipeline's own moves must not be reverted.
+func TestThePipelinesOwnMoveIsNotJudgedAsAHumans(t *testing.T) {
+	moved := tk("T1", protocol.InProgress)
+	s := snap(moved)
+	s.Recorded["T1"] = RecordedMove{From: protocol.ReadyForDev, To: protocol.InProgress, Role: RoleDev}
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
+		t.Errorf("the dev agent's own claim was reverted: %v", *a)
+	}
+}
+
+// An agent's move is recorded, and being recorded is not being excused.
+// A design pass promoting straight past Design review is precisely what
+// §9 exists to catch, and it is the pipeline doing it.
+func TestARecordedAgentMoveIsStillJudged(t *testing.T) {
+	skipped := tk("T1", protocol.ReadyForDev)
+	s := snap(skipped)
+	s.Recorded["T1"] = RecordedMove{From: protocol.Designing, To: protocol.ReadyForDev, Role: RoleDesign}
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.Marker.Fields["rule"] != "sign-off" {
+		t.Errorf("a design pass skipping review was not caught: %v", a)
+	}
+}
+
+// Every ticket that existed before the store did has no record. Reading
+// that as "a human did it" would revert the entire backlog on the first
+// sweep after deploy, which is the one migration failure that cannot be
+// undone by waiting.
+func TestATicketWithNoRecordIsNotJudged(t *testing.T) {
+	s := snap(tk("T1", protocol.InProgress))
+	delete(s.Recorded, "T1")
+	for _, a := range Sweep(s) {
+		if a.Kind == ActTransition && a.TicketID == "T1" && strings.HasPrefix(a.Reason, "invariant") {
+			t.Errorf("an unrecorded ticket was judged: %v", a)
+		}
+	}
+}
+
+// The dispatcher's singularity guard reads Run.Live, and that marker is
+// posted by the claim — inside the dispatched job, after boot, checkout,
+// toolchain and deps. About ninety seconds on catapult, and any sweep
+// landing in that window sees an idle agent and dispatches again. Two
+// boundary agents ran one ticket to completion that way: two scans,
+// twenty-two minutes of spend, four tickets for two findings.
+func TestPickupRefusesWhenAnAgentOfThatKindIsAlreadyRunning(t *testing.T) {
+	running := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "31959743407", Kind: AgentBoundary, Live: true}
+	})
+	second := tk("T2", protocol.InProgress, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+
+	err := VerifyPickup(snap(running, second), "T2", AgentBoundary)
+	if err == nil {
+		t.Fatal("a second boundary agent was allowed to claim")
+	}
+	if !strings.Contains(err.Error(), "31959743407") {
+		t.Errorf("the refusal does not name the run already holding it: %v", err)
+	}
+}
+
+// A ticket's own live run is not a second agent. A claim re-entering
+// after a resume is the same run, and refusing it would break the
+// documented recovery path.
+func TestPickupAllowsATicketToClaimAgainstItsOwnRun(t *testing.T) {
+	resuming := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "r1", Kind: AgentBoundary, Live: true}
+	})
+	if err := VerifyPickup(snap(resuming), "T1", AgentBoundary); err != nil {
+		t.Errorf("a resume was refused as a duplicate: %v", err)
 	}
 }

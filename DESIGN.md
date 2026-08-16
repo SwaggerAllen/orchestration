@@ -391,6 +391,22 @@ trustworthy for the same reason in both cases: design *creates* the screen files
 sketch *is* the system touch list — with CI auditing both against the file maps (§9), because
 a diff that wanders outside its declared labels is a mutex nobody took.
 
+**"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
+commits are on main, so a ticket starting afterwards contains that work rather than racing it —
+there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
+deploy-detection window instead, which on a platform with no deploy webhook is up to an hour of
+a queue held by a ticket that was finished. If the deploy fails and the author sends it back,
+it re-enters the queue and re-takes the mutex then, which is ordinary contention rather than a
+special case.
+
+**The dispatcher asks the same question the pickup assertion does**, through the same
+function. It used not to ask at all, so a ticket whose label was held was dispatched into an
+assertion that could only refuse — and because the refusal leaves the ticket in the queue, the
+next beat did it again. Each of those was a full billed job with a checkout, a toolchain and a
+service container, spent to be told no. Two places asking one question is exactly the shape
+that drifts, so there is one `MutexHolder` and three callers: the promotion revert, the
+pickup assertion, and the dispatcher.
+
 **Files owned by no system** — the router, the mix manifest — are named in the sketch when
 touched and left to git's textual conflict detection. Giving them labels would serialize
 every ticket through them, which is the mutex failing in the other direction.
@@ -1070,6 +1086,48 @@ mean parked — a rehearsal repo between rehearsals, or a project paused for a w
 consuming an allowance the active project needs. The flag is still passed into the binary as
 well, so a hand-dispatched run refuses for the same reason rather than relying on the workflow
 alone to guard it.
+
+**A sweep is ordered furthest-down-the-pipeline first, and folds its own decisions forward.**
+Corrections and reverts still run before everything, so no later rule acts on a state the sweep
+is about to undo. After that the pass takes the tickets nearest the end of the pipeline first,
+and each planned transition is applied to a working copy that the remaining rules read.
+
+Without the fold, a pass reasons entirely about the world as it stood when the snapshot was
+built, so every hop needs its own beat to become visible — and the effects are not merely slow.
+A ticket whose deploy had landed still counted as `Merged` for the whole pass, holding its
+mutex labels against a queued ticket that the same pass then dispatched into a pickup assertion
+guaranteed to refuse it. Resolution before consumption is the whole ordering: retire what is
+finished, then decide what may start.
+
+`Sweep` stays a pure function — no I/O, same input to same output — because the fold happens on
+a copy and the caller's snapshot is never written. What makes it safe to act on a prediction is
+downstream: `Execute` applies actions in slice order and stops at the first error, so an action
+that assumed a transition which then failed to land never runs. **One transition per ticket per
+pass** remains, now for a second reason: a ticket's new state is visible to later rules, and
+they must not judge a state this pass has just produced.
+
+**The pipeline records its own writes, because the tracker cannot say who made them.** Every
+§9 revert turns on telling the author's moves from the pipeline's, and a solo workspace has no
+way to do it: the harness authenticates with the author's key, so every write it makes arrives
+stamped with the author's identity. Resolving a role from that identity answered "control
+plane" for the human's moves too — the one role the revert rules trust — so every invariant in
+this document was off, silently, for as long as the two shared an id. The identity fix is a
+tracker seat per role per month, to encode something the pipeline already knows about itself.
+
+So the harness writes each move down **before making it**, into a store it owns, and the sweep
+compares that record against where the tracker says the ticket is. Agreement means the pipeline
+made the last move, and the record carries the edge and the role; disagreement means somebody
+else did, from where the pipeline left it to where it now is. **No record means not judged** —
+every ticket predating the store is absent from it, and reading absence as "a human did this"
+would revert an entire backlog on the first sweep.
+
+Recorded is not excused: an agent's move is recorded under the agent's role and judged like any
+other, because a design pass promoting straight past `Design review` is precisely what §9
+exists to catch. Write-ahead is what makes it safe — a record for a move that then failed
+matches nothing, while a move that landed unrecorded would read as a human's and be reverted,
+re-made, and reverted again. Writes fail closed (no record, no move; the sweep is convergent
+and retries) and reads fail loud (an unreachable store is not an empty one, and an empty one
+turns the invariants off).
 
 **Run summaries carry what a human is meant to read.** Actions renders `$GITHUB_STEP_SUMMARY`
 on the run page itself, above the job list, so what goes there has been read by the time

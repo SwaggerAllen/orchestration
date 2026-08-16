@@ -21,6 +21,14 @@ inputs:
   linear_api_key:
     description: Linear API key
     required: true
+  pipeline_state_token:
+    description: >
+      Secret for the pipeline's own move record (DESIGN 9). Every
+      transition is written down before it is made, and a project
+      without this records nothing — which turns the invariants off
+      rather than failing, so its absence is worth noticing.
+    required: false
+    default: ""
   github_token:
     # Described in prose, not as an expression: an action's metadata is
     # templated and the github context does not exist there, so an
@@ -79,6 +87,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         pipeline agent claim \
@@ -103,6 +112,27 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+
+    # The prompt inlines the confirmed non-asks (DESIGN §4), and claim
+    # assembled it one step too early: the branch to check out is an
+    # output of the claim, so the tree was still on main. This pass
+    # maintains that document on the branch, so on a re-pass the copy
+    # handed to the model had its own earlier decisions deleted from it —
+    # measured on ORC-16, where the third pass was shown none of the
+    # eleven entries the first two had written.
+    # No tracker credential: the claim is already made and on disk, so
+    # this reads claim.json and the working tree and talks to nothing.
+    - name: rebuild the prompt against the branch
+      shell: bash
+      run: |
+        pipeline agent reprompt \
+          --kind design \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     # The merge-base the design is drawn against (DESIGN §2.4), read
     # before the model writes anything. Computed here rather than in the
@@ -187,6 +217,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         # The URL comes from wrangler rather than being rebuilt from the
@@ -207,6 +238,7 @@ runs:
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
         pipeline agent abort \

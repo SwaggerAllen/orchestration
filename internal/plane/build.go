@@ -15,6 +15,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/deploy"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/state"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
@@ -26,6 +27,7 @@ type Plane struct {
 	Tracker tracker.Tracker
 	Host    host.Host
 	Deploy  deploy.Deploy
+	State   state.Store
 	Config  *config.Config
 
 	// resolved lazily, once per Plane: tracker state id <-> protocol state.
@@ -36,6 +38,10 @@ type Plane struct {
 	triageStates map[string]bool
 	// keyByID is filled by Build; Execute needs keys for dispatch inputs.
 	keyByID map[string]string
+	// stateOf is likewise filled by Build: the state each ticket was in
+	// when the snapshot was taken, which is the `from` of any move this
+	// pass records.
+	stateOf map[string]protocol.State
 }
 
 func New(t tracker.Tracker, cfg *config.Config) *Plane {
@@ -45,6 +51,15 @@ func New(t tracker.Tracker, cfg *config.Config) *Plane {
 // WithHost attaches the code host port.
 func (p *Plane) WithHost(h host.Host) *Plane {
 	p.Host = h
+	return p
+}
+
+// WithState attaches the pipeline's own record of its writes. Without
+// it the snapshot carries no records, so nothing is judged — which is
+// the safe direction, and is exactly what a project that has not been
+// wired up yet should get.
+func (p *Plane) WithState(st state.Store) *Plane {
+	p.State = st
 	return p
 }
 
@@ -132,6 +147,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 
 	tickets := make([]*core.Ticket, 0, len(issues))
 	p.keyByID = map[string]string{}
+	p.stateOf = map[string]protocol.State{}
 	for _, i := range issues {
 		st, ok := p.stateByID[i.StateID]
 		if !ok {
@@ -154,6 +170,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 			return nil, fmt.Errorf("plane: issue %s is in a state the config doesn't map (state id %s)", i.Key, i.StateID)
 		}
 		p.keyByID[i.ID] = i.Key
+		p.stateOf[i.ID] = st
 		t := &core.Ticket{
 			ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description, URL: i.URL,
 			State: st, StateSince: i.StateSince, CreatedAt: i.CreatedAt,
@@ -191,11 +208,25 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 		authorID = ids[0]
 	}
 
+	// The pipeline's own record of what it has written. A read failure
+	// is fatal to the snapshot rather than tolerated: an empty map and
+	// an unreachable store are indistinguishable downstream, and the
+	// second one silently turns every §9 invariant off — which is the
+	// exact failure this store was built to end.
+	recorded := map[string]core.RecordedMove{}
+	if p.State != nil {
+		recorded, err = p.State.All(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot: reading the pipeline's own state record: %w", err)
+		}
+	}
+
 	return &core.Snapshot{
 		Now:              now,
 		AuthorID:         authorID,
 		CurrentMilestone: currentMilestone(milestones, tickets),
 		KillSwitch:       killSwitch,
+		Recorded:         recorded,
 		StaleClaimGrace:  p.Config.StaleClaimGrace.Duration(),
 		DeployTimeout:    p.Config.Deploy.Timeout.Duration(),
 		Tickets:          tickets,

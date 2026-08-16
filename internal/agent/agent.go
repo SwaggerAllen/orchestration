@@ -53,6 +53,10 @@ type ClaimResult struct {
 	// Mode is "dev" or "rework" — it decides where the scope came from
 	// and which state was claimed.
 	Mode string
+	// Role is which part of the pipeline this run is. It travels in
+	// claim.json so the finish and abort steps — separate processes —
+	// record their moves under the same role the claim did.
+	Role core.Role
 	// State is the state the run holds while it works, recorded at claim
 	// so an abort can say where the ticket is coming from. Only the
 	// author moves a ticket out of Blocked and they choose the state
@@ -150,7 +154,7 @@ type NonAsks struct {
 	Err string `json:",omitempty"`
 }
 
-// claimNonAsks reads the confirmed non-asks document for a pass that
+// ClaimNonAsks reads the confirmed non-asks document for a pass that
 // proposes. It lives in the project repo, which the calling job has
 // already checked out — but cwd on a real run is the pipeline checkout,
 // not the project, so the path resolves against the config's directory
@@ -159,7 +163,7 @@ type NonAsks struct {
 // An unreadable file is not a reason to fail the claim — the pass still
 // has work to do — so the failure travels to the prompt instead of
 // ending the run.
-func claimNonAsks(cfg *config.Config) *NonAsks {
+func ClaimNonAsks(cfg *config.Config) *NonAsks {
 	n := &NonAsks{Path: cfg.NonAsksPath}
 	if n.Path == "" {
 		return n
@@ -220,6 +224,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 	// abort is coming from where the agent is, which is the state the
 	// claim is about to write.
 	res.State = claimState
+	res.Role = core.RoleDev
 	res.BaseSHA = baseSHA(t)
 
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
@@ -235,7 +240,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 	// State-transition-as-claim, then the dispatch marker: the id in a
 	// comment is what makes the claim auditable and idempotency checkable
 	// (DESIGN §6).
-	if err := p.TransitionTicket(ctx, t.ID, claimState); err != nil {
+	if err := p.TransitionTicket(ctx, t.ID, claimState, core.RoleDev); err != nil {
 		return nil, err
 	}
 	m := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
@@ -272,7 +277,7 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	} else if err := h.MarkPRReady(ctx, res.PRNumber); err != nil {
 		return fmt.Errorf("finish %s: undraft PR #%d: %w", res.TicketKey, res.PRNumber, err)
 	}
-	return p.TransitionTicket(ctx, res.TicketID, protocol.Checks)
+	return p.TransitionTicket(ctx, res.TicketID, protocol.Checks, core.RoleDev)
 }
 
 // Abort routes a run that cannot finish. Three reasons, and the third is
@@ -324,10 +329,17 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		m.Fields["from"] = string(res.State)
 		message = m.Comment(message)
 	}
+	if res.Role == "" {
+		// A claim with no role cannot record its move, and an unrecorded
+		// move reads as the author's on the next sweep and is reverted.
+		// Refusing here leaves the ticket where the run found it, which
+		// the stale-claim rule then handles honestly.
+		return fmt.Errorf("abort %s: the claim carries no role, so this move cannot be recorded", res.TicketKey)
+	}
 	if err := p.CommentTicket(ctx, res.TicketID, message); err != nil {
 		return err
 	}
-	return p.TransitionTicket(ctx, res.TicketID, to)
+	return p.TransitionTicket(ctx, res.TicketID, to, res.Role)
 }
 
 // newestComment returns the body of the most recent comment.

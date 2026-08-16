@@ -88,7 +88,24 @@ type Issue struct {
 	StateSince time.Time
 	// LastChange is the most recent state transition, if any.
 	LastChange *StateChange
-	Comments   []IssueComment
+	// Comments are ordered **oldest first**, and every adapter must
+	// guarantee it. The requirement sits on the port rather than on each
+	// caller because five separate readers had already assumed it and
+	// none of them checked.
+	//
+	// Linear's connections come back newest first, so the slice was in
+	// exactly the opposite order to what its readers believed. "The
+	// newest merged marker" returned the oldest. `baseSHA` walked the
+	// slice backwards to find the newest base and found the first one
+	// instead — so a re-designed ticket handed dev the base from the
+	// design pass before last. The design prompt printed "Comments,
+	// oldest first" above a reversed history, and an agent that trusts
+	// that header reads the first review it meets as the current one.
+	// The rehearsal's reset reverted in landing order rather than
+	// against it, which only conflicts when two tickets touched one
+	// file. None of it failed loudly: the wrong answer to "which sha" is
+	// still a sha, and a reversed history still reads as a history.
+	Comments []IssueComment
 	// Blocks and BlockedBy are issue IDs from blocking relations.
 	Blocks    []string
 	BlockedBy []string

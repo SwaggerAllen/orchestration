@@ -172,7 +172,23 @@ type Snapshot struct {
 	// AuthorID is the author's tracker id, for assignment (DESIGN §3).
 	// Empty turns assignment off rather than assigning nobody, so a
 	// project without the mapping keeps whatever a human set.
-	AuthorID        string
+	AuthorID string
+	// Recorded is what the pipeline last did to each ticket, keyed by
+	// ticket id, from the state store it owns.
+	//
+	// It exists because the tracker cannot answer "who moved this". The
+	// harness authenticates to Linear as the author on a solo workspace,
+	// so every pipeline write arrives wearing the author's identity, and
+	// a role read off that identity said "control plane" for the human's
+	// moves too — which is the one role the revert rules trust, so every
+	// §9 invariant was silently off.
+	//
+	// A ticket absent from this map is not judged. Every ticket that
+	// existed before the store did is absent, and treating "I have no
+	// record" as "a human did it" would revert the whole backlog on the
+	// first sweep.
+	Recorded map[string]RecordedMove
+
 	KillSwitch      bool
 	StaleClaimGrace time.Duration
 	DeployTimeout   time.Duration
@@ -226,6 +242,64 @@ func (t *Ticket) InFlight() bool {
 		return true
 	}
 	return false
+}
+
+// RecordedMove is one transition the pipeline made, as the pipeline
+// recorded it before making it. Write-ahead, deliberately: a record
+// describing a transition that then failed is harmless — the tracker
+// still shows the old state, so nothing matches it — while a transition
+// that landed without its record reads as a human's and gets reverted,
+// then re-made, then reverted again.
+type RecordedMove struct {
+	From protocol.State
+	To   protocol.State
+	// Role is which part of the pipeline made the move. The writer
+	// matrix judges roles, and the agents' moves have to be judged: a
+	// design pass promoting straight past Design review is exactly the
+	// thing §9 exists to catch.
+	Role Role
+}
+
+// HoldsMutex reports whether this ticket's screen and system labels are
+// claimed against other tickets (DESIGN §6).
+//
+// In flight, minus Merged. The mutex exists so two dev agents do not edit
+// one screen or one system at the same time — and a merged ticket's work
+// is on main, its branch gone, with nothing being written. A ticket
+// branching off main afterwards cannot conflict with it; it *contains*
+// it.
+//
+// Counting Merged held the labels for the whole deploy-detection window
+// instead, which on a platform with no deploy webhook is up to an hour of
+// a queue held by a ticket that is finished. If the deploy fails and the
+// author sends it back for rework it re-enters the queue and re-takes the
+// mutex then, which is the ordinary contention case rather than a special
+// one.
+func (t *Ticket) HoldsMutex() bool {
+	return t.InFlight() && t.State != protocol.Merged
+}
+
+// MutexHolder returns another ticket holding a mutex label this one
+// carries, and the label, or nil.
+//
+// One function, three callers — the promotion revert (DESIGN §6), the
+// pickup assertion, and the dispatcher — because they are the same
+// question and they must not answer it differently. They did: the
+// dispatcher never asked at all, so the sweep dispatched a ticket whose
+// label was held straight into a pickup assertion that refused it, every
+// beat, at a full billed job each time.
+func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
+	for _, other := range s.Tickets {
+		if other.ID == t.ID || !other.HoldsMutex() {
+			continue
+		}
+		for _, mine := range t.MutexLabels() {
+			if other.HasLabel(mine) {
+				return other, mine
+			}
+		}
+	}
+	return nil, ""
 }
 
 // LiveRun reports whether the ticket has a live agent run of the given

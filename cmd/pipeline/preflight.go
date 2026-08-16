@@ -16,6 +16,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -84,9 +85,37 @@ func cmdPreflight(args []string) error {
 			}
 			return nil
 		}},
+		// Diffed, not merely fetched. This check used to assert only
+		// that the call returned — vacuous with respect to the set, with
+		// the protocol's labels and the live list both in hand and
+		// nothing compared. A label the pipeline writes can therefore
+		// ship in one commit while the team it writes to was provisioned
+		// before that commit, and nothing re-runs setup on an upgrade.
+		// `harness` did exactly that: it entered protocol.Labels in the
+		// same commit that taught the filer to emit it, and surfaced two
+		// days later mid-boundary, twice, at eleven minutes of model
+		// spend each, as `no label "harness" in team ...`. The adjacent
+		// state check already did better by failing with "run setup".
 		check{"the label set", "LINEAR_API_KEY", func(ctx context.Context) error {
-			_, err := tr.ListLabels(ctx, cfg.Tracker.TeamID)
-			return err
+			live, err := tr.ListLabels(ctx, cfg.Tracker.TeamID)
+			if err != nil {
+				return err
+			}
+			have := make(map[string]bool, len(live))
+			for _, l := range live {
+				have[l.Name] = true
+			}
+			var missing []string
+			for _, want := range protocol.Labels {
+				if !have[want] {
+					missing = append(missing, want)
+				}
+			}
+			if len(missing) > 0 {
+				return fmt.Errorf("team is missing %d label(s) the pipeline writes: %s — run `pipeline setup --apply`, which creates them idempotently",
+					len(missing), strings.Join(missing, ", "))
+			}
+			return nil
 		}},
 	)
 
@@ -169,6 +198,21 @@ func cmdPreflight(args []string) error {
 		if d != nil {
 			p.WithDeploy(d)
 		}
+	}
+
+	// The state store, if the project has one. Not folded into the
+	// snapshot check below because a missing token and an unreachable
+	// Worker fail there as one opaque error, and they are different
+	// fixes — and because "this project has no store" is a legitimate
+	// answer that has to be told apart from "its store is broken".
+	if st := stateStore(cfg); st != nil {
+		checks = append(checks, check{"the pipeline's move record", "PIPELINE_STATE_TOKEN", func(ctx context.Context) error {
+			_, err := st.All(ctx)
+			return err
+		}})
+		p.WithState(st)
+	} else {
+		fmt.Println("no state store configured — transitions are unrecorded and the DESIGN 9 invariants are not enforced.")
 	}
 
 	// The whole snapshot last: it is what every command starts with, and
@@ -257,6 +301,7 @@ var unexercised = []struct{ scope, why string }{
 	{"pull-requests: write", "opening the PR and flipping the draft off"},
 	{"deployments: write", "recording the stand-in deployment after a merge"},
 	{"LINEAR_API_KEY (write)", "every transition, comment and label the harness makes"},
+	{"PIPELINE_STATE_TOKEN (write)", "recording each move before making it, which is what makes the invariants enforceable"},
 }
 
 func reportUnexercised() {

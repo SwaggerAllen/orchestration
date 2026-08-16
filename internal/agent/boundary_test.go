@@ -317,3 +317,51 @@ func TestFindingsSurviveTheArchiveOnAResumedBoundary(t *testing.T) {
 		t.Errorf("the recovered finding lost its content: %+v", got)
 	}
 }
+
+// The key is derived from the subject, because the model's own key is
+// its phrasing for one scan and phrasing is a choice. Two scans of one
+// tree wrote two keys for one finding on ORC-45 and both filed: four
+// tickets, two findings.
+func TestTheDedupeKeyComesFromTheSubjectNotThePhrasing(t *testing.T) {
+	first := Proposal{
+		Title:   "Arm the six gate lines the repo declares and CI does not run",
+		Dedupe:  "tech-debt-before-the-engine/declared-gate-set-not-armed-in-ci",
+		Subject: "ci.yml",
+	}
+	second := Proposal{
+		Title:   "Arm the gates that are green locally and armed nowhere",
+		Dedupe:  "tech-debt-before-the-engine/arm-the-unarmed-gate-set",
+		Subject: "ci.yml",
+	}
+	a := dedupeKey("Tech debt · before the engine", first)
+	b := dedupeKey("Tech debt · before the engine", second)
+	if a != b {
+		t.Errorf("two scans of one subject produced two keys:\n  %s\n  %s", a, b)
+	}
+	if a == first.Dedupe {
+		t.Error("the key is still the model's own phrasing")
+	}
+}
+
+// A scan that named no subject keeps its own key, so a resume replaying
+// a recorded scan from before this change still dedupes against what
+// that scan filed.
+func TestAProposalWithNoSubjectKeepsItsOwnKey(t *testing.T) {
+	p := Proposal{Title: "Something", Dedupe: "milestone/finding"}
+	if got := dedupeKey("Milestone", p); got != "milestone/finding" {
+		t.Errorf("key = %q, want the model's own", got)
+	}
+	if got := dedupeKey("Milestone", Proposal{Dedupe: "k", Subject: "   "}); got != "k" {
+		t.Errorf("a blank subject was treated as a subject: %q", got)
+	}
+}
+
+// Different subjects stay different, which is the half that matters for
+// not swallowing real work.
+func TestDifferentSubjectsKeepDifferentKeys(t *testing.T) {
+	a := dedupeKey("M", Proposal{Subject: "ci.yml", Dedupe: "x"})
+	b := dedupeKey("M", Proposal{Subject: "pipeline.config.json", Dedupe: "x"})
+	if a == b {
+		t.Errorf("two subjects collapsed to one key: %s", a)
+	}
+}

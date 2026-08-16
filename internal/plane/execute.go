@@ -54,6 +54,14 @@ func (p *Plane) Execute(ctx context.Context, acts []core.Action, log io.Writer) 
 			if !ok {
 				return fmt.Errorf("execute: no tracker state for %q", a.To)
 			}
+			// Write-ahead. The record goes down before the move, and a
+			// failure here stops the move rather than proceeding without
+			// it: an unrecorded transition reads as a human's on the next
+			// sweep, gets reverted, re-made and reverted again. The sweep
+			// is convergent, so declining costs a beat.
+			if err := p.record(ctx, a.TicketID, a.To, core.RoleControlPlane); err != nil {
+				return fmt.Errorf("execute: %s: recording the move before making it: %w", a, err)
+			}
 			if err := p.Tracker.UpdateIssueState(ctx, a.TicketID, stateID); err != nil {
 				return fmt.Errorf("execute: %s: %w", a, err)
 			}
@@ -133,4 +141,23 @@ func (p *Plane) createBoundary(ctx context.Context, a core.Action) error {
 		Labels:      []string{core.LabelBoundary},
 	})
 	return err
+}
+
+// record writes down a move before it is made. The `from` is read from
+// the snapshot the plane built, because the record is an edge and the
+// writer matrix judges edges — "arrived at Ready for dev" is not a rule,
+// "arrived at Ready for dev from Designing" is.
+//
+// No store configured is not an error. A project that has not been wired
+// up records nothing and is judged on nothing, which is the same safe
+// place a brand-new ticket sits in.
+func (p *Plane) record(ctx context.Context, ticketID string, to protocol.State, role core.Role) error {
+	if p.State == nil {
+		return nil
+	}
+	return p.State.Record(ctx, ticketID, core.RecordedMove{
+		From: p.stateOf[ticketID],
+		To:   to,
+		Role: role,
+	})
 }

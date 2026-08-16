@@ -20,6 +20,26 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 	if s.KillSwitch {
 		return fmt.Errorf("pickup %s: kill switch is on", t.Key)
 	}
+	// Singularity, asked here because the dispatcher cannot answer it in
+	// time. The sweep's guard reads Run.Live, and that marker is posted
+	// by the claim — which happens inside the dispatched job, after
+	// runner boot, checkout, toolchain and dependency install. Measured
+	// on catapult: about ninety seconds between the dispatch and the
+	// marker that proves it happened, and any sweep landing in that
+	// window sees an idle agent and dispatches again. Two boundary
+	// agents ran one ticket to completion that way — two full scans,
+	// twenty-two minutes of model spend, and four tickets filed for two
+	// findings.
+	//
+	// This narrows the window rather than closing it: a second run now
+	// aborts in seconds instead of finishing. Closing it wants a
+	// reservation written by the sweep at dispatch — by the thing that
+	// decides, so the record exists before the next sweep can read it —
+	// which the move record now gives us somewhere to put.
+	if other := liveRunOfKind(s, t.ID, kind); other != nil {
+		return fmt.Errorf("pickup %s: %s agent already running on %s (run %s) — one agent of a kind at a time (DESIGN §6)",
+			t.Key, kind, other.Key, other.Run.ID)
+	}
 
 	switch kind {
 	case AgentDev:
@@ -32,15 +52,8 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 		if t.HasLabel(LabelReEvaluate) {
 			return fmt.Errorf("pickup %s: re-evaluate blocks pickup until design clears it (DESIGN §7)", t.Key)
 		}
-		for _, other := range s.Tickets {
-			if other.ID == t.ID || !other.InFlight() {
-				continue
-			}
-			for _, mine := range t.MutexLabels() {
-				if other.HasLabel(mine) {
-					return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
-				}
-			}
+		if other, mine := MutexHolder(s, t); other != nil {
+			return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
 		}
 		if blockedByOpen(s, t) {
 			return fmt.Errorf("pickup %s: blocked by an open ticket (DESIGN §9)", t.Key)
@@ -66,6 +79,21 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 		}
 	default:
 		return fmt.Errorf("pickup %s: unknown agent kind %q", t.Key, kind)
+	}
+	return nil
+}
+
+// liveRunOfKind finds another ticket already holding a live run of this
+// agent kind. The ticket's own run is excluded: a claim re-entering after
+// a resume is the same run, not a second one.
+func liveRunOfKind(s *Snapshot, ticketID string, kind AgentKind) *Ticket {
+	for _, t := range s.Tickets {
+		if t.ID == ticketID {
+			continue
+		}
+		if t.LiveRun(kind) {
+			return t
+		}
 	}
 	return nil
 }
