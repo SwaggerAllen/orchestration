@@ -361,13 +361,27 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		}
 
 		filed, skipped := 0, 0
+		var failures []string
 		for _, prop := range ps.Proposals {
 			if existing[prop.Dedupe] {
 				skipped++
 				continue
 			}
 			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, prop.Dedupe); err != nil {
-				return fmt.Errorf("boundary file: %q: %w", prop.Title, err)
+				// Collected, not returned. Returning on the first error
+				// left the tickets already filed in the tracker while the
+				// step comment said the step never ran — the audit trail
+				// and the tracker disagreeing, with no way to learn which
+				// proposals landed except reading the new tickets and
+				// matching dedupe markers by hand. It also made the blast
+				// radius arbitrary: a bad proposal first files nothing, a
+				// bad proposal last files everything, and nothing chooses
+				// where it sits.
+				//
+				// All problems at once, which is the posture the audit
+				// takes for the same reason.
+				failures = append(failures, fmt.Sprintf("%q: %v", prop.Title, err))
+				continue
 			}
 			filed++
 		}
@@ -379,7 +393,8 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 				continue
 			}
 			if err := p.Tracker.UpdateIssuePriority(ctx, id, r.Priority); err != nil {
-				return fmt.Errorf("boundary file: ranking %s: %w", r.Key, err)
+				failures = append(failures, fmt.Sprintf("ranking %s: %v", r.Key, err))
+				continue
 			}
 			ranked++
 		}
@@ -387,8 +402,21 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		if len(unknown) > 0 {
 			prose += fmt.Sprintf(" Unknown keys skipped: %v.", unknown)
 		}
+		if len(failures) > 0 {
+			prose += fmt.Sprintf("\n\n%d did not land, and this comment is the record of which:\n\n- %s",
+				len(failures), strings.Join(failures, "\n- "))
+		}
+		// Written whatever happened, because the step *did* run and the
+		// tracker already shows what it did. The failures ride in the
+		// same comment rather than aborting the run: everything above
+		// landed, and a resume would otherwise re-derive that from the
+		// tickets themselves.
 		if err := stepDone(ctx, p, plan, StepFile, prose); err != nil {
 			return err
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("boundary file: %d of %d proposals did not land (recorded on the ticket): %s",
+				len(failures), len(ps.Proposals), strings.Join(failures, "; "))
 		}
 	}
 

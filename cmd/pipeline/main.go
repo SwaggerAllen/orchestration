@@ -59,6 +59,8 @@ func run(args []string) error {
 		return cmdSim(args[1:])
 	case "scenario":
 		return cmdScenario(args[1:])
+	case "state":
+		return cmdState(args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -96,6 +98,9 @@ commands:
   sim      run a Ring-2 scenario against in-memory fakes (no network)
   scenario Ring-3 rehearsal against a disposable project: reset, seed,
            check, validate (requires LINEAR_API_KEY)
+  state    the pipeline's own move record: ingest adopts a project's
+           existing tickets so the DESIGN 9 invariants apply to them from
+           now rather than from whenever each next moves
   version  print the binary version
 `)
 }

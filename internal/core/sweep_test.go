@@ -882,3 +882,38 @@ func TestATicketWithNoRecordIsNotJudged(t *testing.T) {
 		}
 	}
 }
+
+// The dispatcher's singularity guard reads Run.Live, and that marker is
+// posted by the claim — inside the dispatched job, after boot, checkout,
+// toolchain and deps. About ninety seconds on catapult, and any sweep
+// landing in that window sees an idle agent and dispatches again. Two
+// boundary agents ran one ticket to completion that way: two scans,
+// twenty-two minutes of spend, four tickets for two findings.
+func TestPickupRefusesWhenAnAgentOfThatKindIsAlreadyRunning(t *testing.T) {
+	running := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "31959743407", Kind: AgentBoundary, Live: true}
+	})
+	second := tk("T2", protocol.InProgress, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+
+	err := VerifyPickup(snap(running, second), "T2", AgentBoundary)
+	if err == nil {
+		t.Fatal("a second boundary agent was allowed to claim")
+	}
+	if !strings.Contains(err.Error(), "31959743407") {
+		t.Errorf("the refusal does not name the run already holding it: %v", err)
+	}
+}
+
+// A ticket's own live run is not a second agent. A claim re-entering
+// after a resume is the same run, and refusing it would break the
+// documented recovery path.
+func TestPickupAllowsATicketToClaimAgainstItsOwnRun(t *testing.T) {
+	resuming := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "r1", Kind: AgentBoundary, Live: true}
+	})
+	if err := VerifyPickup(snap(resuming), "T1", AgentBoundary); err != nil {
+		t.Errorf("a resume was refused as a duplicate: %v", err)
+	}
+}
