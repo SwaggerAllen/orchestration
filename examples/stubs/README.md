@@ -37,6 +37,17 @@ A project also needs:
   architecture doc into `systems/*.md` with file maps and stub the
   `screens/*.md` docs (DESIGN §4)
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
+- Actions secret `PIPELINE_STATE_TOKEN`, matching the metronome
+  Worker's `STATE_TOKEN`, plus a `state` block in `pipeline.config.json`
+  naming the Worker's URL and this project's object. This is the
+  pipeline's record of its own writes, and it is what makes the DESIGN §9
+  invariants enforceable: the tracker cannot say *who* moved a ticket,
+  because on a solo workspace the harness holds the author's key, so
+  every pipeline write arrives wearing the author's identity. Without the
+  store the pipeline records nothing and judges nothing — no reverts, no
+  mutex enforcement at promotion, no hand-moved-claim detection. That is
+  a safe state and a quiet one, so `preflight` and every `sweep` say so
+  out loud rather than letting it pass for working.
 - Actions secrets: `LINEAR_API_KEY`, and a model credential — a
   `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (billed to a
   Claude subscription, tried first), an `ANTHROPIC_API_KEY` (billed to

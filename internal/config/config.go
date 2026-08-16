@@ -27,6 +27,10 @@ const Version = 1
 type Config struct {
 	Version int     `json:"version"`
 	Tracker Tracker `json:"tracker"`
+	// State locates the pipeline's record of its own writes (DESIGN §9).
+	// Absent means no store: nothing is recorded and nothing is judged,
+	// which is where a project sits before it is wired up.
+	State StateStore `json:"state"`
 
 	// Disposable marks a project that exists only to rehearse the
 	// pipeline, and whose tickets the scenario harness may destroy.
@@ -362,4 +366,17 @@ func (c *Config) StateName(s protocol.State) string {
 		panic(fmt.Sprintf("config: no mapping for protocol state %q", s))
 	}
 	return name
+}
+
+// StateStore addresses the ProjectState Durable Object in the metronome
+// Worker. The token is not here — it is a secret, and it arrives in
+// PIPELINE_STATE_TOKEN.
+type StateStore struct {
+	// URL is the Worker's origin, e.g.
+	// https://pipeline-metronome.<subdomain>.workers.dev
+	URL string `json:"url"`
+	// Project names this project's object. Any stable string; the
+	// repository name is the obvious one. Two projects sharing it would
+	// share a row per ticket id, so it is worth being deliberate.
+	Project string `json:"project"`
 }

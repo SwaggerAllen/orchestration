@@ -61,6 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      PIPELINE_STATE_TOKEN: ${{ secrets.PIPELINE_STATE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
       PIPELINE_KILL_SWITCH: ${{ vars.PIPELINE_KILL_SWITCH }}
       # Deploy detection for API-polled providers (digitalocean).

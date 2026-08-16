@@ -1106,6 +1106,29 @@ that assumed a transition which then failed to land never runs. **One transition
 pass** remains, now for a second reason: a ticket's new state is visible to later rules, and
 they must not judge a state this pass has just produced.
 
+**The pipeline records its own writes, because the tracker cannot say who made them.** Every
+§9 revert turns on telling the author's moves from the pipeline's, and a solo workspace has no
+way to do it: the harness authenticates with the author's key, so every write it makes arrives
+stamped with the author's identity. Resolving a role from that identity answered "control
+plane" for the human's moves too — the one role the revert rules trust — so every invariant in
+this document was off, silently, for as long as the two shared an id. The identity fix is a
+tracker seat per role per month, to encode something the pipeline already knows about itself.
+
+So the harness writes each move down **before making it**, into a store it owns, and the sweep
+compares that record against where the tracker says the ticket is. Agreement means the pipeline
+made the last move, and the record carries the edge and the role; disagreement means somebody
+else did, from where the pipeline left it to where it now is. **No record means not judged** —
+every ticket predating the store is absent from it, and reading absence as "a human did this"
+would revert an entire backlog on the first sweep.
+
+Recorded is not excused: an agent's move is recorded under the agent's role and judged like any
+other, because a design pass promoting straight past `Design review` is precisely what §9
+exists to catch. Write-ahead is what makes it safe — a record for a move that then failed
+matches nothing, while a move that landed unrecorded would read as a human's and be reverted,
+re-made, and reverted again. Writes fail closed (no record, no move; the sweep is convergent
+and retries) and reads fail loud (an unreachable store is not an empty one, and an empty one
+turns the invariants off).
+
 **Run summaries carry what a human is meant to read.** Actions renders `$GITHUB_STEP_SUMMARY`
 on the run page itself, above the job list, so what goes there has been read by the time
 somebody has found the run — where a log is something you go and open. The commands that write

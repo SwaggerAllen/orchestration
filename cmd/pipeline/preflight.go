@@ -171,6 +171,21 @@ func cmdPreflight(args []string) error {
 		}
 	}
 
+	// The state store, if the project has one. Not folded into the
+	// snapshot check below because a missing token and an unreachable
+	// Worker fail there as one opaque error, and they are different
+	// fixes — and because "this project has no store" is a legitimate
+	// answer that has to be told apart from "its store is broken".
+	if st := stateStore(cfg); st != nil {
+		checks = append(checks, check{"the pipeline's move record", "PIPELINE_STATE_TOKEN", func(ctx context.Context) error {
+			_, err := st.All(ctx)
+			return err
+		}})
+		p.WithState(st)
+	} else {
+		fmt.Println("no state store configured — transitions are unrecorded and the DESIGN 9 invariants are not enforced.")
+	}
+
 	// The whole snapshot last: it is what every command starts with, and
 	// it fails on things no single call above can see — an unmapped
 	// state, a milestone the config names and the tracker doesn't.
@@ -257,6 +272,7 @@ var unexercised = []struct{ scope, why string }{
 	{"pull-requests: write", "opening the PR and flipping the draft off"},
 	{"deployments: write", "recording the stand-in deployment after a merge"},
 	{"LINEAR_API_KEY (write)", "every transition, comment and label the harness makes"},
+	{"PIPELINE_STATE_TOKEN (write)", "recording each move before making it, which is what makes the invariants enforceable"},
 }
 
 func reportUnexercised() {

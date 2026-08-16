@@ -173,7 +173,7 @@ func agentDeps(cfgPath string) (*plane.Plane, host.Host, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return plane.New(linear.New(apiKey), cfg).WithHost(h), h, nil
+	return plane.New(linear.New(apiKey), cfg).WithHost(h).WithState(stateStore(cfg)), h, nil
 }
 
 func cmdAgentClaim(args []string) error {

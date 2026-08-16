@@ -67,3 +67,13 @@ class_name = "SweepDebounce"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["SweepDebounce"]
+
+# The pipeline's record of its own writes (DESIGN §9). One instance per
+# project, addressed by name on the /state/<project>/ path.
+[[durable_objects.bindings]]
+name = "PROJECT_STATE"
+class_name = "ProjectState"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ProjectState"]

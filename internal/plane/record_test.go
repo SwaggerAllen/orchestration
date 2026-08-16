@@ -117,3 +117,37 @@ func TestAnUnreadableStoreFailsTheSnapshot(t *testing.T) {
 		t.Fatal("an unreadable state store produced a snapshot")
 	}
 }
+
+// A project with no store must produce a nil interface, not an interface
+// holding a nil pointer. The second is Go's oldest trap and it would
+// make p.State != nil true and every call panic — on the write path, in
+// production, at the moment a ticket moves.
+func TestNoStoreMeansNoRecordingRatherThanAPanic(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	p.State = nil
+
+	issue := seedIssue(t, tr, cfg, "Worker", protocol.ReadyForDev)
+	if _, err := p.Build(ctx, time.Now(), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.TransitionTicket(ctx, issue.ID, protocol.InProgress, core.RoleDev); err != nil {
+		t.Fatalf("a storeless project could not transition: %v", err)
+	}
+	after, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Recorded) != 0 {
+		t.Error("a storeless project produced records")
+	}
+	// And nothing is judged, which is the safe place to be.
+	for _, tk := range after.Tickets {
+		if tk.ID != issue.ID {
+			continue
+		}
+		if tk.State != protocol.InProgress {
+			t.Errorf("state = %s, want the move to have happened", tk.State)
+		}
+	}
+}

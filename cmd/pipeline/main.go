@@ -22,6 +22,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
 	"github.com/SwaggerAllen/orchestration/internal/sim"
+	"github.com/SwaggerAllen/orchestration/internal/state"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -245,7 +246,7 @@ func cmdSweep(args []string) error {
 	kill := os.Getenv("PIPELINE_KILL_SWITCH")
 	killOn := kill == "1" || kill == "true"
 
-	p := plane.New(linear.New(apiKey), cfg)
+	p := plane.New(linear.New(apiKey), cfg).WithState(stateStore(cfg))
 	// With GitHub credentials present (always true inside Actions), the
 	// snapshot gains run and CI facts and dispatches become real.
 	repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN")
@@ -390,4 +391,28 @@ func cmdSim(args []string) error {
 	}
 	fmt.Printf("scenario %q passed: %d steps\n", res.Scenario, res.StepsRun)
 	return nil
+}
+
+// stateStore builds the pipeline's record of its own writes, or nil.
+//
+// Nil is a supported configuration and not a degraded one: a project
+// with no store records nothing, so the sweep judges nothing, which is
+// exactly where a project sits before it is wired up and where every
+// ticket that predates the store sits forever. The alternative — a
+// store that silently answers "no records" — is the failure this whole
+// mechanism exists to end, so it is never manufactured here.
+//
+// The URL comes from the config because it is the same Worker the
+// metronome runs in and the project already names its deploy endpoint
+// there; the token is a secret and comes from the environment.
+func stateStore(cfg *config.Config) state.Store {
+	st := state.NewWorker(cfg.State.URL, cfg.State.Project, os.Getenv("PIPELINE_STATE_TOKEN"))
+	if st == nil {
+		// Named rather than silent. A missing store is legitimate and a
+		// missing store nobody noticed is how the invariants went quiet
+		// the first time.
+		fmt.Fprintln(os.Stderr, "pipeline: no state store configured — transitions are unrecorded and the §9 invariants are not enforced")
+		return nil
+	}
+	return st
 }

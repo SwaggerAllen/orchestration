@@ -24,10 +24,11 @@
  * restarted without touching or redeploying the metronome.
  */
 import { SweepDebounce } from "./debounce.ts";
+import { ProjectState } from "./projectstate.ts";
 
 // Re-exported because wrangler binds Durable Object classes from the
 // entrypoint module, not from wherever they are defined.
-export { SweepDebounce };
+export { SweepDebounce, ProjectState };
 
 export interface Env {
   /**
@@ -66,6 +67,17 @@ export interface Env {
    * Webhook-driven sweeps go through it; the cron does not (see below).
    */
   SWEEP_DEBOUNCE: DurableObjectNamespace;
+  /**
+   * The pipeline's record of its own writes, one instance per project.
+   * Read and written by the harness over the /state path below.
+   */
+  PROJECT_STATE: DurableObjectNamespace;
+  /**
+   * Shared secret the harness presents on /state (secret). Unset closes
+   * the path entirely, which fails safe: with no store the pipeline
+   * records nothing and judges nothing.
+   */
+  STATE_TOKEN: string;
 }
 
 interface Project {
@@ -353,6 +365,31 @@ export default {
    * is a receiver that gets retried and eventually disabled.
    */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // The state path, before the webhook handling: it is the harness
+    // talking to us rather than a tracker, it authenticates differently,
+    // and it answers GET.
+    const path = new URL(request.url).pathname;
+    if (path.startsWith("/state/")) {
+      // /state/<project>/all | /state/<project>/record — the project
+      // segment is the Durable Object's name, so two projects never
+      // share a row and neither can read the other's.
+      const rest = path.slice("/state/".length);
+      const slash = rest.indexOf("/");
+      if (slash <= 0) {
+        return new Response("expected /state/<project>/<op>\n", { status: 404 });
+      }
+      const project = rest.slice(0, slash);
+      const op = rest.slice(slash);
+      const id = env.PROJECT_STATE.idFromName(project);
+      return env.PROJECT_STATE.get(id).fetch(
+        new Request(`https://state${op}`, {
+          method: request.method,
+          headers: { authorization: request.headers.get("authorization") ?? "" },
+          body: request.method === "POST" ? await request.text() : undefined,
+        }),
+      );
+    }
+
     if (request.method !== "POST") {
       return new Response("method not allowed\n", { status: 405 });
     }
