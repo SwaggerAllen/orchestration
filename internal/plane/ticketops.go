@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -14,11 +15,28 @@ import (
 // TransitionTicket moves one ticket, resolving the protocol state through
 // the config's name table. The agent harness uses this for claims and
 // hand-offs; sweep actions go through Execute instead.
-func (p *Plane) TransitionTicket(ctx context.Context, ticketID string, to protocol.State) error {
+// The role is a parameter rather than a field on the Plane so that no
+// caller can move a ticket without saying who is moving it. Every
+// transition the pipeline makes is recorded under a role, and the
+// writer matrix judges roles — a move recorded as nobody is a move the
+// next sweep reads as the author's and reverts.
+func (p *Plane) TransitionTicket(ctx context.Context, ticketID string, to protocol.State, role core.Role) error {
 	if err := p.resolveStates(ctx); err != nil {
 		return err
 	}
-	return p.Tracker.UpdateIssueState(ctx, ticketID, p.idByState[to])
+	// Write-ahead, and fatal if it fails: see (*Plane).record.
+	if err := p.record(ctx, ticketID, to, role); err != nil {
+		return fmt.Errorf("transition %s: recording the move before making it: %w", ticketID, err)
+	}
+	if err := p.Tracker.UpdateIssueState(ctx, ticketID, p.idByState[to]); err != nil {
+		return err
+	}
+	// So a second transition in the same process records the right edge
+	// rather than the one the snapshot was built with.
+	if p.stateOf != nil {
+		p.stateOf[ticketID] = to
+	}
+	return nil
 }
 
 // CommentTicket posts one comment body verbatim.

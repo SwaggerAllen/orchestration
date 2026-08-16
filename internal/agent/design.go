@@ -45,6 +45,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Mode:        mode,
+		Role:        core.RoleDesign,
 		State:       t.State,
 		Scope:       t.Description,
 		Description: t.Description,
@@ -179,7 +180,7 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 				return err
 			}
 		}
-		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview)
+		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview, core.RoleDesign)
 
 	case "decisionless":
 		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
@@ -189,7 +190,7 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(o.Summary)); err != nil {
 			return err
 		}
-		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDev)
+		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDev, core.RoleDesign)
 
 	case "clear":
 		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
@@ -201,7 +202,7 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
 			return err
 		}
-		return p.TransitionTicket(ctx, res.TicketID, protocol.Designing)
+		return p.TransitionTicket(ctx, res.TicketID, protocol.Designing, core.RoleDesign)
 	}
 	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
 }

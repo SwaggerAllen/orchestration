@@ -76,7 +76,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	plan := &BoundaryPlan{
 		ClaimResult: ClaimResult{
 			TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-			Mode: "boundary", Description: t.Description, State: t.State,
+			Mode: "boundary", Role: core.RoleBoundary, Description: t.Description, State: t.State,
 		},
 		Milestone:       t.Milestone,
 		Done:            map[string]bool{},
@@ -398,7 +398,7 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 	if err := ProposeComposition(ctx, p, plan, now); err != nil {
 		return fmt.Errorf("boundary file: composition: %w", err)
 	}
-	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview)
+	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview, core.RoleBoundary)
 }
 
 func slug(s string) string {
