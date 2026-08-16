@@ -123,3 +123,63 @@ func snippet(r io.Reader) string {
 	b, _ := io.ReadAll(io.LimitReader(r, 512))
 	return strings.TrimSpace(string(b))
 }
+
+func (w *Worker) Reserve(ctx context.Context, kind core.AgentKind, ticketID string, ttl time.Duration) (string, error) {
+	body, err := json.Marshal(map[string]any{
+		"kind": string(kind), "ticket": ticketID, "ttlMs": ttl.Milliseconds(),
+	})
+	if err != nil {
+		return "", err
+	}
+	res, err := w.post(ctx, "/reserve", body)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("state: reserving %s: HTTP %d: %s", kind, res.StatusCode, snippet(res.Body))
+	}
+	var out struct {
+		Granted bool   `json:"granted"`
+		HeldBy  string `json:"heldBy"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("state: decoding the reservation: %w", err)
+	}
+	if out.Granted {
+		return "", nil
+	}
+	// A reservation held by nobody nameable is still a reservation. The
+	// caller must not dispatch, so an empty holder becomes a non-empty
+	// answer rather than reading as "granted".
+	if out.HeldBy == "" {
+		return "another run", nil
+	}
+	return out.HeldBy, nil
+}
+
+func (w *Worker) Release(ctx context.Context, kind core.AgentKind, ticketID string) error {
+	body, err := json.Marshal(map[string]any{"kind": string(kind), "ticket": ticketID})
+	if err != nil {
+		return err
+	}
+	res, err := w.post(ctx, "/release", body)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("state: releasing %s: HTTP %d: %s", kind, res.StatusCode, snippet(res.Body))
+	}
+	return nil
+}
+
+func (w *Worker) post(ctx context.Context, op string, body []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(op), bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("authorization", "Bearer "+w.Token)
+	req.Header.Set("content-type", "application/json")
+	return w.HTTP.Do(req)
+}

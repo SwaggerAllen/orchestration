@@ -31,6 +31,7 @@ package state
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 )
@@ -47,6 +48,25 @@ type Store interface {
 	// "I have no record" and "I left it in the zero state" are different
 	// answers and only one of them means "do not judge".
 	All(ctx context.Context) (map[string]core.RecordedMove, error)
+	// Reserve claims an agent kind for a ticket, before dispatching it.
+	// Returns the ticket already holding it, or "" when granted.
+	//
+	// It exists because the sweep's own singularity guard cannot answer
+	// in time: that guard reads a run marker the harness posts at claim,
+	// inside the dispatched job, after boot, checkout, toolchain and
+	// deps — about ninety seconds. Any sweep in that window sees an idle
+	// agent and dispatches again, and two boundary agents ran one ticket
+	// to completion that way. The reservation is written by the thing
+	// that decides, before it acts, so the record exists before the next
+	// sweep can read it.
+	//
+	// ttl bounds it. A dispatched job can die before it ever claims — a
+	// lost runner, a workflow that will not parse — and a lock nobody
+	// releases is an agent kind that never runs again.
+	Reserve(ctx context.Context, kind core.AgentKind, ticketID string, ttl time.Duration) (heldBy string, err error)
+	// Release drops a reservation when a run ends. Best-effort: the TTL
+	// is what keeps correctness from depending on this arriving.
+	Release(ctx context.Context, kind core.AgentKind, ticketID string) error
 }
 
 // Memory is the in-process Store for tests and the sim.
@@ -60,6 +80,7 @@ type Memory struct {
 	// FailReads makes All error, standing in for the same outage on the
 	// read side, where the safe answer is to judge nothing.
 	FailReads error
+	res       map[core.AgentKind]string
 }
 
 func NewMemory() *Memory { return &Memory{m: map[string]core.RecordedMove{}} }
@@ -88,4 +109,29 @@ func (s *Memory) All(_ context.Context) (map[string]core.RecordedMove, error) {
 		out[k] = v
 	}
 	return out, nil
+}
+
+func (s *Memory) Reserve(_ context.Context, kind core.AgentKind, ticketID string, ttl time.Duration) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.FailWrites != nil {
+		return "", s.FailWrites
+	}
+	if s.res == nil {
+		s.res = map[core.AgentKind]string{}
+	}
+	if held, ok := s.res[kind]; ok && held != ticketID {
+		return held, nil
+	}
+	s.res[kind] = ticketID
+	return "", nil
+}
+
+func (s *Memory) Release(_ context.Context, kind core.AgentKind, ticketID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.res[kind] == ticketID {
+		delete(s.res, kind)
+	}
+	return nil
 }

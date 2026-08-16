@@ -56,6 +56,27 @@ export class ProjectState {
         at INTEGER NOT NULL
       )
     `);
+    // Dispatch reservations, one row per agent kind.
+    //
+    // The sweep's singularity guard reads a run marker the harness posts
+    // at *claim* — inside the dispatched job, after runner boot,
+    // checkout, toolchain and dependency install. Measured on catapult:
+    // about ninety seconds between the dispatch and the marker proving
+    // it happened. Any sweep landing in that window sees an idle agent
+    // and dispatches again, and two boundary agents ran one ticket to
+    // completion that way: two scans, twenty-two minutes of model spend,
+    // four tickets for two findings.
+    //
+    // A reservation is written by the thing that *decides* — the sweep,
+    // before it dispatches — so the record exists before the next sweep
+    // can read it. That closes the window rather than narrowing it.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS reservations (
+        kind TEXT PRIMARY KEY,
+        ticket_id TEXT NOT NULL,
+        at INTEGER NOT NULL
+      )
+    `);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -81,6 +102,53 @@ export class ProjectState {
         };
       }
       return Response.json(out);
+    }
+
+    // Reserve is compare-and-set, and it is the whole point: two sweeps
+    // racing both call it and exactly one is told it won. Durable
+    // Objects serialize requests to one instance, so this needs no
+    // transaction beyond that guarantee — which is the property DESIGN
+    // §13 named when it said one object per project *is* the mutex.
+    if (request.method === "POST" && url.pathname === "/reserve") {
+      const body = (await request.json()) as { kind: string; ticket: string; ttlMs: number };
+      if (!body?.kind || !body?.ticket) {
+        return new Response("kind and ticket are required\n", { status: 400 });
+      }
+      // A reservation expires. A dispatched job can die before it ever
+      // claims — a runner lost, a workflow file that will not parse —
+      // and a lock nobody can release is an agent kind that never runs
+      // again. The TTL is the caller's, because only the caller knows
+      // how long boot-to-claim takes for that project.
+      const ttl = typeof body.ttlMs === "number" && body.ttlMs > 0 ? body.ttlMs : 300_000;
+      const now = Date.now();
+      const held = [...this.sql.exec(
+        "SELECT ticket_id, at FROM reservations WHERE kind = ? AND at > ?",
+        body.kind, now - ttl,
+      )];
+      if (held.length > 0 && held[0].ticket_id !== body.ticket) {
+        return Response.json(
+          { granted: false, heldBy: held[0].ticket_id, since: held[0].at },
+          { status: 200 },
+        );
+      }
+      this.sql.exec(
+        `INSERT INTO reservations (kind, ticket_id, at) VALUES (?, ?, ?)
+         ON CONFLICT(kind) DO UPDATE SET ticket_id = excluded.ticket_id, at = excluded.at`,
+        body.kind, body.ticket, now,
+      );
+      return Response.json({ granted: true }, { status: 200 });
+    }
+
+    // Released when a run ends, so the next dispatch does not wait out
+    // the TTL. Best-effort: the TTL is what makes correctness not depend
+    // on this arriving.
+    if (request.method === "POST" && url.pathname === "/release") {
+      const body = (await request.json()) as { kind: string; ticket: string };
+      if (!body?.kind) {
+        return new Response("kind is required\n", { status: 400 });
+      }
+      this.sql.exec("DELETE FROM reservations WHERE kind = ? AND ticket_id = ?", body.kind, body.ticket ?? "");
+      return new Response("released\n", { status: 200 });
     }
 
     if (request.method === "POST" && url.pathname === "/record") {

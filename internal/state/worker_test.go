@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -132,5 +133,70 @@ func TestATypedNilIsNotAUsableStore(t *testing.T) {
 	}
 	if s != nil {
 		t.Fatal("an unconfigured project produced a non-nil Store")
+	}
+}
+
+// Two sweeps racing both call Reserve and exactly one is told it won.
+// The loser gets the ticket already holding it, which is what turns a
+// duplicate dispatch into no dispatch at all.
+func TestReserveReportsTheHolderToTheLoser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/reserve") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"granted": false, "heldBy": "tkt_1"})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	held, err := NewWorker(srv.URL, "p", "sec").Reserve(context.Background(), core.AgentBoundary, "tkt_2", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held != "tkt_1" {
+		t.Errorf("heldBy = %q, want the ticket already holding it", held)
+	}
+}
+
+// A refusal that names nobody is still a refusal. Returning "" there
+// would read as granted and dispatch the second agent — the exact
+// failure the reservation exists to prevent.
+func TestARefusalWithNoNamedHolderIsStillARefusal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"granted": false})
+	}))
+	defer srv.Close()
+
+	held, err := NewWorker(srv.URL, "p", "sec").Reserve(context.Background(), core.AgentDev, "tkt_2", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held == "" {
+		t.Error("an unnamed refusal read as a grant")
+	}
+}
+
+func TestMemoryReservesOncePerKind(t *testing.T) {
+	ctx := context.Background()
+	m := NewMemory()
+	if held, _ := m.Reserve(ctx, core.AgentBoundary, "t1", time.Minute); held != "" {
+		t.Fatalf("first reservation refused, held by %q", held)
+	}
+	if held, _ := m.Reserve(ctx, core.AgentBoundary, "t2", time.Minute); held != "t1" {
+		t.Errorf("second reservation granted or misreported: %q", held)
+	}
+	// The holder re-reserving is a resume, not a second agent.
+	if held, _ := m.Reserve(ctx, core.AgentBoundary, "t1", time.Minute); held != "" {
+		t.Errorf("the holder was refused its own reservation: %q", held)
+	}
+	// A different kind is a different agent.
+	if held, _ := m.Reserve(ctx, core.AgentDev, "t2", time.Minute); held != "" {
+		t.Errorf("one kind's reservation blocked another: %q", held)
+	}
+	if err := m.Release(ctx, core.AgentBoundary, "t1"); err != nil {
+		t.Fatal(err)
+	}
+	if held, _ := m.Reserve(ctx, core.AgentBoundary, "t2", time.Minute); held != "" {
+		t.Errorf("release did not free the kind: %q", held)
 	}
 }
