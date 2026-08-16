@@ -574,6 +574,9 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The claim recorded where the run holds the ticket. Without it the
+	// move is recorded with no origin, and a half-edge is unjudgeable.
+	p.KnownState(res.TicketID, res.State)
 
 	if res.Mode == "reconcile" {
 		if *verdict == "" {
@@ -651,6 +654,9 @@ func cmdAgentAbort(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The claim recorded where the run holds the ticket. Without it the
+	// move is recorded with no origin, and a half-edge is unjudgeable.
+	p.KnownState(res.TicketID, res.State)
 	if err := agent.Abort(context.Background(), p, res, *reason, *message); err != nil {
 		return err
 	}

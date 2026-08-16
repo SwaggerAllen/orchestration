@@ -54,6 +54,26 @@ func (p *Plane) WithHost(h host.Host) *Plane {
 	return p
 }
 
+// KnownState tells the plane where a ticket stands without building a
+// snapshot to find out.
+//
+// Recording a move records an *edge*, and the origin comes from the
+// snapshot Build took. The agent's finish and abort steps are separate
+// processes from the claim: they load claim.json and transition, with no
+// Build behind them and therefore no origin — so the move went down
+// half-recorded, and a later sweep judging that half-edge planned a
+// revert to nowhere and died on it, taking the whole pass with it.
+//
+// The claim already knows: it recorded the state the run holds while it
+// works. This hands that back rather than spending a snapshot to
+// rediscover it.
+func (p *Plane) KnownState(ticketID string, s protocol.State) {
+	if p.stateOf == nil {
+		p.stateOf = map[string]protocol.State{}
+	}
+	p.stateOf[ticketID] = s
+}
+
 // WithState attaches the pipeline's own record of its writes. Without
 // it the snapshot carries no records, so nothing is judged — which is
 // the safe direction, and is exactly what a project that has not been
