@@ -25,6 +25,8 @@ func cmdAgent(args []string) error {
 	switch args[0] {
 	case "claim":
 		return cmdAgentClaim(args[1:])
+	case "reprompt":
+		return cmdAgentReprompt(args[1:])
 	case "finish":
 		return cmdAgentFinish(args[1:])
 	case "abort":
@@ -38,6 +40,92 @@ func cmdAgent(args []string) error {
 	default:
 		return fmt.Errorf("agent: unknown subcommand %q", args[0])
 	}
+}
+
+// cmdAgentReprompt rebuilds prompt.md from a claim already made, after
+// the job has checked out the ticket branch.
+//
+// It exists because claiming and reading the tree are two different
+// moments and the design action cannot put them in the order it wants.
+// The branch to check out is an *output* of the claim — an existing PR's
+// branch, or one derived from the key and title — so checkout cannot
+// come first. But the claim also inlines the confirmed non-asks (DESIGN
+// §4) into the prompt, and at that moment the tree is still on whatever
+// the caller checked out: main.
+//
+// On a first pass those are the same file and nothing shows. On a
+// re-pass they are not, and the re-pass is the case that matters: the
+// design agent maintains that document on the branch, so the copy it was
+// handed had its own prior decisions deleted from it. Measured on ORC-16
+// — eleven entries written by two earlier passes of the same ticket, none
+// of them visible to the third. An agent told to read the decision
+// record and given a censored one re-litigates settled ground or appends
+// a duplicate of an entry it wrote itself, and "add and amend, never
+// delete" cannot hold when the amendment's subject is invisible.
+//
+// Re-reading rather than reordering, because the claim's transition must
+// not be re-run: it is the claim.
+func cmdAgentReprompt(args []string) error {
+	fs := flag.NewFlagSet("agent reprompt", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	kind := fs.String("kind", "design", "agent kind the claim was made for")
+	outDir := fs.String("out", "", "the claim's directory; claim.json is read and prompt.md rewritten")
+	promptTemplate := fs.String("prompt-template", "", "agent base prompt file")
+	repoContext := fs.String("repo-context", "", "shared repo orientation (prompts/repo-context.md)")
+	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to")
+	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *outDir == "" || *promptTemplate == "" {
+		return fmt.Errorf("agent reprompt: --out and --prompt-template are required")
+	}
+	if *kind != "design" {
+		return fmt.Errorf("agent reprompt: only design needs this; %q assembles its prompt against a tree that is already right", *kind)
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(filepath.Join(*outDir, "claim.json"))
+	if err != nil {
+		return err
+	}
+	var res agent.ClaimResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return err
+	}
+	// The one thing that changed: the tree under our feet.
+	before := res.NonAsks
+	res.NonAsks = agent.ClaimNonAsks(cfg)
+	tpl, err := os.ReadFile(*promptTemplate)
+	if err != nil {
+		return err
+	}
+	var rc []byte
+	if *repoContext != "" {
+		if rc, err = os.ReadFile(*repoContext); err != nil {
+			return err
+		}
+	}
+	prompt := assembleDesignPrompt(composeBase(string(tpl), string(rc)), &res, *outcomePath)
+	prompt += harnessFindingsSection(*findingsPath)
+	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
+		return err
+	}
+	// Said out loud, because a silent no-op and a silent correction look
+	// identical in a log and only one of them means the branch had
+	// nothing extra to say.
+	switch {
+	case before == nil || res.NonAsks == nil:
+		fmt.Println("reprompt: prompt.md rebuilt from the branch")
+	case before.Body == res.NonAsks.Body:
+		fmt.Printf("reprompt: %s is identical on the branch; prompt.md rebuilt unchanged\n", res.NonAsks.Path)
+	default:
+		fmt.Printf("reprompt: %s differs on the branch (%d bytes at claim, %d now) — the prompt now carries the branch's copy\n",
+			res.NonAsks.Path, len(before.Body), len(res.NonAsks.Body))
+	}
+	return nil
 }
 
 // cmdLiveSuiteReport posts the live-suite result on the boundary ticket.

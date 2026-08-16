@@ -104,6 +104,27 @@ runs:
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
 
+    # The prompt inlines the confirmed non-asks (DESIGN §4), and claim
+    # assembled it one step too early: the branch to check out is an
+    # output of the claim, so the tree was still on main. This pass
+    # maintains that document on the branch, so on a re-pass the copy
+    # handed to the model had its own earlier decisions deleted from it —
+    # measured on ORC-16, where the third pass was shown none of the
+    # eleven entries the first two had written.
+    # No tracker credential: the claim is already made and on disk, so
+    # this reads claim.json and the working tree and talks to nothing.
+    - name: rebuild the prompt against the branch
+      shell: bash
+      run: |
+        pipeline agent reprompt \
+          --kind design \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
+
     # The merge-base the design is drawn against (DESIGN §2.4), read
     # before the model writes anything. Computed here rather than in the
     # harness because only the runner has the checkout, and taken as a

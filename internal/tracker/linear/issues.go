@@ -3,6 +3,7 @@ package linear
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
@@ -172,6 +173,14 @@ func (c *Client) ListIssues(ctx context.Context, teamID, projectID string) ([]tr
 					Body: cm.Body, ActorID: actorID(cm.User, cm.BotActor), CreatedAt: cm.CreatedAt,
 				})
 			}
+			// Linear's connections arrive newest first; the port promises
+			// oldest first (tracker.Issue.Comments). Sorted here rather
+			// than asked for in the query because the ordering is a
+			// contract of the port, and a query argument is one edit away
+			// from being dropped by someone tuning the GraphQL.
+			sort.SliceStable(issue.Comments, func(a, b int) bool {
+				return issue.Comments[a].CreatedAt.Before(issue.Comments[b].CreatedAt)
+			})
 			var newestEntry, newestChange time.Time
 			for _, h := range n.History.Nodes {
 				if h.ToState == nil {

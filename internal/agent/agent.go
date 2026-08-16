@@ -150,7 +150,7 @@ type NonAsks struct {
 	Err string `json:",omitempty"`
 }
 
-// claimNonAsks reads the confirmed non-asks document for a pass that
+// ClaimNonAsks reads the confirmed non-asks document for a pass that
 // proposes. It lives in the project repo, which the calling job has
 // already checked out — but cwd on a real run is the pipeline checkout,
 // not the project, so the path resolves against the config's directory
@@ -159,7 +159,7 @@ type NonAsks struct {
 // An unreadable file is not a reason to fail the claim — the pass still
 // has work to do — so the failure travels to the prompt instead of
 // ending the run.
-func claimNonAsks(cfg *config.Config) *NonAsks {
+func ClaimNonAsks(cfg *config.Config) *NonAsks {
 	n := &NonAsks{Path: cfg.NonAsksPath}
 	if n.Path == "" {
 		return n

@@ -307,3 +307,45 @@ func oneIssue(t *testing.T, node map[string]any) tracker.Issue {
 	}
 	return issues[0]
 }
+
+// Linear returns connections newest first. The port promises oldest
+// first (tracker.Issue.Comments), and five readers already depended on
+// that promise before anything enforced it — "the newest merged marker"
+// returned the oldest, the design prompt printed a reversed history
+// under a header claiming otherwise, and the rehearsal reverted commits
+// in landing order rather than against it.
+func TestCommentsComeBackOldestFirst(t *testing.T) {
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		return issuesPage([]map[string]any{issueNode("i1", "PIPE-1", map[string]any{
+			"comments": map[string]any{
+				// As Linear sends them: newest first.
+				"nodes": []any{
+					map[string]any{"body": "third", "createdAt": "2026-01-03T00:00:00Z", "user": nil, "botActor": nil},
+					map[string]any{"body": "second", "createdAt": "2026-01-02T00:00:00Z", "user": nil, "botActor": nil},
+					map[string]any{"body": "first", "createdAt": "2026-01-01T00:00:00Z", "user": nil, "botActor": nil},
+				},
+				"pageInfo": map[string]any{"hasNextPage": false},
+			},
+		})}, false, ""), nil
+	})
+	issues, err := New("lin_api_test", WithEndpoint(srv.URL)).ListIssues(context.Background(), "team", "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || len(issues[0].Comments) != 3 {
+		t.Fatalf("got %d issues", len(issues))
+	}
+	var got []string
+	for _, c := range issues[0].Comments {
+		got = append(got, c.Body)
+	}
+	if strings.Join(got, ",") != "first,second,third" {
+		t.Errorf("comment order = %v, want oldest first", got)
+	}
+	// And the property the readers actually use: the last element is the
+	// newest, which is what a backwards walk for "the newest marker"
+	// depends on.
+	if issues[0].Comments[len(issues[0].Comments)-1].Body != "third" {
+		t.Error("the last comment is not the newest")
+	}
+}

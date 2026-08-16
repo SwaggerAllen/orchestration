@@ -54,7 +54,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	}
 	// Read before proposing (DESIGN §4), and written back to in the same
 	// artifacts commit when a push-back establishes a new refusal.
-	res.NonAsks = claimNonAsks(p.Config)
+	res.NonAsks = ClaimNonAsks(p.Config)
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
 		res.Branch = pr.Branch
 		res.PRNumber = pr.Number

@@ -635,3 +635,52 @@ func TestConflictsCountAcrossBothDetectionPoints(t *testing.T) {
 		t.Errorf("want Ready for rework, got %v", a.To)
 	}
 }
+
+// The run correlated to a ticket is the newest of any kind; the kind
+// expected comes from the state. When a dispatch is rejected outright —
+// an invalid workflow file, a missing secret — no run of the expected
+// kind ever exists, and the ticket used to report a dead run of that
+// kind naming a *different* agent's run id. That sentence sent a real
+// debugging session at a merge conflict for an hour while the actual
+// fault was a duplicate YAML key in the reconcile workflow.
+func TestAStaleClaimSaysSoWhenTheAgentWasNeverDispatched(t *testing.T) {
+	s := snap(tk("T1", protocol.Reconciling, func(t *Ticket) {
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "31912796533", Kind: AgentDev, Live: false, EndedAt: t0.Add(-2 * time.Hour)}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want Blocked, got %v", a)
+	}
+	if strings.Contains(a.Prose, "The reconcile run claiming this ticket") {
+		t.Errorf("a dev run is described as the reconcile run:\n%s", a.Prose)
+	}
+	for _, want := range []string{"No reconcile run was ever dispatched", "dev run `31912796533`", "workflow file"} {
+		if !strings.Contains(a.Prose, want) {
+			t.Errorf("the comment is missing %q:\n%s", want, a.Prose)
+		}
+	}
+	// The marker carries what was actually found, so the history is
+	// readable without re-deriving it from prose.
+	if a.Marker == nil || a.Marker.Fields["dispatched"] != string(AgentDev) {
+		t.Errorf("the marker does not record the run's real kind: %v", a.Marker)
+	}
+}
+
+// The ordinary case is unchanged: the run is the right kind and it died.
+func TestAStaleClaimOnTheRightAgentReadsAsBefore(t *testing.T) {
+	s := snap(tk("T1", protocol.Reconciling, func(t *Ticket) {
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "99", Kind: AgentReconcile, Live: false, EndedAt: t0.Add(-2 * time.Hour)}
+	}))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want Blocked, got %v", a)
+	}
+	if !strings.Contains(a.Prose, "The reconcile run claiming this ticket is no longer live") {
+		t.Errorf("the ordinary stale-claim wording changed:\n%s", a.Prose)
+	}
+	if a.Marker.Fields["dispatched"] != "" {
+		t.Error("a matching run recorded a mismatch")
+	}
+}

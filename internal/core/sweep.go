@@ -493,6 +493,25 @@ func staleClaimFor(s *Snapshot, t *Ticket) []Action {
 	// it used to be a second field named `state` saying the same thing,
 	// and one fact under two names is the beginning of them disagreeing.
 	m := &marker.Marker{Kind: marker.StaleClaim, Fields: map[string]string{"run": t.Run.ID}}
+
+	// The run correlated to a ticket is the newest of *any* kind, while
+	// the kind expected here comes from the state. When they disagree,
+	// the honest reading is that this state's agent was never dispatched
+	// at all — and saying "the reconcile run is no longer live" about a
+	// dev run sends the reader looking for a crash that never happened.
+	//
+	// That is not hypothetical: a project whose reconcile workflow file
+	// was invalid YAML had every dispatch rejected by GitHub, and the
+	// ticket reported a dead reconcile run whose id belonged to the dev
+	// pass that finished cleanly an hour earlier. The state was right,
+	// the run was right, the sentence joining them was not.
+	if t.Run.Kind != "" && t.Run.Kind != kind {
+		m.Fields["dispatched"] = string(t.Run.Kind)
+		return block(t, m, fmt.Sprintf(
+			"No %s run was ever dispatched for this ticket. The newest run on it is the %s run `%s`, which ended before this state was entered — so the claim has nothing behind it and the grace period passed.\n\n"+
+				"Look at the dispatch rather than at the run: the usual causes are the %s workflow file failing to parse (GitHub rejects the dispatch and shows the run named by its file path), a missing secret, or the workflow having been renamed.",
+			kind, t.Run.Kind, t.Run.ID, kind), "stale claim, agent never dispatched")
+	}
 	return block(t, m,
 		fmt.Sprintf("The %s run claiming this ticket is no longer live and the grace period passed. At one agent a stuck claim halts the queue, so it is detected rather than waited out (DESIGN §12).", kind),
 		"stale claim")
