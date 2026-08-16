@@ -37,7 +37,17 @@ should change. The author reviews your ranking before the queue resumes.
   has been rescheduled rather than repaired. If you find a bug, say so
   in a proposal description marked kind `debt` ONLY if the debt is the
   cause; the bug itself is the author's to file.
+- **Every proposal names its `subject`**: the concrete thing it is
+  about, as the repository names it — a file path, a config key, a mix
+  task, a gate line, a doc section, a module. `ci.yml`,
+  `qualityGates`, `mix xref graph --label compile-connected`,
+  `Catapult.Foundation.licensing/0`. The harness derives the dedupe key
+  from it, so two scans that find the same thing must agree here even
+  when they describe it differently. Name the thing, not your sentence
+  about it: `docs/non-goals.md` rather than "the decision record is
+  missing entries".
 - **Every proposal carries a dedupe key**: `<milestone>/<finding-slug>`.
+  Still required, and used only when `subject` is absent.
   A re-run files nothing twice because of this key. Check the retro
   notes and existing tickets before proposing — archived work is
   invisible to search, the retro note is your duplicate detector.
@@ -59,6 +69,7 @@ Write JSON to the outcome path given below:
   "proposals": [
     {"title": "...", "description": "the argument — why this is worth doing",
      "kind": "debt" | "design", "gating": true|false,
+     "subject": "<the file, key, task, gate or module this is about>",
      "dedupe": "<milestone>/<finding-slug>"}
   ],
   "ranking": [

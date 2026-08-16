@@ -204,6 +204,36 @@ type Proposal struct {
 	// Dedupe is milestone+finding; a re-run files nothing twice because
 	// this key is checked against existing issues (DESIGN §10).
 	Dedupe string `json:"dedupe"`
+	// Subject is the concrete thing this proposal is about, named as the
+	// repository names it: a file path, a config key, a mix task, a gate
+	// line, a doc section, a module. The key is derived from it.
+	//
+	// Dedupe alone was the model's phrasing for one scan, and phrasing is
+	// a choice rather than a fact — so two scans of one tree wrote two
+	// keys for one finding and both filed. Measured on ORC-45: four
+	// tickets for two findings, keyed `declared-gate-set-not-armed-in-ci`
+	// and `arm-the-unarmed-gate-set` for the same gate work.
+	//
+	// A subject is not immune to rewording, but it is a fact about the
+	// repository rather than a sentence about the finding, and two scans
+	// naming one gate agree far more readily than two scans describing
+	// it. Title similarity was measured as an alternative and rejected:
+	// on the real ORC-45 pairs it scores 0.08 and 0.19 against a maximum
+	// of 0.07 among unrelated proposals from the same scan, which is a
+	// margin of one hundredth on a sample of two — a coincidence rather
+	// than a threshold, and it vanishes entirely under stemming.
+	Subject string `json:"subject"`
+}
+
+// dedupeKey is the key a proposal is filed under: derived from the
+// subject when the scan named one, and falling back to the model's own
+// key when it did not, so an older scan replayed by a resume still
+// dedupes against what it filed.
+func dedupeKey(milestone string, p Proposal) string {
+	if strings.TrimSpace(p.Subject) == "" {
+		return p.Dedupe
+	}
+	return slug(milestone) + "/" + slug(p.Subject)
 }
 
 // RankEntry re-ranks one existing ticket (grooming, DESIGN §10 step 7).
@@ -348,26 +378,39 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		if err != nil {
 			return err
 		}
-		existing := map[string]bool{}
 		keyToID := map[string]string{}
 		for _, t := range snap.Tickets {
 			keyToID[t.Key] = t.ID
-			for _, line := range strings.Split(t.Description, "\n") {
-				m, ok, err := marker.Parse(line)
-				if err == nil && ok && m.Kind == marker.TriageProposal {
-					existing[m.Fields["dedupe"]] = true
-				}
+		}
+		// Read from the tracker, not from the snapshot. Build skips
+		// triage-category states and FileTriageProposal files into
+		// exactly those, so a dedupe set assembled from snap.Tickets
+		// could never contain a filed proposal — the check was inert
+		// rather than weak, and two identical keys would have made two
+		// tickets as readily as two different ones did.
+		filedAlready, err := p.ListTriageProposals(ctx)
+		if err != nil {
+			return fmt.Errorf("boundary file: reading open proposals: %w", err)
+		}
+		existing := map[string]bool{}
+		for _, tp := range filedAlready {
+			if tp.Dedupe != "" {
+				existing[tp.Dedupe] = true
 			}
 		}
 
 		filed, skipped := 0, 0
 		var failures []string
 		for _, prop := range ps.Proposals {
-			if existing[prop.Dedupe] {
+			key := dedupeKey(plan.Milestone, prop)
+			if existing[key] {
 				skipped++
 				continue
 			}
-			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, prop.Dedupe); err != nil {
+			// Held so the rest of this scan dedupes against it too: two
+			// proposals from one scan can name one subject.
+			existing[key] = true
+			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, key); err != nil {
 				// Collected, not returned. Returning on the first error
 				// left the tickets already filed in the tracker while the
 				// step comment said the step never ran — the audit trail
