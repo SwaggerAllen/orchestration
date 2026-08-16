@@ -391,6 +391,22 @@ trustworthy for the same reason in both cases: design *creates* the screen files
 sketch *is* the system touch list — with CI auditing both against the file maps (§9), because
 a diff that wanders outside its declared labels is a mutex nobody took.
 
+**"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
+commits are on main, so a ticket starting afterwards contains that work rather than racing it —
+there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
+deploy-detection window instead, which on a platform with no deploy webhook is up to an hour of
+a queue held by a ticket that was finished. If the deploy fails and the author sends it back,
+it re-enters the queue and re-takes the mutex then, which is ordinary contention rather than a
+special case.
+
+**The dispatcher asks the same question the pickup assertion does**, through the same
+function. It used not to ask at all, so a ticket whose label was held was dispatched into an
+assertion that could only refuse — and because the refusal leaves the ticket in the queue, the
+next beat did it again. Each of those was a full billed job with a checkout, a toolchain and a
+service container, spent to be told no. Two places asking one question is exactly the shape
+that drifts, so there is one `MutexHolder` and three callers: the promotion revert, the
+pickup assertion, and the dispatcher.
+
 **Files owned by no system** — the router, the mix manifest — are named in the sketch when
 touched and left to git's textual conflict detection. Giving them labels would serialize
 every ticket through them, which is the mutex failing in the other direction.
@@ -1070,6 +1086,25 @@ mean parked — a rehearsal repo between rehearsals, or a project paused for a w
 consuming an allowance the active project needs. The flag is still passed into the binary as
 well, so a hand-dispatched run refuses for the same reason rather than relying on the workflow
 alone to guard it.
+
+**A sweep is ordered furthest-down-the-pipeline first, and folds its own decisions forward.**
+Corrections and reverts still run before everything, so no later rule acts on a state the sweep
+is about to undo. After that the pass takes the tickets nearest the end of the pipeline first,
+and each planned transition is applied to a working copy that the remaining rules read.
+
+Without the fold, a pass reasons entirely about the world as it stood when the snapshot was
+built, so every hop needs its own beat to become visible — and the effects are not merely slow.
+A ticket whose deploy had landed still counted as `Merged` for the whole pass, holding its
+mutex labels against a queued ticket that the same pass then dispatched into a pickup assertion
+guaranteed to refuse it. Resolution before consumption is the whole ordering: retire what is
+finished, then decide what may start.
+
+`Sweep` stays a pure function — no I/O, same input to same output — because the fold happens on
+a copy and the caller's snapshot is never written. What makes it safe to act on a prediction is
+downstream: `Execute` applies actions in slice order and stops at the first error, so an action
+that assumed a transition which then failed to land never runs. **One transition per ticket per
+pass** remains, now for a second reason: a ticket's new state is visible to later rules, and
+they must not judge a state this pass has just produced.
 
 **Run summaries carry what a human is meant to read.** Actions renders `$GITHUB_STEP_SUMMARY`
 on the run page itself, above the job list, so what goes there has been read by the time

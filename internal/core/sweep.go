@@ -17,9 +17,26 @@ import (
 // the convergence loop in the sim — reach a fixpoint. Ring 2 asserts the
 // fixpoint on every scenario.
 //
-// Rule order matters and is deliberate: corrections and reverts first, so
-// no later rule dispatches work against a state the sweep itself is about
-// to undo.
+// Rule order matters and is deliberate, in two directions.
+//
+// Corrections and reverts run first, so no later rule dispatches work
+// against a state the sweep itself is about to undo.
+//
+// Everything else runs **furthest down the pipeline first**, and each
+// planned transition is folded into a working copy so the rules that run
+// after it see the state it produces. Without that fold a pass reasons
+// entirely about the world as it was at the top of the sweep, and every
+// hop takes its own beat to become visible: a ticket whose deploy landed
+// sat in `Merged` holding its mutex labels for the whole pass, and the
+// queued ticket sharing a label was dispatched into a pickup assertion
+// that could not pass — once per beat, at a full billed job each time.
+// Resolution before consumption is the whole ordering.
+//
+// It stays a pure function. No I/O, same input to same output; the fold
+// happens on a copy, and the caller's snapshot is untouched. What makes
+// it safe to act on a prediction is downstream: Execute applies actions
+// in slice order and stops at the first error, so if the transition a
+// later action assumed never lands, that later action never runs either.
 func Sweep(s *Snapshot) []Action {
 	// Kill switch: nothing new starts, in-flight runs finish (DESIGN §13).
 	// It halts corrections too — the author flipping it wants the system's
@@ -28,67 +45,164 @@ func Sweep(s *Snapshot) []Action {
 		return nil
 	}
 
+	// The working copy. Rules read w; the caller's snapshot is never
+	// written, so a caller that sweeps twice gets the same answer twice.
+	w := s.working()
+
 	var acts []Action
-	tickets := make([]*Ticket, len(s.Tickets))
-	copy(tickets, s.Tickets)
-	sort.Slice(tickets, func(i, j int) bool { return tickets[i].Key < tickets[j].Key })
+	tickets := make([]*Ticket, len(w.Tickets))
+	copy(tickets, w.Tickets)
+	// Deepest first, by key within a rank so the order is total and the
+	// output is reproducible.
+	sort.Slice(tickets, func(i, j int) bool {
+		di, dj := pipelineDepth(tickets[i].State), pipelineDepth(tickets[j].State)
+		if di != dj {
+			return di > dj
+		}
+		return tickets[i].Key < tickets[j].Key
+	})
 
-	// reverted tracks tickets this sweep is already correcting, so later
-	// rules don't act on a state that is about to be undone.
-	reverted := map[string]bool{}
+	// moved tracks tickets this sweep already has a transition for. One
+	// transition per ticket per pass: later rules must not act on a state
+	// that is about to be undone, and — now that transitions are folded —
+	// must not act on one this pass has just produced either.
+	moved := map[string]bool{}
+	plan := func(a []Action) {
+		if len(a) == 0 {
+			return
+		}
+		acts = append(acts, a...)
+		w.fold(a, moved)
+	}
 
 	for _, t := range tickets {
-		if a, ok := revertFor(s, t); ok {
-			acts = append(acts, a...)
-			reverted[t.ID] = true
+		if a, ok := revertFor(w, t); ok {
+			plan(a)
 		}
 	}
-	for _, t := range tickets {
-		if reverted[t.ID] {
-			continue
+	unmoved := func(fn func(*Snapshot, *Ticket) []Action) {
+		for _, t := range tickets {
+			if moved[t.ID] {
+				continue
+			}
+			plan(fn(w, t))
 		}
-		acts = append(acts, correctionsFor(s, t)...)
 	}
-	for _, t := range tickets {
-		if reverted[t.ID] {
-			continue
-		}
-		acts = append(acts, ciFor(s, t)...)
-	}
-	// Assignment last among the per-ticket rules: it is derived from the
+	unmoved(correctionsFor)
+	// Resolution first: a deploy that landed retires the ticket, which
+	// releases its mutex labels and clears it as a blocker for everything
+	// judged after this point.
+	unmoved(postDeployFor)
+	unmoved(ciFor)
+	unmoved(escalationsFor)
+	unmoved(staleClaimFor)
+
+	// The boundary ticket is created when the last milestone ticket
+	// resolves, so it runs after the resolutions above rather than
+	// against the state they replaced.
+	plan(boundaryFor(w))
+
+	// Assignment after every transition is known: it is derived from the
 	// state a sweep leaves behind, and a ticket this pass is moving gets
 	// its assignee on the next one rather than one keystroke early.
 	for _, t := range tickets {
-		if reverted[t.ID] {
+		if moved[t.ID] {
 			continue
 		}
-		acts = append(acts, assignmentFor(s, t)...)
+		acts = append(acts, assignmentFor(w, t)...)
 	}
-	for _, t := range tickets {
-		if reverted[t.ID] {
-			continue
-		}
-		acts = append(acts, escalationsFor(s, t)...)
-		acts = append(acts, postDeployFor(s, t)...)
-		acts = append(acts, staleClaimFor(s, t)...)
-	}
-
-	acts = append(acts, boundaryFor(s)...)
 
 	// A ticket this sweep is already moving must not also be dispatched —
 	// the dispatch would race the transition it hasn't seen. The next
-	// sweep dispatches from the settled state.
-	moving := map[string]bool{}
+	// sweep dispatches from the settled state. Other tickets, though, are
+	// dispatched against the folded world, which is the point.
+	acts = append(acts, dispatches(w, moved)...)
+	return acts
+}
+
+// working returns a copy the pass may write to. Tickets are copied by
+// value; their slices are shared, which is safe because the fold only
+// ever replaces whole fields.
+func (s *Snapshot) working() *Snapshot {
+	w := *s
+	w.Tickets = make([]*Ticket, len(s.Tickets))
+	for i, t := range s.Tickets {
+		c := *t
+		w.Tickets[i] = &c
+	}
+	return &w
+}
+
+// fold applies planned transitions to the working snapshot so later rules
+// read the state this pass is producing.
+//
+// The synthesised Transition is stamped RoleControlPlane, which is what
+// the sweep's own writes really are — and it keeps revertFor from judging
+// a transition the sweep itself just planned.
+func (w *Snapshot) fold(acts []Action, moved map[string]bool) {
 	for _, a := range acts {
-		if a.Kind == ActTransition {
-			moving[a.TicketID] = true
+		switch a.Kind {
+		case ActTransition:
+			moved[a.TicketID] = true
+			t := w.ticket(a.TicketID)
+			if t == nil {
+				continue
+			}
+			t.Last = &Transition{From: t.State, To: a.To, Actor: RoleControlPlane, At: w.Now}
+			t.State = a.To
+			t.StateSince = w.Now
+		case ActRemoveLabel:
+			t := w.ticket(a.TicketID)
+			if t == nil {
+				continue
+			}
+			kept := make([]string, 0, len(t.Labels))
+			for _, l := range t.Labels {
+				if l != a.Label {
+					kept = append(kept, l)
+				}
+			}
+			t.Labels = kept
 		}
 	}
-	for id := range reverted {
-		moving[id] = true
+}
+
+// pipelineDepth ranks a state by how far along the pipeline it is, so a
+// pass considers the furthest-along tickets first. The numbers are only
+// ever compared, never stored.
+//
+// Blocked sits at the bottom rather than beside the state it came from:
+// nothing the sweep does moves it, so considering it early would buy
+// nothing, and the tickets that *are* moving are the ones whose effects
+// the rest of the pass wants to see.
+func pipelineDepth(s protocol.State) int {
+	switch s {
+	case protocol.Merged:
+		return 100
+	case protocol.Reconciling:
+		return 90
+	case protocol.Checks:
+		return 80
+	case protocol.Reworking:
+		return 70
+	case protocol.ReadyForRework:
+		return 60
+	case protocol.InProgress:
+		return 50
+	case protocol.ReadyForDev:
+		return 40
+	case protocol.DesignReview:
+		return 30
+	case protocol.Designing:
+		return 20
+	case protocol.Todo:
+		return 10
+	case protocol.Backlog:
+		return 5
+	case protocol.Blocked:
+		return 1
 	}
-	acts = append(acts, dispatches(s, moving)...)
-	return acts
+	return 0
 }
 
 // revertFor enforces the §9 invariants on how the ticket arrived in its
@@ -141,16 +255,9 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 	// The mutex — screen and system labels under one rule — enforced at
 	// promotion into Ready for dev (DESIGN §6).
 	if t.State == protocol.ReadyForDev {
-		for _, other := range s.Tickets {
-			if other.ID == t.ID || !other.InFlight() {
-				continue
-			}
-			for _, mine := range t.MutexLabels() {
-				if other.HasLabel(mine) {
-					return revert("mutex",
-						fmt.Sprintf("Mutex label %q is already in flight on %s. Two in-flight tickets may not share a screen or a system (DESIGN §6).", mine, other.Key)), true
-				}
-			}
+		if other, mine := MutexHolder(s, t); other != nil {
+			return revert("mutex",
+				fmt.Sprintf("Mutex label %q is already in flight on %s. Two in-flight tickets may not share a screen or a system (DESIGN §6).", mine, other.Key)), true
 		}
 	}
 
@@ -602,6 +709,16 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 				continue
 			}
 			if blockedByOpen(s, t) {
+				continue
+			}
+			// The same question the pickup assertion asks. Asked here too
+			// because the dispatcher used not to: it would send a ticket
+			// whose screen or system was held straight into an assertion
+			// that could only refuse, and since the refusal leaves the
+			// ticket in the queue, it did it again on the next beat, and
+			// the next. Each of those was a full job — checkout,
+			// toolchain, services — spent to be told no.
+			if other, _ := MutexHolder(s, t); other != nil {
 				continue
 			}
 			// During the pause: only tickets blocking the boundary ticket,

@@ -684,3 +684,118 @@ func TestAStaleClaimOnTheRightAgentReadsAsBefore(t *testing.T) {
 		t.Error("a matching run recorded a mismatch")
 	}
 }
+
+// The ORC-16 loop, in one test. A merged ticket whose deploy has landed
+// holds mutex labels a queued ticket needs. Before the fold, the pass
+// reasoned about the world as it was at the top of the sweep: ORC-21 was
+// still Merged for every rule, so the queue ticket was held — and on the
+// beats where it was dispatched anyway, the pickup assertion refused it,
+// at a full billed job each time.
+func TestADeployedTicketReleasesItsMutexWithinTheSamePass(t *testing.T) {
+	done := tk("T1", protocol.Merged, func(t *Ticket) {
+		t.Deploy = DeployDeployed
+		t.Labels = []string{"system:substrate"}
+	})
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+
+	acts := Sweep(snap(done, queued))
+	if a := find(acts, ActTransition, "T1"); a == nil || a.To != protocol.Done {
+		t.Fatalf("the deployed ticket did not retire: %v", a)
+	}
+	d := find(acts, ActDispatch, "T2")
+	if d == nil || d.Agent != AgentDev {
+		t.Errorf("the queued ticket was not dispatched once its label was free: %v", acts)
+	}
+}
+
+// The other half: while the holder is genuinely in flight, the sweep must
+// not dispatch into an assertion that can only refuse. Every one of those
+// cost a job with a checkout, a toolchain and a service container.
+func TestAHeldMutexStopsTheDispatchRatherThanThePickup(t *testing.T) {
+	holder := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) {
+		t.Labels = []string{"system:substrate"}
+	})
+
+	s := snap(holder, queued)
+	if d := find(Sweep(s), ActDispatch, "T2"); d != nil {
+		t.Errorf("dispatched into a pickup that refuses: %v", *d)
+	}
+	// And the two agree, which is the reason they share a function.
+	if err := VerifyPickup(s, queued.ID, AgentDev); err == nil {
+		t.Error("the dispatcher declined but the pickup assertion would have allowed it")
+	}
+}
+
+// Merged is finished work: the branch is gone and its commits are on
+// main, so a ticket starting afterwards contains it rather than racing
+// it. Holding the labels through Merged meant holding them for the whole
+// deploy-detection window — on a platform with no deploy webhook, up to
+// an hour of a queue held by a ticket that was done.
+func TestMergedDoesNotHoldTheMutex(t *testing.T) {
+	merged := tk("T1", protocol.Merged, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+	if other, _ := MutexHolder(snap(merged, queued), queued); other != nil {
+		t.Errorf("a merged ticket still holds %q", "screen:home")
+	}
+	// Every earlier state still does.
+	for _, st := range []protocol.State{
+		protocol.ReadyForDev, protocol.InProgress, protocol.Checks,
+		protocol.Reconciling, protocol.ReadyForRework, protocol.Reworking,
+	} {
+		holder := tk("T3", st, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+		if other, _ := MutexHolder(snap(holder, queued), queued); other == nil {
+			t.Errorf("%s does not hold the mutex", st)
+		}
+	}
+}
+
+// The fold must not leak. A caller that sweeps the same snapshot twice
+// has to get the same answer — that property is what Ring 2's
+// convergence loop and every table test rest on.
+func TestSweepDoesNotMutateTheCallersSnapshot(t *testing.T) {
+	s := snap(
+		tk("T1", protocol.Merged, func(t *Ticket) { t.Deploy = DeployDeployed }),
+		tk("T2", protocol.Checks, func(t *Ticket) { t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"} }),
+	)
+	first := Sweep(s)
+	for _, tk := range s.Tickets {
+		if tk.Key == "T1" && tk.State != protocol.Merged {
+			t.Fatalf("the caller's snapshot was written: T1 is %s", tk.State)
+		}
+	}
+	second := Sweep(s)
+	if len(first) != len(second) {
+		t.Fatalf("sweeping twice gave %d then %d actions", len(first), len(second))
+	}
+	for i := range first {
+		if first[i].String() != second[i].String() {
+			t.Errorf("action %d differs between passes:\n%s\n%s", i, first[i], second[i])
+		}
+	}
+}
+
+// One transition per ticket per pass. The fold makes a ticket's new state
+// visible to later rules, and without this guard those rules would act on
+// it — a ticket promoted into Reconciling being judged, in the same pass,
+// as a Reconciling ticket whose claim is stale.
+func TestAFoldedTicketIsNotActedOnTwice(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "r1", Kind: AgentDev, Live: false, EndedAt: t0.Add(-time.Hour)}
+	}))
+	var transitions int
+	for _, a := range Sweep(s) {
+		if a.Kind == ActTransition && a.TicketID == "T1" {
+			transitions++
+		}
+	}
+	if transitions != 1 {
+		t.Errorf("got %d transitions for one ticket in one pass, want 1", transitions)
+	}
+}

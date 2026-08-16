@@ -234,7 +234,7 @@ func describe(t *Ticket, byID map[string]*Ticket, openBlockers func(*Ticket) []*
 	// its labels, and telling it that it collides with itself is noise.
 	if !isStarted(t) {
 		for _, other := range considered {
-			if other.ID == t.ID || !other.InFlight() {
+			if other.ID == t.ID || !other.HoldsMutex() {
 				continue
 			}
 			for _, mine := range t.MutexLabels() {

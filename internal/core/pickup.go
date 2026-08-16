@@ -32,15 +32,8 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 		if t.HasLabel(LabelReEvaluate) {
 			return fmt.Errorf("pickup %s: re-evaluate blocks pickup until design clears it (DESIGN §7)", t.Key)
 		}
-		for _, other := range s.Tickets {
-			if other.ID == t.ID || !other.InFlight() {
-				continue
-			}
-			for _, mine := range t.MutexLabels() {
-				if other.HasLabel(mine) {
-					return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
-				}
-			}
+		if other, mine := MutexHolder(s, t); other != nil {
+			return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
 		}
 		if blockedByOpen(s, t) {
 			return fmt.Errorf("pickup %s: blocked by an open ticket (DESIGN §9)", t.Key)

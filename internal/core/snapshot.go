@@ -228,6 +228,48 @@ func (t *Ticket) InFlight() bool {
 	return false
 }
 
+// HoldsMutex reports whether this ticket's screen and system labels are
+// claimed against other tickets (DESIGN §6).
+//
+// In flight, minus Merged. The mutex exists so two dev agents do not edit
+// one screen or one system at the same time — and a merged ticket's work
+// is on main, its branch gone, with nothing being written. A ticket
+// branching off main afterwards cannot conflict with it; it *contains*
+// it.
+//
+// Counting Merged held the labels for the whole deploy-detection window
+// instead, which on a platform with no deploy webhook is up to an hour of
+// a queue held by a ticket that is finished. If the deploy fails and the
+// author sends it back for rework it re-enters the queue and re-takes the
+// mutex then, which is the ordinary contention case rather than a special
+// one.
+func (t *Ticket) HoldsMutex() bool {
+	return t.InFlight() && t.State != protocol.Merged
+}
+
+// MutexHolder returns another ticket holding a mutex label this one
+// carries, and the label, or nil.
+//
+// One function, three callers — the promotion revert (DESIGN §6), the
+// pickup assertion, and the dispatcher — because they are the same
+// question and they must not answer it differently. They did: the
+// dispatcher never asked at all, so the sweep dispatched a ticket whose
+// label was held straight into a pickup assertion that refused it, every
+// beat, at a full billed job each time.
+func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
+	for _, other := range s.Tickets {
+		if other.ID == t.ID || !other.HoldsMutex() {
+			continue
+		}
+		for _, mine := range t.MutexLabels() {
+			if other.HasLabel(mine) {
+				return other, mine
+			}
+		}
+	}
+	return nil, ""
+}
+
 // LiveRun reports whether the ticket has a live agent run of the given
 // kind ("" for any kind).
 func (t *Ticket) LiveRun(kind AgentKind) bool {
