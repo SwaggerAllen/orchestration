@@ -53,3 +53,17 @@ PROJECTS = '''[
     "trackerProject": "2bdba291-161c-4cf4-bbe2-6eab216a2985"
   }
 ]'''
+
+# The trailing-debounce object, one instance per repository. Webhooks
+# arrive in bursts — a state change, its comment and its label edit are
+# three events a second apart — and Actions bills each job rounded up to
+# the minute, so a burst of six cost six minutes to compute one answer.
+# See debounce.ts for why the window is trailing rather than leading.
+[[durable_objects.bindings]]
+name = "SWEEP_DEBOUNCE"
+class_name = "SweepDebounce"
+
+# SQLite-backed, which is the free-plan backend (DESIGN §13).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SweepDebounce"]

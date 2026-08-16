@@ -88,6 +88,38 @@ two projects. Then each Worker carries a one-entry `PROJECTS` list and
 its own secret. Note that this buys no operational independence beyond
 the token — see the kill switch below.
 
+## Coalescing the beat
+
+Webhooks arrive in bursts. One logical change — a ticket moving state —
+produces the state change, its comment and its label edit as separate
+events a second apart, and a reconcile pass that merges produces several
+more. Catapult ran **six sweeps in ninety-nine seconds** one evening.
+Actions bills each job rounded up to the minute, so that burst cost six
+minutes to compute an answer that barely changed between them.
+
+So webhook-driven sweeps go through `SweepDebounce`, a Durable Object
+with one instance per repository. The first event of a quiet period arms
+a five-second alarm; every event inside that window is recorded and does
+nothing else; the alarm fires one sweep.
+
+**Trailing, not leading**, and that is the part worth understanding. A
+leading edge would fire on the *first* event of a burst — which is the
+worst moment to read the tracker, because the burst *is* the tracker
+mid-change, and a snapshot taken then is the one most likely to catch a
+half-applied state. Waiting for the quiet at the end costs a few seconds
+and reads a settled world.
+
+The window never rolls forward. Later events in a burst do not push the
+alarm back, or a busy enough project could defer its sweep indefinitely
+— "wait for quiet" becoming "wait for the end of the workday".
+
+**The cron does not go through it.** The hourly beat is the floor under
+everything else: the thing that runs when webhooks are dropped,
+misconfigured or rejected. It does not get a dependency on another
+moving part to save a minute it spends once an hour. For the same
+reason, a debounce that errors or is unreachable falls through to
+dispatching directly — the beat matters and the saving does not.
+
 ## Kill switch
 
 Halting is not the Worker's job. `PIPELINE_KILL_SWITCH` is a **repo

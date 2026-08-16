@@ -23,6 +23,12 @@
  * variable the sweep itself reads, so a project can be stopped and
  * restarted without touching or redeploying the metronome.
  */
+import { SweepDebounce } from "./debounce.ts";
+
+// Re-exported because wrangler binds Durable Object classes from the
+// entrypoint module, not from wherever they are defined.
+export { SweepDebounce };
+
 export interface Env {
   /**
    * JSON array of dispatch targets, e.g.
@@ -55,6 +61,11 @@ export interface Env {
    * value is set on. Same reason DISPATCH_TOKEN is not GITHUB_DISPATCH_TOKEN.
    */
   WEBHOOK_SECRET: string;
+  /**
+   * The trailing-debounce Durable Object, one instance per repository.
+   * Webhook-driven sweeps go through it; the cron does not (see below).
+   */
+  SWEEP_DEBOUNCE: DurableObjectNamespace;
 }
 
 interface Project {
@@ -295,6 +306,37 @@ async function dispatch(p: Project, token: string): Promise<void> {
   }
 }
 
+/**
+ * Hand a project's sweep to its debounce window instead of dispatching
+ * now. One Durable Object per repository, so two projects never queue
+ * behind each other.
+ *
+ * A failure here falls through to dispatching directly. The debounce is
+ * an optimisation and the beat is not: if the Durable Object is
+ * unreachable, the right outcome is a sweep that costs a minute, not a
+ * sweep that never happens.
+ */
+async function debounced(p: Project, env: Env): Promise<void> {
+  try {
+    const id = env.SWEEP_DEBOUNCE.idFromName(p.repository);
+    const res = await env.SWEEP_DEBOUNCE.get(id).fetch("https://debounce/sweep", {
+      method: "POST",
+      body: JSON.stringify({
+        repository: p.repository,
+        workflow: p.workflow,
+        ref: p.ref || "main",
+      }),
+    });
+    if (res.ok) {
+      return;
+    }
+    console.error(`metronome: debounce for ${p.repository} answered HTTP ${res.status}; dispatching directly`);
+  } catch (err) {
+    console.error(`metronome: debounce for ${p.repository} unreachable (${err}); dispatching directly`);
+  }
+  await dispatch(p, env.DISPATCH_TOKEN);
+}
+
 function projectsOrLog(env: Env): Project[] {
   try {
     return parseProjects(env.PROJECTS);
@@ -356,7 +398,7 @@ export default {
         // ordinary, and all answered 202 so GitHub keeps the hook green.
         return new Response("nothing to dispatch\n", { status: 202 });
       }
-      ctx.waitUntil(Promise.allSettled(targets.map((p) => dispatch(p, env.DISPATCH_TOKEN))));
+      ctx.waitUntil(Promise.allSettled(targets.map((p) => debounced(p, env))));
       return new Response("dispatched\n", { status: 202 });
     }
 
@@ -381,7 +423,7 @@ export default {
       // failed to parse — which is already logged above.
       return new Response("no matching project\n", { status: 202 });
     }
-    ctx.waitUntil(Promise.allSettled(targets.map((p) => dispatch(p, env.DISPATCH_TOKEN))));
+    ctx.waitUntil(Promise.allSettled(targets.map((p) => debounced(p, env))));
     return new Response("dispatched\n", { status: 202 });
   },
 
@@ -392,6 +434,11 @@ export default {
    * the webhook path dropped.
    */
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
+    // Direct, not debounced. The hourly beat is the floor under
+    // everything else — the thing that runs when webhooks are dropped,
+    // misconfigured or rejected — so it does not get a dependency on
+    // another moving part to save a minute it only spends once an hour.
+    //
     // Settled, not all-or-nothing: one project's outage must not stop
     // another project's beat.
     await Promise.allSettled(projectsOrLog(env).map((p) => dispatch(p, env.DISPATCH_TOKEN)));
