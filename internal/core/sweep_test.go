@@ -917,3 +917,44 @@ func TestPickupAllowsATicketToClaimAgainstItsOwnRun(t *testing.T) {
 		t.Errorf("a resume was refused as a duplicate: %v", err)
 	}
 }
+
+// A record with no origin stopped the whole sweep. The writer matrix
+// judges edges, and a revert sends the ticket back to the edge's origin
+// — so a half-edge planned `transition <id> -> ""` and Execute died on
+// "no tracker state for \"\"". One unjudgeable ticket froze every other
+// ticket in the project.
+func TestAnOriginlessRecordIsNotJudged(t *testing.T) {
+	for _, rec := range []RecordedMove{
+		{To: protocol.ReadyForDev, Role: RoleDesign},         // finish with no snapshot behind it
+		{To: protocol.ReadyForDev, Role: RoleControlPlane},   // as ingest writes them
+		{From: protocol.Designing, To: "", Role: RoleDesign}, // a destination nobody recorded
+	} {
+		s := snap(tk("T1", protocol.ReadyForDev))
+		s.Recorded["T1"] = rec
+		for _, a := range Sweep(s) {
+			if a.Kind != ActTransition || a.TicketID != "T1" {
+				continue
+			}
+			if a.To == "" {
+				t.Errorf("planned a transition to nowhere from %+v", rec)
+			}
+			if strings.HasPrefix(a.Reason, "invariant") {
+				t.Errorf("judged a half-edge %+v: %s", rec, a.Reason)
+			}
+		}
+	}
+}
+
+// And a complete record is still judged, so the guard above did not
+// quietly turn the invariants off again.
+func TestACompleteRecordIsStillJudged(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForDev))
+	s.Recorded["T1"] = RecordedMove{From: protocol.Designing, To: protocol.ReadyForDev, Role: RoleDesign}
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.Marker.Fields["rule"] != "sign-off" {
+		t.Fatalf("a complete edge went unjudged: %v", a)
+	}
+	if a.To != protocol.Designing {
+		t.Errorf("revert target = %q, want the recorded origin", a.To)
+	}
+}

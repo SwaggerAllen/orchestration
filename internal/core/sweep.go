@@ -311,6 +311,23 @@ func arrival(s *Snapshot, t *Ticket) (*Transition, bool) {
 	if !ok {
 		return nil, false
 	}
+	// A record with no origin cannot be judged, and must not be. The
+	// writer matrix judges *edges* — "arrived at Ready for dev" is not a
+	// rule, "arrived at Ready for dev from Designing" is — and a revert
+	// sends the ticket back to that origin. With the origin missing, the
+	// matrix reads a half-edge and the revert targets nothing: the sweep
+	// planned `transition <id> -> ""` and Execute died on "no tracker
+	// state for \"\"", taking the whole pass with it. One unjudgeable
+	// ticket stopped every other ticket in the project from moving.
+	//
+	// So it is treated exactly as an absent record is, which is the rule
+	// this file already relies on: what the pipeline has not recorded, it
+	// does not judge. Ingest writes records with no origin deliberately —
+	// nothing is known about where an adopted ticket came from — and this
+	// is the same fact arriving by a different route.
+	if rec.To == "" || rec.From == "" && rec.To == t.State {
+		return nil, false
+	}
 	if rec.To == t.State {
 		return &Transition{From: rec.From, To: rec.To, Actor: rec.Role, At: t.StateSince}, true
 	}
