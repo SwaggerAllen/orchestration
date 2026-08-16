@@ -90,6 +90,22 @@ jobs:
       - name: deploy
         uses: cloudflare/wrangler-action@v3
         with:
+          # Pinned, because the action's fallback is not.
+          #
+          # wrangler-action@v3 probes for the wrangler it wants — 4.123.0
+          # at the time of writing — and on not finding it installs
+          # 3.90.0 instead, then calls `secret bulk` the way 4.x expects.
+          # The two disagree about the calling convention, so all three
+          # secrets arrive unread: "0 secrets successfully uploaded, 3
+          # failed", with no per-secret error, because none of them was
+          # ever seen. The deploy never runs, which on the first deploy
+          # of a Durable Object migration reads as the migration having
+          # failed.
+          #
+          # A floating major would drift back into this the next time
+          # the action moves its default. An exact pin is a thing you
+          # bump deliberately and read the changelog for.
+          wranglerVersion: "4.123.0"
           apiToken: ${{ secrets.CLOUDFLARE_WORKERS_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
