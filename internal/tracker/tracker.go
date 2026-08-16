@@ -57,7 +57,6 @@ type IssueComment struct {
 	CreatedAt time.Time
 }
 
-
 // StateChange is one state transition from the issue's history.
 type StateChange struct {
 	FromStateID string

@@ -172,7 +172,7 @@ type Snapshot struct {
 	// AuthorID is the author's tracker id, for assignment (DESIGN §3).
 	// Empty turns assignment off rather than assigning nobody, so a
 	// project without the mapping keeps whatever a human set.
-	AuthorID        string
+	AuthorID string
 	// Recorded is what the pipeline last did to each ticket, keyed by
 	// ticket id, from the state store it owns.
 	//
