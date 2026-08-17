@@ -101,6 +101,7 @@ runs:
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/dev.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
           --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the ticket branch
@@ -122,13 +123,34 @@ runs:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
 
     - name: push
+      id: push
       shell: bash
       run: |
+        set -euo pipefail
         # The prompt tells the model to commit; anything it left behind
         # still belongs to the run rather than the runner's disk.
         if ! git diff --quiet || ! git diff --cached --quiet; then
           git add -A ':!.pipeline'
           git commit -m "wip: uncommitted changes at end of agent run"
+        fi
+
+        # Counted here because git is where the answer is, and finish
+        # runs from the pipeline checkout. It decides whether there is
+        # anything to open a PR with: zero means the run changed nothing
+        # main does not already have, which finish parks for the author
+        # rather than failing (DESIGN §12).
+        #
+        # It used to be discovered by the host instead — CreatePR
+        # rejected with "No commits between main and <branch>", the step
+        # exited non-zero, and `abort on failure` below stamped
+        # Blocked/failed on top of a hand-back explaining that changing
+        # nothing was the right answer. Measured on ORC-64.
+        git fetch -q origin main
+        COMMITS="$(git rev-list --count origin/main..HEAD)"
+        echo "commits=$COMMITS" >> "$GITHUB_OUTPUT"
+        if [ "$COMMITS" -eq 0 ]; then
+          echo "the run produced nothing main does not already have; not pushing an empty branch"
+          exit 0
         fi
         git push -u origin "${{ steps.claim.outputs.branch }}"
 
@@ -145,7 +167,7 @@ runs:
     # project without previews wired yet still gets its agent runs, and
     # the step says which it did.
     - name: build the storybook export
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.push.outputs.commits != '0'
       shell: bash
       run: |
         set -euo pipefail
@@ -155,7 +177,7 @@ runs:
 
     - name: read the preview target
       id: preview
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.push.outputs.commits != '0'
       shell: bash
       run: |
         set -euo pipefail
@@ -167,7 +189,7 @@ runs:
         echo "dir=$(jq -r .preview.outputDir "$CFG")" >> "$GITHUB_OUTPUT"
 
     - name: publish the preview
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.push.outputs.commits != '0'
       uses: cloudflare/wrangler-action@v3
       with:
         apiToken: ${{ inputs.cloudflare_api_token }}
@@ -184,10 +206,17 @@ runs:
         PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        # `|| -1` is the fallback for an empty output, which means the
+        # push step did not get far enough to count. -1 is "unmeasured",
+        # and finish refuses it when there is no PR yet rather than
+        # reading it as "nothing landed" — the failure of guessing wrong
+        # there is a ticket parked over work that was fine.
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --handback "$RUNNER_TEMP/pipeline/handback.md" \
+          --commits "${{ steps.push.outputs.commits || -1 }}" \
+          --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure

@@ -958,3 +958,42 @@ func TestACompleteRecordIsStillJudged(t *testing.T) {
 		t.Errorf("revert target = %q, want the recorded origin", a.To)
 	}
 }
+
+// Some work is legal for nobody but the author. The gate set lives in
+// pipeline.config.json and ci.yml, both author-only (DESIGN §5), so a
+// ticket scoped to change it used to be claimed by the dev agent, which
+// then found every file it needed closed to it and handed back — a full
+// run, checkout and toolchain and model, spent to be told no, and
+// repeated on every beat because the refusal leaves the ticket in the
+// queue.
+//
+// The label routes it to the human instead: no design dispatch, no dev
+// dispatch, in any state.
+func TestAuthorOnlyTicketsAreNeverDispatched(t *testing.T) {
+	for _, state := range []protocol.State{protocol.Designing, protocol.ReadyForDev, protocol.ReadyForRework} {
+		t.Run(string(state), func(t *testing.T) {
+			mine := tk("A1", state, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
+			s := snap(mine)
+			for _, a := range Sweep(s) {
+				if a.Kind == ActDispatch && a.TicketID == mine.ID {
+					t.Errorf("dispatched %s for an author-only ticket in %s", a.Agent, state)
+				}
+			}
+		})
+	}
+
+	// And the label is not a general freeze: an ordinary ticket beside it
+	// still goes out, so one author-only ticket at the head of the queue
+	// cannot stall everything behind it.
+	mine := tk("A1", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
+	other := tk("B1", protocol.ReadyForDev)
+	var dispatched bool
+	for _, a := range Sweep(snap(mine, other)) {
+		if a.Kind == ActDispatch && a.Agent == AgentDev && a.TicketID == other.ID {
+			dispatched = true
+		}
+	}
+	if !dispatched {
+		t.Error("an author-only ticket at the head of the queue blocked the ticket behind it")
+	}
+}

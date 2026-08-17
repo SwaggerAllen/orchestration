@@ -42,6 +42,15 @@ type BoundaryPlan struct {
 	// queried, not configured, so it cannot describe a convention the
 	// project stopped following.
 	Roster []MilestoneStatus
+	// Backlog is the unscheduled tech-debt tickets with their current
+	// priorities — the thing the grooming pass is asked to re-rank
+	// (DESIGN §10). Carried because the run cannot read it: the model
+	// holds the model credential and nothing else, so a prompt that does
+	// not state the ordering is a prompt asking for a re-ranking of an
+	// invisible list. Two boundaries in a row returned an empty ranking
+	// for exactly that reason, which reads on the ticket as "the order
+	// looked right".
+	Backlog []CompositionEntry
 }
 
 // MilestoneStatus is one milestone as the boundary agent sees it.
@@ -109,6 +118,8 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 		}
 		plan.Roster = append(plan.Roster, st)
 	}
+
+	plan.Backlog = DebtBacklog(snap.Tickets)
 
 	// The scan proposes tickets, so it is subject to the confirmed
 	// non-asks the same way design is (DESIGN §4) — a debt scan that

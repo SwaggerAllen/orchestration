@@ -123,6 +123,23 @@ func (m *Memory) AddWorkspaceLabel(name string) (Label, error) {
 	return m.createLabel(WorkspaceScope, name)
 }
 
+// DropLabel is a test helper: unprovision a label so a team looks like
+// one set up before that label was added to the protocol. That is an
+// ordinary state for a real project — the label set grows and existing
+// projects only catch up when setup is re-run — and code that attaches
+// labels has to be exercised against it.
+func (m *Memory) DropLabel(scope, name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.labels[scope][:0]
+	for _, l := range m.labels[scope] {
+		if l.Name != name {
+			kept = append(kept, l)
+		}
+	}
+	m.labels[scope] = kept
+}
+
 // createLabel enforces Linear's uniqueness: a name is taken if any scope
 // the team can see already holds it, not just the scope being written to.
 func (m *Memory) createLabel(scope, name string) (Label, error) {

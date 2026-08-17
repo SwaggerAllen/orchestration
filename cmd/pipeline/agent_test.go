@@ -8,6 +8,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 )
 
 // The three halves must reach the model in the order they were written
@@ -18,7 +19,7 @@ func TestAssembledPromptOrdersRoleContextTicket(t *testing.T) {
 	base := composeBase("ROLE-PROMPT", "REPO-CONTEXT")
 	got := assemblePrompt(base, &agent.ClaimResult{
 		TicketKey: "DUM-1", Title: "t", Mode: "fresh", Scope: "TICKET-SCOPE", Branch: "b",
-	}, "/tmp/handback.md")
+	}, "/tmp/handback.md", "/tmp/outcome.json")
 
 	role, ctx, ticket := strings.Index(got, "ROLE-PROMPT"), strings.Index(got, "REPO-CONTEXT"), strings.Index(got, "TICKET-SCOPE")
 	if role < 0 || ctx < 0 || ticket < 0 {
@@ -135,7 +136,7 @@ func TestReworkPromptCarriesTheFailingBuild(t *testing.T) {
 				Log:  "** (CompileError) lib/dummy/greetings.ex:12: undefined function farwell/1",
 			}},
 		},
-	}, "/tmp/handback.md")
+	}, "/tmp/handback.md", "/tmp/outcome.json")
 
 	for _, want := range []string{"gates", "undefined function farwell/1", "https://gh/run/9"} {
 		if !strings.Contains(got, want) {
@@ -163,5 +164,71 @@ func TestUnreadableLogsSaySoRatherThanGoingQuiet(t *testing.T) {
 	}
 	if ciFailureSection(nil) != "" {
 		t.Error("a ticket that did not bounce on CI gets a section about a build that did not fail")
+	}
+}
+
+// The boundary prompt states the step flags — they are the resume
+// signal (DESIGN §10), and all-false versus archive=true is the
+// difference between a first pass and a boundary picking itself back up.
+//
+// What they must not do is claim to be current. They are read at claim,
+// which is this run's first step, so they describe an earlier run and
+// nothing else; stated as "already completed" they contradicted the
+// template's "the archive pass already ran" — that one being about this
+// run's harness step — and the model filed a harness finding rather than
+// trusting either source. It was right to.
+func TestBoundaryPromptScopesTheStepFlagsToAnEarlierRun(t *testing.T) {
+	got := assembleBoundaryPrompt("ROLE-PROMPT", &agent.BoundaryPlan{
+		ClaimResult: agent.ClaimResult{TicketKey: "DUM-9", Title: "Milestone boundary"},
+		Milestone:   "Rehearsal 1",
+		Done:        map[string]bool{},
+	}, "/tmp/proposals.json")
+
+	flags := strings.Index(got, "archive=false scan=false file=false")
+	if flags < 0 {
+		t.Fatalf("the resume signal is gone; a resumed boundary cannot tell it is one:\n%s", got)
+	}
+	// Attributed, not bare. The sentence carrying the flags has to say
+	// whose run they describe, or it reads as a claim about this one.
+	line := got[strings.LastIndex(got[:flags], "\n")+1:]
+	line = line[:strings.Index(line, "\n")]
+	if !strings.Contains(line, "earlier run") {
+		t.Errorf("the flags are stated without saying they are an earlier run's: %q", line)
+	}
+	if !strings.Contains(got, retro.Dir) {
+		t.Errorf("the prompt never names %s, which its own scan instructions call the duplicate detector:\n%s", retro.Dir, got)
+	}
+}
+
+// The agent is judged against its labels and could not see them.
+//
+// CI fails a diff touching a path mapped to a screen or system doc whose
+// label the ticket does not carry, and prompts/dev.md tells the agent to
+// stay inside its labels — while claim.json had no Labels key at all, so
+// the binding was to a set the run never received. Inferring them from
+// the scope is the guess the mutex exists to prevent.
+func TestDevPromptStatesTheLabelsTheRunIsJudgedAgainst(t *testing.T) {
+	got := assemblePrompt("ROLE-PROMPT", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "dev", Scope: "s", Branch: "b",
+		Labels: []string{"frontend", "screen:home", "system:greetings"},
+	}, "/tmp/handback.md", "/tmp/outcome.json")
+
+	for _, want := range []string{"screen:home", "system:greetings", "frontend"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt never names %q, which CI will audit the diff against", want)
+		}
+	}
+}
+
+// No labels and "nobody told me" are different facts to an agent
+// deciding whether a path is in bounds, and an absent section reads as
+// the second — so the empty case is stated rather than skipped.
+func TestDevPromptSaysSoWhenTheTicketCarriesNoLabels(t *testing.T) {
+	got := assemblePrompt("ROLE-PROMPT", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "dev", Scope: "s", Branch: "b",
+	}, "/tmp/handback.md", "/tmp/outcome.json")
+
+	if !strings.Contains(got, "Your labels") || !strings.Contains(got, "carries none") {
+		t.Errorf("a ticket with no labels gets no section, which reads as the harness staying silent:\n%s", got)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -73,7 +74,7 @@ func cmdAgentReprompt(args []string) error {
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file")
 	repoContext := fs.String("repo-context", "", "shared repo orientation (prompts/repo-context.md)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to")
-	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
+	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -189,7 +190,7 @@ func cmdAgentClaim(args []string) error {
 	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to (all kinds)")
 	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
-	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
+	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -261,7 +262,7 @@ func cmdAgentClaim(args []string) error {
 		case "boundary":
 			prompt = assembleBoundaryPrompt(base, plan, *outcomePath)
 		default:
-			prompt = assemblePrompt(base, res, *handbackPath)
+			prompt = assemblePrompt(base, res, *handbackPath, *outcomePath)
 		}
 		// Every kind, including boundary: the boundary agent is as
 		// likely as any other to meet a harness gap, and its own scan
@@ -308,7 +309,7 @@ func composeBase(rolePrompt, repoContext string) string {
 // template is the protocol half; this is the per-run half. Everything the
 // model must treat as work-to-judge is fenced under explicit headings so
 // the base prompt can point at it (DESIGN §9's trust boundary).
-func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string) string {
+func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outcomePath string) string {
 	var b []byte
 	add := func(s string) { b = append(b, s...) }
 	add(template)
@@ -322,6 +323,7 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string
 	if res.Mode == "rework" && res.Description != "" {
 		add("\n## Original argument (context only — do not re-implement)\n\n" + res.Description + "\n")
 	}
+	add(labelsSection(res.Labels))
 	add("\n## Base check\n\n")
 	if res.BaseSHA != "" {
 		add(fmt.Sprintf("The design was drawn against `%s`. Diff it against origin/main; if main moved and both changes touch the same behavior, DO NOT reconcile by guessing — abort with a push-back (DESIGN §2.4).\n", res.BaseSHA))
@@ -332,7 +334,31 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string
 	if handbackPath != "" {
 		add(fmt.Sprintf("- Write your hand-back to `%s` before you finish: what landed, the commit, anything deliberately not done and why, any open question you resolved (DESIGN vocabulary: Hand-back).\n", handbackPath))
 	}
+	if outcomePath != "" {
+		add(fmt.Sprintf("- If you changed no files, write `%s`: `{\"outcome\": \"scope-satisfied\"|\"needs-setup\"|\"pushback\", \"summary\": \"...\"}` — see Outcomes above. Omit the file when you did the work; that is the ordinary case.\n", outcomePath))
+	}
 	return string(b)
+}
+
+// labelsSection states the labels the run is judged against.
+//
+// CI fails a diff that touches a path mapped to a screen or system doc
+// whose label the ticket does not carry (DESIGN §6, §9), and the role
+// prompt tells the agent to stay inside its labels — while the claim
+// carried none, so it was bound to a set it could not read. An agent
+// that has to infer them from the scope is making exactly the guess the
+// mutex exists to prevent.
+//
+// The empty case is stated rather than skipped. No labels and "the
+// harness did not tell me" are different facts to an agent deciding
+// whether a path is in bounds, and an absent section reads as the
+// second.
+func labelsSection(labels []string) string {
+	if len(labels) == 0 {
+		return "\n## Your labels\n\nThis ticket carries none. Any path mapped to a screen or system doc is therefore out of bounds — touching one fails the build (DESIGN §6, §9). If the scope needs one, that is the re-evaluation flow, not a silent expansion.\n"
+	}
+	return fmt.Sprintf("\n## Your labels\n\n%s\n\nCI audits the diff against these: a path mapped to a screen or system doc whose label is not here fails the build (DESIGN §6, §9). This is the list, not a summary of it.\n",
+		"- "+strings.Join(labels, "\n- "))
 }
 
 // assembleReconcilePrompt is the reconcile counterpart: the argument, the
@@ -430,8 +456,22 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	add(template)
 	add("\n\n---\n\n")
 	add(fmt.Sprintf("# Boundary — milestone %q (ticket %s)\n", plan.Milestone, plan.TicketKey))
-	add(fmt.Sprintf("\nSteps already completed on this ticket: archive=%t scan=%t file=%t.\n",
+	// "By an earlier run", not "already", and the distinction is the
+	// whole defect. plan.Done is read at claim — this run's first step —
+	// so it can only ever describe what a *previous* run finished, never
+	// what this one has. Phrased as "already completed" it contradicted
+	// the template's "the archive pass already ran", which is about this
+	// run's own harness step, and every first pass therefore handed the
+	// model two sources disagreeing with no way to tell which was stale.
+	// It filed a harness finding rather than trusting either, correctly.
+	//
+	// The flags themselves stay: they are the resume signal (DESIGN §10).
+	// All false is a first pass; archive=true is a boundary picking
+	// itself back up, which changes what the model should expect to find
+	// already done around it.
+	add(fmt.Sprintf("\nCompleted by an earlier run of this boundary: archive=%t scan=%t file=%t — all false means this is the first pass.\n",
 		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	add(fmt.Sprintf("\nThe archive pass has run either way — an earlier run's, or this one's before you started — so the retro notes are in your checkout under `%s/`, this milestone's among them.\n", retro.Dir))
 	if len(plan.Roster) > 0 {
 		add("\n## Milestones, in the tracker's order\n\n")
 		for _, m := range plan.Roster {
@@ -444,6 +484,7 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 		add("\nThe gating test asks about the next PRODUCT milestone — read it off this list rather than assuming a naming convention.\n")
 	}
 	if !plan.Done[agent.StepScan] {
+		add(debtBacklogSection(plan.Backlog))
 		add(harnessFindingsForBoundary(plan.HarnessFindings))
 		add(nonAsksSection(plan.NonAsks, "filing proposals", false))
 	}
@@ -556,10 +597,16 @@ func cmdAgentFinish(args []string) error {
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
 	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
 	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
-	outcome := fs.String("outcome", "", "outcome.json written by the model (design)")
+	outcome := fs.String("outcome", "", "outcome.json written by the model (design, dev)")
 	baseSHA := fs.String("base-sha", "", "merge-base the design was drawn against (design mode)")
 	previewURL := fs.String("preview-url", "", "where this pass's storybook export was published (design)")
 	findings := fs.String("findings", "", "harness findings the model recorded (any kind)")
+	// Counted by the caller because git is where the answer is, and this
+	// command runs from the pipeline checkout rather than the project's.
+	// -1 rather than 0 by default: absent and zero are different claims,
+	// and reading "nobody said" as "nothing landed" would park a ticket
+	// whose work was fine.
+	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -621,11 +668,26 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return fmt.Errorf("agent finish: reading hand-back: %w (an issue that moves without one is a state change nobody can audit)", err)
 	}
-	if err := agent.Finish(context.Background(), p, h, res, string(body)); err != nil {
+	devOutcome, err := agent.LoadDevOutcome(*outcome)
+	if err != nil {
+		return err
+	}
+	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {
 		return err
+	}
+	// Findings post either way, above, because a run that changed nothing
+	// is a likely place to have met a harness gap — which is how these
+	// outcomes were discovered in the first place.
+	if devOutcome.Outcome != "done" {
+		fmt.Printf("%s: %s — parked for the author, no PR opened\n", res.TicketKey, devOutcome.Outcome)
+		return nil
+	}
+	if res.PRNumber == 0 && *commits == 0 {
+		fmt.Printf("parked %s: the run changed nothing and named no reason; blocked as scope-satisfied\n", res.TicketKey)
+		return nil
 	}
 	fmt.Printf("finished %s: PR #%d ready, ticket in Checks\n", res.TicketKey, res.PRNumber)
 	return nil
@@ -635,7 +697,7 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed or needs-setup")
+	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or scope-satisfied")
 	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
@@ -805,6 +867,34 @@ true on a project using none of this machinery, it does not belong here.
 `+"`dedupe`"+` names the thing, never the run: ten runs hitting one gap
 should produce one ticket.
 `, path)
+}
+
+// debtBacklogSection renders the backlog the grooming pass re-ranks.
+//
+// DESIGN §10 asks that pass to re-rank existing debt, and the prompt
+// used to carry no debt at all — only the milestone roster, which is
+// names and open counts. So the pass was asked to reorder a list it
+// could not see, and did the only honest thing available: returned an
+// empty ranking, twice in a row, indistinguishable on the ticket from a
+// pass that read the order and approved of it.
+//
+// Current priorities are stated because a ranking is a diff against
+// them: the schema asks for entries "only where the rank should change",
+// which is unanswerable without knowing what the rank is.
+func debtBacklogSection(backlog []agent.CompositionEntry) string {
+	if len(backlog) == 0 {
+		return "\n## The debt backlog\n\nEmpty — no unscheduled tech-debt tickets. There is nothing to re-rank, so an empty `ranking` is the right answer here rather than a gap in the input.\n"
+	}
+	var b strings.Builder
+	b.WriteString("\n## The debt backlog\n\nUnscheduled tech-debt, in its current order — gating first, then by priority. This is what your `ranking` re-orders; emit an entry only where the rank should change.\n\n")
+	for _, c := range backlog {
+		kind := "non-gating"
+		if c.Gating {
+			kind = "GATING"
+		}
+		fmt.Fprintf(&b, "- %s — %s  (%s, priority %d)\n", c.Key, c.Title, kind, c.Priority)
+	}
+	return b.String()
 }
 
 // harnessFindingsForBoundary renders what the milestone's agents

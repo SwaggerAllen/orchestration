@@ -163,10 +163,10 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Finish(ctx, p, h, res, ""); err == nil {
+	if err := Finish(ctx, p, h, res, "", 3, nil); err == nil {
 		t.Error("empty hand-back must be refused")
 	}
-	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope."); err != nil {
+	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope.", 3, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Checks {
@@ -192,7 +192,7 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 	if res2.PRNumber != draft.Number {
 		t.Fatalf("claim did not find the draft PR: %+v", res2)
 	}
-	if err := Finish(ctx, p, h, res2, "hand-back"); err != nil {
+	if err := Finish(ctx, p, h, res2, "hand-back", -1, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, pr := range h.PRs {
@@ -217,8 +217,16 @@ func TestAbortRoutes(t *testing.T) {
 	if err := Abort(ctx, p, res, "pushback", "The design assumes a socket the static export cannot have."); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
-		t.Errorf("state = %q, want designing", got)
+	// Blocked rather than straight back to Designing, and the origin
+	// rides along: a design run is dispatched on every entry to Designing
+	// and nothing counts the entries, so a decisionless pass and a
+	// push-back could hand one ticket between them indefinitely. Parking
+	// puts the only participant who can break that in front of it.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	if got := blockedFrom(t, tr, cfg, i.ID); got != string(protocol.InProgress) {
+		t.Errorf("blocked marker from = %q, want %q", got, protocol.InProgress)
 	}
 
 	j := seed(t, tr, cfg, "Crash case", "d", protocol.ReadyForDev)
@@ -438,5 +446,228 @@ func TestReconcileBounceReworkHasNoFailingBuildSection(t *testing.T) {
 	}
 	if res.CIFailure != nil {
 		t.Errorf("a reconcile bounce carries a CI failure section: %+v", res.CIFailure)
+	}
+}
+
+// A dev run that correctly changes nothing.
+//
+// This used to be the worst outcome the pipeline could produce: the host
+// rejected a PR with no commits behind it, the finish step exited
+// non-zero, and the generic `abort on failure` stamped Blocked/failed on
+// top of a hand-back arguing — correctly — that the right answer was to
+// change nothing. Measured on ORC-64, where the scope was already on
+// main from ORC-23 and every clause of it checked out.
+//
+// It is a park, not a failure, and not a route the pipeline picks a
+// reason for. Which of "duplicate, cancel it" and "stale scope, rewrite
+// it" applies is a judgment, and both the hand-back and the label are
+// there so a human can make it.
+func TestFinishWithNoCommitsAndNoReasonParksTheTicket(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Add a farewell to the home screen", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handback := "Nothing landed, deliberately: every clause of the scope is already on main."
+	if err := Finish(ctx, p, h, res, handback, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked — nothing failed, but nobody but the author can say what this ticket is", got)
+	}
+	if len(h.PRs) != 0 {
+		t.Errorf("opened %d PR(s) with nothing to put in them: %+v", len(h.PRs), h.PRs)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	if !hasLabel(issue.Labels, core.LabelScopeSatisfied) {
+		t.Errorf("labels = %v, want %s — same status and same question as a run that named it, so the same label", issue.Labels, core.LabelScopeSatisfied)
+	}
+	// The run's own account survives, and so does the protocol's. The
+	// hand-back is the half that looked at the repository.
+	var handbackSeen, explained bool
+	for _, c := range issue.Comments {
+		if strings.Contains(c.Body, handback) {
+			handbackSeen = true
+		}
+		if strings.Contains(c.Body, "No changes, and no reason given") {
+			explained = true
+		}
+	}
+	if !handbackSeen || !explained {
+		t.Errorf("hand-back on ticket: %v; explanation on ticket: %v — a park nobody can read is a park nobody acts on", handbackSeen, explained)
+	}
+}
+
+// Absent and zero are different claims. Reading "nobody counted" as
+// "nothing landed" would park a ticket whose work was fine, which is a
+// worse failure than the one this check exists for — so it refuses
+// rather than assumes, and only where the count decides something.
+func TestFinishRefusesToGuessWhetherAnythingLanded(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Finish(ctx, p, h, res, "hand-back", -1, nil)
+	if err == nil || !strings.Contains(err.Error(), "--commits") {
+		t.Fatalf("want a refusal naming the flag that fixes it, got %v", err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got == protocol.Blocked {
+		t.Error("refusing left the ticket parked; it should sit where the run found it")
+	}
+}
+
+func hasLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
+}
+
+// A project set up before the scope-satisfied label existed does not carry
+// it, and re-running setup is not something a dev run can wait for. The
+// plane provisions the label on demand instead, so the park works on a
+// project that has never heard of it — worth pinning, because the
+// alternative failure is the one this route was built to stop: a park
+// that cannot attach its label becomes a run recorded as broken.
+func TestParkWorksOnAProjectMissingTheLabel(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	tr.DropLabel(cfg.Tracker.TeamID, core.LabelScopeSatisfied)
+	i := seed(t, tr, cfg, "Already on main", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Finish(ctx, p, h, res, "Nothing landed; the scope is already on main.", 0, nil); err != nil {
+		t.Fatalf("a project without the label could not park a ticket: %v", err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	if issue := findIssue(t, tr, cfg, i.ID); !hasLabel(issue.Labels, core.LabelScopeSatisfied) {
+		t.Errorf("labels = %v, want the label provisioned on demand", issue.Labels)
+	}
+}
+
+// The three reasons a run legitimately changes nothing, each landing
+// somewhere different. Collapsing them was tried first and rejected: a
+// duplicate ticket, a missing secret and an unbuildable design want
+// three different things from a human, and a Blocked column that renders
+// them identically is one where every ticket has to be opened to be
+// read.
+func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
+	cases := []struct {
+		outcome string
+		state   protocol.State
+		label   string
+	}{
+		{"scope-satisfied", protocol.Blocked, core.LabelScopeSatisfied},
+		{"needs-setup", protocol.Blocked, core.LabelNeedsSetup},
+		// Blocked, not Designing. Routing straight back to Designing
+		// re-dispatches design, and nothing counts the trips: a
+		// decisionless pass and a push-back can hand one ticket back and
+		// forth forever, each correct on its own terms.
+		{"pushback", protocol.Blocked, core.LabelPushback},
+	}
+	for _, c := range cases {
+		t.Run(c.outcome, func(t *testing.T) {
+			ctx := context.Background()
+			tr, h, cfg, p := world(t)
+			i := seed(t, tr, cfg, "Add a farewell", "d", protocol.ReadyForDev)
+			res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &DevOutcome{Outcome: c.outcome, Summary: "The argument for " + c.outcome + "."}
+			if err := Finish(ctx, p, h, res, "hand-back", 0, o); err != nil {
+				t.Fatal(err)
+			}
+			if got := issueState(t, tr, cfg, i.ID); got != c.state {
+				t.Errorf("state = %q, want %q", got, c.state)
+			}
+			if len(h.PRs) != 0 {
+				t.Errorf("opened a PR for a run that changed nothing: %+v", h.PRs)
+			}
+			issue := findIssue(t, tr, cfg, i.ID)
+			if !hasLabel(issue.Labels, c.label) {
+				t.Errorf("labels = %v, want %s", issue.Labels, c.label)
+			}
+			var argued bool
+			for _, cm := range issue.Comments {
+				if strings.Contains(cm.Body, "The argument for "+c.outcome) {
+					argued = true
+				}
+			}
+			if !argued {
+				t.Error("the model's argument did not reach the ticket, so nobody can act on it")
+			}
+		})
+	}
+}
+
+// An outcome without its argument is a ticket nobody can act on — each
+// of the three ends with a human reading it and deciding something.
+func TestDevOutcomeRequiresItsArgument(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "outcome.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if _, err := LoadDevOutcome(write(`{"outcome":"pushback"}`)); err == nil {
+		t.Error("a push-back with no argument was accepted")
+	}
+	if _, err := LoadDevOutcome(write(`{"outcome":"nonsense","summary":"x"}`)); err == nil {
+		t.Error("an unknown outcome was accepted")
+	}
+	// Absent means done: an older prompt that never wrote one still
+	// finishes, and a run that changed nothing without saying why is
+	// caught by the commit count instead.
+	o, err := LoadDevOutcome(filepath.Join(dir, "never-written.json"))
+	if err != nil || o.Outcome != "done" {
+		t.Errorf("missing file = %+v, %v; want done", o, err)
+	}
+}
+
+// A named outcome says the run changed nothing, so commits contradict
+// it. Reported rather than refused: the outcome is the model's own
+// account, overriding it would be the harness guessing, and failing here
+// would land the ticket in Blocked/failed — the outcome these routes
+// exist to avoid.
+func TestNamedOutcomeWithCommitsSaysSoRatherThanFailing(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Add a farewell", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DevOutcome{Outcome: "scope-satisfied", Summary: "Already on main."}
+	if err := Finish(ctx, p, h, res, "hand-back", 2, o); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want the model's outcome honoured", got)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	var noted bool
+	for _, c := range issue.Comments {
+		if strings.Contains(c.Body, "left 2 commit(s)") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Error("the contradiction is not on the ticket, so the commits are invisible to whoever reads it")
 	}
 }

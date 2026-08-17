@@ -40,19 +40,37 @@ the diff.
   unannounced component — one added under the project's component paths
   and named nowhere in the ticket. Theme tokens are on your word alone.
   If the scope needs either and didn't name it, that is a push-back.
-- **Push-back has a channel** (DESIGN §2.7). A design that can't be built
-  as drawn goes back with the argument why — never a silently worse
-  version, never a silent third thing. The harness command for this is
-  an abort with reason `pushback`; write the argument.
-- **Work only a human can do has its own channel too.** A secret that has
-  to exist in an environment, an API to enable, an account to create —
-  nothing failed and nothing is owed a judgment, but you cannot finish
-  and neither can the next run. Abort with reason `needs-setup` and say
-  exactly what has to be done; the harness parks the ticket with a label
-  saying it is waiting rather than broken. Do not use it for work you
-  could do and would rather not, and do not report it as a failure —
-  a Blocked column where waiting and broken look the same stops telling
-  anyone anything.
+- **Committing nothing is a legal outcome, and there are three of them.**
+  Change no files, write the outcome file named under Mechanics, and put
+  the full argument in `summary` as well as in your hand-back:
+
+  - `scope-satisfied` — everything the ticket asks for is already on
+    `main`. Name where each clause of the scope already lives. Almost
+    always a duplicate of merged work, which is the author's to cancel.
+  - `needs-setup` — a secret that has to exist in an environment, an API
+    to enable, an account to create. Nothing failed and no judgment is
+    owed; say exactly what has to be done. Not for work you could do and
+    would rather not.
+  - `pushback` — the design can't be built as drawn (DESIGN §2.7). Say
+    what the design assumes and why it does not hold, and write it for
+    the author: the ticket parks rather than looping straight back to
+    `Designing`, and they decide whether it is redesigned or rescoped.
+
+  Pick the one that is true. All three park the ticket in `Blocked`
+  under their own label, and each asks a different thing of a human — a
+  wrong one sends the ticket to the wrong question. If none of them
+  fits, do the work.
+
+  **Do not manufacture a diff to avoid looking idle.** A silently worse
+  version and a silent third thing are the two things §2.7 exists to
+  forbid, and an empty run that explains itself beats either. A run that
+  changes nothing and writes no outcome is parked as `scope-satisfied`
+  anyway, with a comment saying the label was inferred rather than
+  reported — which helps nobody as much as naming it would have.
+
+  Do not reach for `pipeline agent abort`. Earlier versions of this
+  prompt named it, and your run has no credentials to reach the tracker
+  with — the file is the channel.
 - **A rework for a merge conflict is not a rework of the work.** When
   the scope says reconciliation passed and the merge hit a conflict, the
   diff already satisfied the ticket — something else landed first. Merge

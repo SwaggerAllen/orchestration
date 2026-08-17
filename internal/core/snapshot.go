@@ -321,6 +321,41 @@ const (
 	// reads as a failure in a Blocked column otherwise, which is how the
 	// Blocked count stops being a health signal.
 	LabelNeedsSetup = "needs-setup"
+	// A run that changes no files is exceptional — work reaches an agent
+	// because something is meant to change — and there are three
+	// different reasons for it, wanting three different things from a
+	// human. They get three labels rather than one, because a Blocked
+	// column that cannot tell them apart is one somebody has to open
+	// every ticket to read.
+	//
+	// LabelScopeSatisfied: everything the ticket asks for is already on
+	// main. Almost always a duplicate of merged work, which is Canceled
+	// rather than Done (DESIGN §2.6) — but sometimes a scope that went
+	// stale and wants rewriting, and only a human can tell which.
+	LabelScopeSatisfied = "scope-satisfied"
+	// LabelPushback: the design cannot be built as drawn (DESIGN §2.7).
+	// Parks rather than routing back to Designing, because a design pass
+	// runs on every entry to Designing and nothing counts the trips — a
+	// decisionless pass and a push-back can hand the same ticket back and
+	// forth indefinitely, each one correct on its own terms. Blocked puts
+	// a human in the loop, which is the only thing here that can break it.
+	LabelPushback = "pushback"
+	// LabelAuthorOnly routes a ticket to the author instead of an agent:
+	// no design pass is dispatched for it and the dev queue skips it, in
+	// every state, so it moves only when a human moves it.
+	//
+	// It exists because some work is legal for nobody else. The quality
+	// gates live in pipeline.config.json and ci.yml; both are author-only
+	// (DESIGN §5), so a ticket scoped to change the gate set had no
+	// agent-legal path to completion — the dev agent would claim it, find
+	// every file it needed closed to it, and hand back. That is a full
+	// run spent to be told no, repeated on every beat, because the
+	// refusal leaves the ticket in the queue.
+	//
+	// A label rather than a state: it says who owns the work, not where
+	// the work is, and the ticket still moves through the ordinary states
+	// as the author does it.
+	LabelAuthorOnly = "author-only"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {

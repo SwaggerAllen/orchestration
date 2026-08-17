@@ -102,6 +102,37 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json"
 
+    # The step above committed the retro note through the contents API,
+    # straight to the default branch — the boundary opens no PR (DESIGN
+    # §10). That write lands on the remote; this checkout was taken
+    # before it and knows nothing about it.
+    #
+    # The scan below then reads a tree with no docs/retros/ in it and
+    # concludes the note was never written, which is exactly what it
+    # reported on the first boundary after the note started carrying
+    # merge shas. Its own prompt names that note twice as load-bearing:
+    # the marker for "diffs merged since the last boundary", and the
+    # duplicate detector standing in for tracker search over archived
+    # work. Handing the model a tree the harness has already moved past
+    # is handing it the wrong repository.
+    #
+    # A warning rather than a failure. The scan is read-mostly and its
+    # inputs are bounded, so a stale tree degrades it rather than
+    # breaking it — and a boundary that refuses to run over a
+    # fast-forward is one that needs a human for something a human
+    # cannot fix from a phone. If the note really is missing the model
+    # says so, which is how this was found.
+    - name: pick up the retro note the archive just wrote
+      shell: bash
+      run: |
+        set -uo pipefail
+        git fetch -q origin main
+        if git merge --ff-only -q FETCH_HEAD; then
+          echo "checkout fast-forwarded to origin/main; the retro note is in the tree"
+        else
+          echo "::warning::could not fast-forward this checkout to origin/main — the debt scan will read a tree without the retro note the archive step just wrote, and may report it missing"
+        fi
+
     - name: debt scan + grooming
       if: steps.claim.outputs.scan_done != 'true'
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main

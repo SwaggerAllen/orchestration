@@ -7,6 +7,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -72,6 +74,15 @@ type ClaimResult struct {
 	// exists yet (DESIGN §5: the branch name carries the issue key).
 	Branch   string
 	PRNumber int // 0 = no PR yet
+	// Labels are the ticket's labels as the claim found them.
+	//
+	// Carried because they are what the run is judged against and the
+	// agent could not see them: CI fails a diff that touches a path
+	// mapped to a screen or system doc whose label the ticket does not
+	// carry (DESIGN §6, §9), and the prompt told the agent to stay inside
+	// labels it was never shown. Guessing them from the scope is exactly
+	// the guess the mutex exists to prevent.
+	Labels []string `json:",omitempty"`
 	// BaseSHA is the recorded merge-base, "" if the description has none.
 	// The base check flags rather than blocks (DESIGN §9): the harness
 	// surfaces it, the agent judges it.
@@ -204,7 +215,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-		Description: t.Description,
+		Description: t.Description, Labels: append([]string(nil), t.Labels...),
 	}
 	claimState := protocol.InProgress
 	res.Mode = "dev"
@@ -258,12 +269,58 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 // of draft (or created), and the transition to Checks. An issue that
 // moves without a hand-back is a state change nobody can audit
 // (DESIGN vocabulary), so an empty hand-back is an error.
-func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, handback string) error {
+//
+// o is the model's own account of how the run ended; nil means "done".
+// commits is how many commits the branch carries that main does not,
+// counted by the caller because git is where that fact lives, with -1
+// for "nobody measured". Between them they separate the three reasons a
+// run legitimately changes nothing (DESIGN §12) from the case where it
+// changed nothing and said nothing about why.
+func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, handback string, commits int, o *DevOutcome) error {
 	if strings.TrimSpace(handback) == "" {
 		return fmt.Errorf("finish %s: hand-back is empty — what landed, the commit, anything deliberately not done and why", res.TicketKey)
 	}
+	if o == nil {
+		o = &DevOutcome{Outcome: "done"}
+	}
+	// Unmeasured is only tolerable when a PR already exists, or when the
+	// model named an outcome that opens none: those are the cases where
+	// the count decides nothing. Otherwise it decides whether a PR can be
+	// opened at all, and guessing wrong is how this used to fail — the
+	// host rejected the empty PR, the step exited non-zero, and the
+	// generic abort stamped Blocked/failed over a hand-back explaining
+	// that the run had done exactly the right thing.
+	if o.Outcome == "done" && res.PRNumber == 0 && commits < 0 {
+		return fmt.Errorf("finish %s: no PR yet and nobody counted the commits, so this cannot tell work from a no-op — pass --commits \"$(git rev-list --count origin/main..HEAD)\"", res.TicketKey)
+	}
+	// Before the routing below, so the run's own account is on the ticket
+	// whichever way this goes. On every route but "done" it is the more
+	// useful half: the label says the shape of the problem and the
+	// hand-back says what the run actually saw.
 	if err := p.CommentTicket(ctx, res.TicketID, handback); err != nil {
 		return err
+	}
+	if reason, named := devOutcomes[o.Outcome]; named {
+		summary := o.Summary
+		// A named outcome means the run changed nothing, so commits on the
+		// branch contradict it. Reported rather than refused: the outcome
+		// is the model's own account and overriding it would be the
+		// harness guessing, while failing here would land the ticket in
+		// Blocked/failed — the exact outcome these routes exist to avoid.
+		// The commits are already pushed, so a human can look.
+		if commits > 0 {
+			summary += fmt.Sprintf("\n\n---\n\n_The run reported `%s` but left %d commit(s) on `%s`. Nothing was opened for review; the branch is there if they matter._", o.Outcome, commits, res.Branch)
+		}
+		return Abort(ctx, p, res, reason, summary)
+	}
+	// Nothing to open a PR with, and no account of why. Filed as
+	// scope-satisfied like a run that said so itself: it is the same
+	// status, wants the same look from the same person, and the comment
+	// below is where the difference lives. A second label for it was
+	// tried and dropped — two labels the author triages identically are
+	// two labels they have to learn the difference between for nothing.
+	if res.PRNumber == 0 && commits == 0 {
+		return Abort(ctx, p, res, "scope-satisfied", unexplainedMessage)
 	}
 	if res.PRNumber == 0 {
 		pr, err := h.CreatePR(ctx, res.Branch,
@@ -280,11 +337,114 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	return p.TransitionTicket(ctx, res.TicketID, protocol.Checks, core.RoleDev)
 }
 
-// Abort routes a run that cannot finish. Three reasons, and the third is
-// not a failure:
+// softLabel attaches a label without letting the attachment decide
+// whether the abort happens.
 //
-//   - pushback   -> Designing with the argument, never a silently worse
-//     version (DESIGN §2.7)
+// The plane provisions a missing label on demand, so what is left here is
+// a tracker refusing outright: a permissions gap, an API error, a name
+// already taken at another scope. On a hard failure any of those would
+// abort the abort, fail the finish step, and let the generic handler
+// stamp Blocked/failed on a run that did exactly the right thing — which
+// is the outcome these routes exist to prevent, so it must not be
+// reachable through them.
+//
+// The move is the load-bearing half; the label is how the column stays
+// readable. Saying so on the ticket beats both failing and going quiet.
+func softLabel(ctx context.Context, p *plane.Plane, res *ClaimResult, message, label string) string {
+	if err := p.AddTicketLabel(ctx, res.TicketID, label); err != nil {
+		return message + fmt.Sprintf("\n\n---\n\n_The `%s` label could not be attached (%v). The move itself is unaffected; run `pipeline setup` on this project to provision the label set._", label, err)
+	}
+	return message
+}
+
+// unexplainedMessage is what a zero-diff run leaves on the ticket when
+// it named no outcome of its own.
+//
+// It lands under the same label as a run that said "scope-satisfied",
+// because it is the same status and the same question for the same
+// person. What it does not do is claim the run said so: the prose is
+// where the harness admits it is inferring, which is the honest place
+// for that — a label the author reads at a glance should not be the
+// thing carrying a hedge.
+//
+// It is a park rather than a failure because nothing failed. This used
+// to arrive as Blocked/failed — the host rejected a PR with no commits
+// behind it, the step exited non-zero, and the generic abort stamped the
+// ticket over a hand-back arguing, correctly, that the right answer was
+// to change nothing. A Blocked column where that looks the same as a
+// crash is a column that has stopped answering "what is broken".
+const unexplainedMessage = `**No changes, and no reason given.** This run produced nothing main does not already have, and wrote no outcome saying why — so there is no diff to open a PR with, and the label above is an inference rather than the run's own word.
+
+It is filed as scope-satisfied because that is overwhelmingly the usual cause and it is the same question either way, but take the label as a starting point rather than a finding. A run that changes nothing is supposed to say which of the three applies — the scope was already satisfied, something needs setting up first, or the design cannot be built as drawn — and this one said none of them, which is itself worth a look.
+
+The hand-back above is the run's own account and the only thing here that looked at the actual repository. Read it, then pick: cancel the ticket if it duplicates merged work — ` + "`Canceled`" + `, not ` + "`Done`" + `, so ` + "`Done`" + ` stays a record of what actually shipped (DESIGN §2.6) — or send it back with a scope naming what is still missing.`
+
+// DevOutcome is the dev model's structured output: which of the ways a
+// run can end this one took, and the argument for it.
+//
+// A file rather than a command the model runs, for the same reason
+// design and reconcile use files. The model's run carries the model
+// credential and nothing else — no tracker key, no GitHub token — so it
+// cannot transition a ticket, and that is the design rather than an
+// oversight: the harness brackets the model, and every protocol
+// obligation stays in Go under test. prompts/dev.md told the model to
+// run `pipeline agent abort --reason pushback` for a long time, an
+// instruction it was never once able to follow.
+type DevOutcome struct {
+	// Outcome: "done", "scope-satisfied", "needs-setup" or "pushback".
+	// Absent file means "done" — an older prompt that never wrote one
+	// still finishes, and a run that produced nothing without saying why
+	// is caught by the commit count instead.
+	Outcome string `json:"outcome"`
+	// Summary is the argument. Required for everything but "done": each
+	// of the other three ends with a human reading this and deciding
+	// something, and one that arrives without it is a ticket nobody can
+	// act on.
+	Summary string `json:"summary"`
+}
+
+// devOutcomes maps each outcome to the abort reason that lands it.
+// "done" is absent because it is the one that does not abort.
+var devOutcomes = map[string]string{
+	"scope-satisfied": "scope-satisfied",
+	"needs-setup":     "needs-setup",
+	"pushback":        "pushback",
+}
+
+// LoadDevOutcome reads the dev model's outcome. A missing file is not an
+// error: it means "done", which is what almost every run is.
+func LoadDevOutcome(path string) (*DevOutcome, error) {
+	if path == "" {
+		return &DevOutcome{Outcome: "done"}, nil
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return &DevOutcome{Outcome: "done"}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dev outcome: %w", err)
+	}
+	var o DevOutcome
+	if err := json.Unmarshal(raw, &o); err != nil {
+		return nil, fmt.Errorf("dev outcome %s: %w", path, err)
+	}
+	if o.Outcome == "" {
+		o.Outcome = "done"
+	}
+	if _, ok := devOutcomes[o.Outcome]; !ok && o.Outcome != "done" {
+		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback", o.Outcome)
+	}
+	if o.Outcome != "done" && strings.TrimSpace(o.Summary) == "" {
+		return nil, fmt.Errorf("dev outcome: %q without its argument is a ticket nobody can act on — say what you found", o.Outcome)
+	}
+	return &o, nil
+}
+
+// Abort routes a run that cannot finish. Four reasons, and only
+// "failed" is a failure:
+//
+//   - pushback   -> Blocked with the pushback label and the argument,
+//     never a silently worse version (DESIGN §2.7)
 //   - failed     -> Blocked naming what failed (DESIGN §12)
 //   - needs-setup -> Blocked with the needs-setup label: nothing failed
 //     and no judgment is owed, a human has to do something the run
@@ -292,6 +452,17 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 //     account. Without its own flavor it lands in Blocked looking like a
 //     failure, and the Blocked column stops being readable as "what is
 //     broken".
+//   - scope-satisfied -> Blocked with the scope-satisfied label: the
+//     ticket asks for what is already on main, so there was nothing to
+//     build. Almost always a duplicate of merged work. Also where a run
+//     that changed nothing and named no reason lands — a separate label
+//     for that was tried and dropped, because it is the same status and
+//     the same question, and the comment already says which happened.
+//
+// Every reason but "failed" parks in Blocked, including push-back. They
+// want different things from a human — cancel the ticket, provision a
+// secret, re-decide the design — and a Blocked column that renders them
+// identically is one where every ticket has to be opened to be read.
 //
 // Both Blocked routes stamp the state the run was working in. Only the
 // author moves a ticket out of Blocked and they choose the state
@@ -303,10 +474,21 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 	var m *marker.Marker
 	switch reason {
 	case "pushback":
-		to = protocol.Designing
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("abort: push-back without its argument is one the next pass repeats (DESIGN §3)")
 		}
+		// Blocked, not Designing, and this is a change from §2.7 as first
+		// written. Routing straight back to Designing re-dispatches the
+		// design agent — that is what entering Designing means — and
+		// nothing counts the trips. A decisionless design pass and a dev
+		// push-back can hand one ticket back and forth forever, each pass
+		// correct on its own terms and neither able to see the loop it is
+		// in. Counting the bounces was the alternative; parking is
+		// cheaper and it puts the one participant who can actually break
+		// the cycle in front of it.
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"pushback": "1"}}
+		message = softLabel(ctx, p, res, message, core.LabelPushback)
 	case "failed":
 		to = protocol.Blocked
 		if message == "" {
@@ -319,11 +501,16 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		}
 		to = protocol.Blocked
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"setup": "1"}}
-		if err := p.AddTicketLabel(ctx, res.TicketID, core.LabelNeedsSetup); err != nil {
-			return err
+		message = softLabel(ctx, p, res, message, core.LabelNeedsSetup)
+	case "scope-satisfied":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: scope-satisfied without saying what is already there is a ticket nobody can adjudicate")
 		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"scope-satisfied": "1"}}
+		message = softLabel(ctx, p, res, message, core.LabelScopeSatisfied)
 	default:
-		return fmt.Errorf("abort: reason must be pushback, failed or needs-setup, got %q", reason)
+		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup or scope-satisfied, got %q", reason)
 	}
 	if m != nil {
 		m.Fields["from"] = string(res.State)
