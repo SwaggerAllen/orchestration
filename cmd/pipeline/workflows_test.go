@@ -68,3 +68,34 @@ func stripComments(body string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// Where the retro notes are cleared is the whole safety argument, so it
+// is asserted rather than left to whoever next edits the step.
+//
+// The notes are the reset's only record of what a milestone boundary
+// archived, and they have to outlive a reset that could not finish. A
+// conflicting revert exits the step, so clearing them after the revert
+// loop means a re-run still has them; clearing them before it would
+// destroy the answer on exactly the run that needed it twice. They also
+// have to be cleared before the push, or the commit never leaves the
+// runner and the next boundary skips its note again.
+func TestRehearsalResetClearsRetroNotesBetweenTheRevertsAndThePush(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "rehearse.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+
+	revert := strings.Index(body, "git revert --no-edit")
+	clear := strings.Index(body, "git rm -r -q docs/retros")
+	push := strings.Index(body, "git push origin main")
+	if revert < 0 || clear < 0 || push < 0 {
+		t.Fatalf("rehearse.yml no longer reverts (%d), clears the notes (%d) or pushes (%d) — one of them was renamed or dropped", revert, clear, push)
+	}
+	if clear < revert {
+		t.Error("the retro notes are cleared before the reverts run: a conflicting revert exits the step, and the re-run would come back to notes that are already gone")
+	}
+	if push < clear {
+		t.Error("the retro notes are cleared after the push: the deletion never leaves the runner, and the next boundary skips writing its note")
+	}
+}

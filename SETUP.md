@@ -515,10 +515,25 @@ takes `--repo` and refuses to run without it: a reset that cannot read
 the notes reverts some of the last rehearsal and calls it done, which
 is the same silence in a smaller size.
 
-Notes are never reverted away, so every past milestone's shas come back
-on every reset. They cost nothing — the revert loop skips a commit that
-is already reverted or no longer on `main` — and the alternative is the
-harness deciding which note is "current", which it has no way to know.
+**And the reset clears the notes once its reverts have landed.** A
+boundary writes one note per milestone and only if absent, which is
+right for a real project — the check is what stops a resumed pass
+clobbering a record — and wrong for a rehearsal, because the scenario
+names its milestone the same thing every run. The second boundary would
+find the first one's note already there, skip it, and record nothing;
+the reset after it would read a note describing a rehearsal two runs ago
+and miss everything the last one merged. Same silence, one layer down.
+
+Clearing happens in the repo step, not in `scenario reset`, and the
+order is the argument: the notes have been read by then, a conflicting
+revert exits before reaching it so a re-run still has them, and what
+replaces a note as the record of a reverted commit is the revert commit
+itself — which is what the loop checks before reverting anything.
+
+This is a rehearsal behavior only. On a real project a retro note is the
+record of a milestone and nothing deletes it, which is why the whole
+thing lives in `rehearse.yml` and is deliberately absent from
+`examples/stubs`.
 
 Two consequences worth knowing:
 

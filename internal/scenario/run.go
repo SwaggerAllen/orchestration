@@ -155,12 +155,14 @@ func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmPr
 		}
 	}
 	// After the live tickets, so a ticket still carrying its marker wins
-	// the dedupe and keeps its PR number. Notes from every past
-	// milestone are read, not just this rehearsal's: a note is never
-	// reverted away, so old shas come back every run. They cost nothing
-	// — the revert loop skips a commit that is already reverted or no
-	// longer on main — and singling out "the last one" would mean the
-	// harness deciding which note was current, which it cannot know.
+	// the dedupe and keeps its PR number. Every note is read, not the
+	// newest: a rehearsal that crossed more than one milestone boundary
+	// wrote one per milestone, and picking "the current one" would mean
+	// the harness deciding something it has no way to know. Nothing
+	// older than this rehearsal is in the way, because the repo half of
+	// the reset clears the notes once its reverts have landed — and if
+	// one is somehow left behind, it costs nothing: the revert loop
+	// skips a commit already reverted or no longer on main.
 	notes, err := ReadRetroNotes(repoRoot)
 	if err != nil {
 		return nil, err
