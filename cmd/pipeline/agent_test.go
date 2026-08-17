@@ -167,27 +167,35 @@ func TestUnreadableLogsSaySoRatherThanGoingQuiet(t *testing.T) {
 	}
 }
 
-// The boundary prompt used to state the step flags, and on every first
-// pass it said archive=false — the prompt is assembled at claim and the
-// archive step runs after it. The template's prose says the archive
-// already ran, so the model got two sources contradicting each other
-// and, correctly, filed a harness finding about it rather than trusting
-// either. What it needs instead is where the notes are.
-func TestBoundaryPromptPointsAtTheRetroNotesAndClaimsNothingAboutSteps(t *testing.T) {
+// The boundary prompt states the step flags — they are the resume
+// signal (DESIGN §10), and all-false versus archive=true is the
+// difference between a first pass and a boundary picking itself back up.
+//
+// What they must not do is claim to be current. They are read at claim,
+// which is this run's first step, so they describe an earlier run and
+// nothing else; stated as "already completed" they contradicted the
+// template's "the archive pass already ran" — that one being about this
+// run's harness step — and the model filed a harness finding rather than
+// trusting either source. It was right to.
+func TestBoundaryPromptScopesTheStepFlagsToAnEarlierRun(t *testing.T) {
 	got := assembleBoundaryPrompt("ROLE-PROMPT", &agent.BoundaryPlan{
 		ClaimResult: agent.ClaimResult{TicketKey: "DUM-9", Title: "Milestone boundary"},
 		Milestone:   "Rehearsal 1",
 		Done:        map[string]bool{},
 	}, "/tmp/proposals.json")
 
+	flags := strings.Index(got, "archive=false scan=false file=false")
+	if flags < 0 {
+		t.Fatalf("the resume signal is gone; a resumed boundary cannot tell it is one:\n%s", got)
+	}
+	// Attributed, not bare. The sentence carrying the flags has to say
+	// whose run they describe, or it reads as a claim about this one.
+	line := got[strings.LastIndex(got[:flags], "\n")+1:]
+	line = line[:strings.Index(line, "\n")]
+	if !strings.Contains(line, "earlier run") {
+		t.Errorf("the flags are stated without saying they are an earlier run's: %q", line)
+	}
 	if !strings.Contains(got, retro.Dir) {
 		t.Errorf("the prompt never names %s, which its own scan instructions call the duplicate detector:\n%s", retro.Dir, got)
-	}
-	// Not "archive=false" specifically — any restatement of the step
-	// flags is the same lie, whatever it is spelled.
-	for _, dead := range []string{"archive=", "scan=", "file="} {
-		if strings.Contains(got, dead) {
-			t.Errorf("the prompt still states %q, which is captured at claim and wrong by the time the model reads it", dead)
-		}
 	}
 }

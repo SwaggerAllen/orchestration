@@ -434,19 +434,22 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	add(template)
 	add("\n\n---\n\n")
 	add(fmt.Sprintf("# Boundary — milestone %q (ticket %s)\n", plan.Milestone, plan.TicketKey))
-	// The step flags used to be stated here, and they told the model
-	// archive=false on every first pass — the prompt is assembled at
-	// claim, and the archive step runs after it. The template's prose
-	// says the archive already ran, so the model was handed two sources
-	// contradicting each other with no way to tell which to believe, and
-	// reported exactly that as a harness finding.
+	// "By an earlier run", not "already", and the distinction is the
+	// whole defect. plan.Done is read at claim — this run's first step —
+	// so it can only ever describe what a *previous* run finished, never
+	// what this one has. Phrased as "already completed" it contradicted
+	// the template's "the archive pass already ran", which is about this
+	// run's own harness step, and every first pass therefore handed the
+	// model two sources disagreeing with no way to tell which was stale.
+	// It filed a harness finding rather than trusting either, correctly.
 	//
-	// Dropped rather than corrected, because none of the three was ever
-	// actionable: the model step is skipped entirely when the scan is
-	// done, so a running model always has scan=false and file=false, and
-	// the archive is the harness's business either way. What it can use
-	// is where the notes are.
-	add(fmt.Sprintf("\nThe retro notes are in your checkout under `%s/`, this milestone's included — the archive step wrote it before you started.\n", retro.Dir))
+	// The flags themselves stay: they are the resume signal (DESIGN §10).
+	// All false is a first pass; archive=true is a boundary picking
+	// itself back up, which changes what the model should expect to find
+	// already done around it.
+	add(fmt.Sprintf("\nCompleted by an earlier run of this boundary: archive=%t scan=%t file=%t — all false means this is the first pass.\n",
+		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	add(fmt.Sprintf("\nThe archive pass has run either way — an earlier run's, or this one's before you started — so the retro notes are in your checkout under `%s/`, this milestone's among them.\n", retro.Dir))
 	if len(plan.Roster) > 0 {
 		add("\n## Milestones, in the tracker's order\n\n")
 		for _, m := range plan.Roster {
