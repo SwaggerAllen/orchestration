@@ -935,7 +935,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has three flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has four flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -949,6 +949,22 @@ the comment and a label say which:
   another name with a duplicate copy of every rule attached to it. It is a label because the
   distinction it carries is "is anything broken", and a `Blocked` column where waiting and
   broken look identical answers that question wrongly.
+- **Nothing failed, and there was nothing to do.** The `no-changes` case: the run finished and
+  produced no diff. A ticket reaches an agent because something is meant to change, so this is
+  exceptional, and the overwhelmingly likely explanation is that the work reached `main` by
+  another route and the ticket duplicates it. The harness parks it with the label and the run's
+  hand-back and names no cause, because the two candidates want opposite answers — a duplicate
+  of merged work is `Canceled` (§2.6), a scope that has gone stale is a rewrite — and choosing
+  between them from inside the pipeline is the silent third thing §2.7 forbids.
+
+  **This is deliberately one route for several situations.** A design that can't be built as
+  drawn, a scope already on `main`, a secret that has to exist first: an agent takes all of
+  them by changing no files and writing the argument in its hand-back, and they all land here.
+  Push-back to `Designing` (§2.7) stays the protocol's answer for the first of those, but no
+  agent can currently invoke it — the model runs with no tracker credentials — so in practice
+  the author reads the hand-back and moves the ticket. Collapsing the distinction is the price
+  of not building a second channel for a case that should be rare; if it stops being rare,
+  that is the signal to build one.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation

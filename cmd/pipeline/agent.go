@@ -560,6 +560,12 @@ func cmdAgentFinish(args []string) error {
 	baseSHA := fs.String("base-sha", "", "merge-base the design was drawn against (design mode)")
 	previewURL := fs.String("preview-url", "", "where this pass's storybook export was published (design)")
 	findings := fs.String("findings", "", "harness findings the model recorded (any kind)")
+	// Counted by the caller because git is where the answer is, and this
+	// command runs from the pipeline checkout rather than the project's.
+	// -1 rather than 0 by default: absent and zero are different claims,
+	// and reading "nobody said" as "nothing landed" would park a ticket
+	// whose work was fine.
+	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as no-changes")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -621,11 +627,18 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return fmt.Errorf("agent finish: reading hand-back: %w (an issue that moves without one is a state change nobody can audit)", err)
 	}
-	if err := agent.Finish(context.Background(), p, h, res, string(body)); err != nil {
+	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {
 		return err
+	}
+	// Findings post either way, above, because a run that found nothing
+	// to do is a likely place to have met a harness gap — which is how
+	// this outcome was discovered in the first place.
+	if res.PRNumber == 0 && *commits == 0 {
+		fmt.Printf("parked %s: no changes were needed, blocked with the no-changes label for the author\n", res.TicketKey)
+		return nil
 	}
 	fmt.Printf("finished %s: PR #%d ready, ticket in Checks\n", res.TicketKey, res.PRNumber)
 	return nil
@@ -635,7 +648,7 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed or needs-setup")
+	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or no-changes")
 	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.

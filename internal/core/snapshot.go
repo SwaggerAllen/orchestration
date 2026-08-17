@@ -321,6 +321,16 @@ const (
 	// reads as a failure in a Blocked column otherwise, which is how the
 	// Blocked count stops being a health signal.
 	LabelNeedsSetup = "needs-setup"
+	// LabelNoChanges is Blocked's fourth flavor (DESIGN §12): the run
+	// finished and produced nothing, because there was nothing to
+	// produce. A ticket reaches an agent because something is meant to
+	// change, so a run with no diff is exceptional and almost always
+	// means the work reached main by another route and the ticket
+	// duplicates it. Parked for the author rather than routed
+	// automatically: whether it is a duplicate to cancel or a scope that
+	// needs rewriting is a judgment, and the pipeline has no way to make
+	// it that is not a guess.
+	LabelNoChanges = "no-changes"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {
