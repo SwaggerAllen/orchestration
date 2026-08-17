@@ -15,6 +15,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -433,8 +434,19 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	add(template)
 	add("\n\n---\n\n")
 	add(fmt.Sprintf("# Boundary — milestone %q (ticket %s)\n", plan.Milestone, plan.TicketKey))
-	add(fmt.Sprintf("\nSteps already completed on this ticket: archive=%t scan=%t file=%t.\n",
-		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	// The step flags used to be stated here, and they told the model
+	// archive=false on every first pass — the prompt is assembled at
+	// claim, and the archive step runs after it. The template's prose
+	// says the archive already ran, so the model was handed two sources
+	// contradicting each other with no way to tell which to believe, and
+	// reported exactly that as a harness finding.
+	//
+	// Dropped rather than corrected, because none of the three was ever
+	// actionable: the model step is skipped entirely when the scan is
+	// done, so a running model always has scan=false and file=false, and
+	// the archive is the harness's business either way. What it can use
+	// is where the notes are.
+	add(fmt.Sprintf("\nThe retro notes are in your checkout under `%s/`, this milestone's included — the archive step wrote it before you started.\n", retro.Dir))
 	if len(plan.Roster) > 0 {
 		add("\n## Milestones, in the tracker's order\n\n")
 		for _, m := range plan.Roster {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 )
 
 // The three halves must reach the model in the order they were written
@@ -163,5 +164,30 @@ func TestUnreadableLogsSaySoRatherThanGoingQuiet(t *testing.T) {
 	}
 	if ciFailureSection(nil) != "" {
 		t.Error("a ticket that did not bounce on CI gets a section about a build that did not fail")
+	}
+}
+
+// The boundary prompt used to state the step flags, and on every first
+// pass it said archive=false — the prompt is assembled at claim and the
+// archive step runs after it. The template's prose says the archive
+// already ran, so the model got two sources contradicting each other
+// and, correctly, filed a harness finding about it rather than trusting
+// either. What it needs instead is where the notes are.
+func TestBoundaryPromptPointsAtTheRetroNotesAndClaimsNothingAboutSteps(t *testing.T) {
+	got := assembleBoundaryPrompt("ROLE-PROMPT", &agent.BoundaryPlan{
+		ClaimResult: agent.ClaimResult{TicketKey: "DUM-9", Title: "Milestone boundary"},
+		Milestone:   "Rehearsal 1",
+		Done:        map[string]bool{},
+	}, "/tmp/proposals.json")
+
+	if !strings.Contains(got, retro.Dir) {
+		t.Errorf("the prompt never names %s, which its own scan instructions call the duplicate detector:\n%s", retro.Dir, got)
+	}
+	// Not "archive=false" specifically — any restatement of the step
+	// flags is the same lie, whatever it is spelled.
+	for _, dead := range []string{"archive=", "scan=", "file="} {
+		if strings.Contains(got, dead) {
+			t.Errorf("the prompt still states %q, which is captured at claim and wrong by the time the model reads it", dead)
+		}
 	}
 }
