@@ -333,17 +333,13 @@ const (
 	// rather than Done (DESIGN §2.6) — but sometimes a scope that went
 	// stale and wants rewriting, and only a human can tell which.
 	LabelScopeSatisfied = "scope-satisfied"
-	// LabelPushback marks a ticket the dev pass sent back to Designing
-	// because the design cannot be built as drawn (DESIGN §2.7). Unlike
-	// the other two this is not a Blocked flavor — the ticket keeps
-	// moving, and the label is what makes a bounce visible in a column
-	// where a re-designing ticket otherwise looks like a new one.
+	// LabelPushback: the design cannot be built as drawn (DESIGN §2.7).
+	// Parks rather than routing back to Designing, because a design pass
+	// runs on every entry to Designing and nothing counts the trips — a
+	// decisionless pass and a push-back can hand the same ticket back and
+	// forth indefinitely, each one correct on its own terms. Blocked puts
+	// a human in the loop, which is the only thing here that can break it.
 	LabelPushback = "pushback"
-	// LabelNoChanges is the honest fallback: the run produced nothing and
-	// did not say why. Distinct from the three above on purpose — it is
-	// the harness admitting it does not know, which is worth telling
-	// apart from a run that named its reason.
-	LabelNoChanges = "no-changes"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {

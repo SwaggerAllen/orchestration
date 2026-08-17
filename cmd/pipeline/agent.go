@@ -568,7 +568,7 @@ func cmdAgentFinish(args []string) error {
 	// -1 rather than 0 by default: absent and zero are different claims,
 	// and reading "nobody said" as "nothing landed" would park a ticket
 	// whose work was fine.
-	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as no-changes")
+	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -644,11 +644,11 @@ func cmdAgentFinish(args []string) error {
 	// is a likely place to have met a harness gap — which is how these
 	// outcomes were discovered in the first place.
 	if devOutcome.Outcome != "done" {
-		fmt.Printf("%s: %s — routed for the author, no PR opened\n", res.TicketKey, devOutcome.Outcome)
+		fmt.Printf("%s: %s — parked for the author, no PR opened\n", res.TicketKey, devOutcome.Outcome)
 		return nil
 	}
 	if res.PRNumber == 0 && *commits == 0 {
-		fmt.Printf("parked %s: the run changed nothing and named no reason; blocked with the no-changes label\n", res.TicketKey)
+		fmt.Printf("parked %s: the run changed nothing and named no reason; blocked as scope-satisfied\n", res.TicketKey)
 		return nil
 	}
 	fmt.Printf("finished %s: PR #%d ready, ticket in Checks\n", res.TicketKey, res.PRNumber)
@@ -659,7 +659,7 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed, needs-setup, scope-satisfied or no-changes")
+	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or scope-satisfied")
 	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.

@@ -217,8 +217,16 @@ func TestAbortRoutes(t *testing.T) {
 	if err := Abort(ctx, p, res, "pushback", "The design assumes a socket the static export cannot have."); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
-		t.Errorf("state = %q, want designing", got)
+	// Blocked rather than straight back to Designing, and the origin
+	// rides along: a design run is dispatched on every entry to Designing
+	// and nothing counts the entries, so a decisionless pass and a
+	// push-back could hand one ticket between them indefinitely. Parking
+	// puts the only participant who can break that in front of it.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	if got := blockedFrom(t, tr, cfg, i.ID); got != string(protocol.InProgress) {
+		t.Errorf("blocked marker from = %q, want %q", got, protocol.InProgress)
 	}
 
 	j := seed(t, tr, cfg, "Crash case", "d", protocol.ReadyForDev)
@@ -475,8 +483,8 @@ func TestFinishWithNoCommitsAndNoReasonParksTheTicket(t *testing.T) {
 		t.Errorf("opened %d PR(s) with nothing to put in them: %+v", len(h.PRs), h.PRs)
 	}
 	issue := findIssue(t, tr, cfg, i.ID)
-	if !hasLabel(issue.Labels, core.LabelNoChanges) {
-		t.Errorf("labels = %v, want %s — the harness saying it does not know, told apart from the three named reasons", issue.Labels, core.LabelNoChanges)
+	if !hasLabel(issue.Labels, core.LabelScopeSatisfied) {
+		t.Errorf("labels = %v, want %s — same status and same question as a run that named it, so the same label", issue.Labels, core.LabelScopeSatisfied)
 	}
 	// The run's own account survives, and so does the protocol's. The
 	// hand-back is the half that looked at the repository.
@@ -524,16 +532,16 @@ func hasLabel(labels []string, want string) bool {
 	return false
 }
 
-// A project set up before the no-changes label existed does not carry
+// A project set up before the scope-satisfied label existed does not carry
 // it, and re-running setup is not something a dev run can wait for. The
 // plane provisions the label on demand instead, so the park works on a
 // project that has never heard of it — worth pinning, because the
 // alternative failure is the one this route was built to stop: a park
 // that cannot attach its label becomes a run recorded as broken.
-func TestUnexplainedNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
+func TestParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	tr.DropLabel(cfg.Tracker.TeamID, core.LabelNoChanges)
+	tr.DropLabel(cfg.Tracker.TeamID, core.LabelScopeSatisfied)
 	i := seed(t, tr, cfg, "Already on main", "d", protocol.ReadyForDev)
 	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
 	if err != nil {
@@ -545,7 +553,7 @@ func TestUnexplainedNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
 		t.Errorf("state = %q, want blocked", got)
 	}
-	if issue := findIssue(t, tr, cfg, i.ID); !hasLabel(issue.Labels, core.LabelNoChanges) {
+	if issue := findIssue(t, tr, cfg, i.ID); !hasLabel(issue.Labels, core.LabelScopeSatisfied) {
 		t.Errorf("labels = %v, want the label provisioned on demand", issue.Labels)
 	}
 }
@@ -564,11 +572,11 @@ func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
 	}{
 		{"scope-satisfied", protocol.Blocked, core.LabelScopeSatisfied},
 		{"needs-setup", protocol.Blocked, core.LabelNeedsSetup},
-		// Designing, not Blocked: §2.7 sends a push-back back to be
-		// re-decided rather than parking it. The label is what makes the
-		// bounce visible in a column where a ticket designing for the
-		// second time looks like one designing for the first.
-		{"pushback", protocol.Designing, core.LabelPushback},
+		// Blocked, not Designing. Routing straight back to Designing
+		// re-dispatches design, and nothing counts the trips: a
+		// decisionless pass and a push-back can hand one ticket back and
+		// forth forever, each correct on its own terms.
+		{"pushback", protocol.Blocked, core.LabelPushback},
 	}
 	for _, c := range cases {
 		t.Run(c.outcome, func(t *testing.T) {

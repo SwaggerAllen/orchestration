@@ -140,7 +140,6 @@ var Labels = []string{
 	"needs-setup",
 	"scope-satisfied",
 	"pushback",
-	"no-changes",
 	"harness",
 	"milestone-boundary",
 }

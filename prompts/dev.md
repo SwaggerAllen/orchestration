@@ -52,19 +52,21 @@ the diff.
     owed; say exactly what has to be done. Not for work you could do and
     would rather not.
   - `pushback` — the design can't be built as drawn (DESIGN §2.7). Say
-    what the design assumes and why it does not hold. This sends the
-    ticket back to `Designing` with your argument, so write it for the
-    design pass that reads it next.
+    what the design assumes and why it does not hold, and write it for
+    the author: the ticket parks rather than looping straight back to
+    `Designing`, and they decide whether it is redesigned or rescoped.
 
-  Pick the one that is true. They land in different places and ask
-  different things of a human, and a wrong one sends the ticket to the
-  wrong person. If none of them fits, do the work.
+  Pick the one that is true. All three park the ticket in `Blocked`
+  under their own label, and each asks a different thing of a human — a
+  wrong one sends the ticket to the wrong question. If none of them
+  fits, do the work.
 
   **Do not manufacture a diff to avoid looking idle.** A silently worse
   version and a silent third thing are the two things §2.7 exists to
   forbid, and an empty run that explains itself beats either. A run that
-  changes nothing and writes no outcome is parked as `no-changes` — the
-  harness saying it does not know why, which helps nobody.
+  changes nothing and writes no outcome is parked as `scope-satisfied`
+  anyway, with a comment saying the label was inferred rather than
+  reported — which helps nobody as much as naming it would have.
 
   Do not reach for `pipeline agent abort`. Earlier versions of this
   prompt named it, and your run has no credentials to reach the tracker

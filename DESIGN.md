@@ -88,18 +88,30 @@ and the drift shows up as agents disagreeing about what a state means.
 4. **Base-rev is optimistic concurrency control, checked at pickup.** Not provenance. Git
    surfaces conflict at merge, which is after the implementation exists, and only textual
    conflict at that. The resolution rule is semantic and has no git equivalent: the repo moved
-   and both changes touch the same behavior → **repo wins, ticket returns to `Designing`**
-   with a comment naming what moved. Never reconcile by guessing; that produces a design
-   nobody agreed to.
+   and both changes touch the same behavior → **repo wins, and the ticket stops** with a
+   comment naming what moved. It stops as a push-back (§2.7), so it parks in `Blocked` and the
+   author sends it back to `Designing` — the design has to be re-decided either way, and an
+   agent routing it there itself is the loop §2.7 describes. Never reconcile by guessing; that
+   produces a design nobody agreed to.
 5. **Undesigned changes remain legal.** Small fixes and vulnerability patches land on main
    without a ticket, on purpose — the author's, made outside the pipeline (§5). The base check
    is the only thing that warns the next design pass that the ground moved.
 6. **Rejected proposals are `Canceled`, never `Done`.** `Done` stays a clean record of what
    shipped.
-7. **Push-back has a channel.** A design that can't be built as drawn goes back to `Designing`
-   with a comment and a `pushback` label — never a silently worse version, never a silent third
-   thing. An agent takes it by changing no files and naming the outcome (§12); it has no
-   credential with which to move a ticket itself.
+7. **Push-back has a channel.** A design that can't be built as drawn stops, with the argument
+   why — never a silently worse version, never a silent third thing. An agent takes it by
+   changing no files and naming the outcome (§12); it has no credential with which to move a
+   ticket itself. It lands in `Blocked` under a `pushback` label, and the author decides
+   whether it is redesigned or rescoped.
+
+   **It parks rather than returning to `Designing`, and that is a correction.** Routing it
+   straight back is the obvious shape and it has a cycle in it: a design pass runs on every
+   entry to `Designing`, so a decisionless pass that finds nothing to decide and a push-back
+   that finds nothing to build can hand one ticket between them indefinitely, each pass correct
+   on its own terms and neither able to see the loop. Counting the bounces was the alternative
+   — a third counter beside the CI and reconcile ones (§12) — and it is more machinery to stop
+   something a human should be told about the first time. The author is the only participant
+   who can break the cycle, so they are the one it stops at.
 8. **A new component, token, context, table or dependency is a decision, not a port.** It
    must be named — components and tokens in the issue, structure in the sketch (§4) — because
    a decision nobody named is a decision nobody reviewed. Enforced in CI (§9), not by
@@ -154,8 +166,10 @@ is a confusion every agent prompt would have to fight.
 **Why `Design review` exists.** Without it there is no signal for *design is finished and
 waiting on the author* as distinct from *design is still working*. Sign-off is the transition
 `Design review` → `Ready for dev`, and it is the author's, always. **Declining is
-`Design review` → `Designing` with a comment** — the same channel the dev agent uses to push
-back, for the same reason: a rejection without its argument is one the next pass repeats.
+`Design review` → `Designing` with a comment**, for the same reason the dev agent's push-back
+carries its argument: a rejection without one is a rejection the next pass repeats. The author
+may route straight to `Designing` because they are the one who would notice a ticket going
+round; an agent's push-back parks instead (§2.7).
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
@@ -479,7 +493,7 @@ surprise at merge.
 | `Design review` | Returns to `Designing`. Nothing is built; revision is cheap. | design |
 | `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Designing`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
-| `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back to `Designing` if genuinely unbuildable. | dev |
+| `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
 | `Checks` | Evaluated in place. No state move. Clear with a comment, or return to `Reworking`. | dev |
 | `Reconciling` | Evaluated in place as an additional reconcile item. **Blocks the merge.** | reconcile |
 | `Merged` | Deferred — the change is merged and past recall. Becomes a finding → Triage. | — |
@@ -957,24 +971,25 @@ the comment and a label say which:
   `Done` stays a record of what actually shipped — but sometimes a scope that went stale and
   wants rewriting, and the pipeline cannot tell which. It parks with the run's hand-back and
   the author decides.
-- **Nothing failed, and the run produced nothing without saying why.** The `no-changes` case,
-  and the only one of these the harness raises on its own: no commits, and no outcome naming a
-  reason. It is deliberately its own label rather than being folded into the others, because
-  it is the harness admitting it does not know — putting a confident label on the one case
-  where nobody was confident is worse than saying so.
+- **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
+  parks here rather than looping back to `Designing`.
 
 **A run that changes nothing states which of these it is, in a file.** The model has the model
 credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,
 and that is the boundary rather than an oversight (§9). It writes `{"outcome": ..., "summary":
-...}` alongside its hand-back and the harness routes it: `scope-satisfied` and `needs-setup`
-park here, `pushback` goes back to `Designing` with the argument (§2.7) and carries a `pushback`
-label, because a ticket being designed for the second time looks exactly like one being
-designed for the first.
+...}` alongside its hand-back and the harness routes it.
 
-The three are not collapsed into one, and the reason is what a label is for: a duplicate ticket,
-a missing secret and an unbuildable design want three different actions from a human. A `Blocked`
-column that renders them identically is one where every ticket has to be opened before it can be
-triaged, which is the same failure as a column where waiting and broken look alike.
+**Three labels, not one**, because a duplicate ticket, a missing secret and an unbuildable
+design want three different actions from a human. A `Blocked` column that renders them
+identically is one where every ticket has to be opened before it can be triaged, which is the
+same failure as a column where waiting and broken look alike.
+
+**And not four.** A run that changes nothing and names no reason is filed as `scope-satisfied`
+too, with a comment saying the label was inferred rather than reported. A fourth label for it
+was tried and dropped: it is the same status, read by the same person, answering the same
+question, and two labels somebody triages identically are two labels they have to learn the
+difference between for nothing. The hedge belongs in the prose, where it can be read, rather
+than in a label, which is read at a glance.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation
