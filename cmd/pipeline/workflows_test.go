@@ -99,3 +99,50 @@ func TestRehearsalResetClearsRetroNotesBetweenTheRevertsAndThePush(t *testing.T)
 		t.Error("the retro notes are cleared after the push: the deletion never leaves the runner, and the next boundary skips writing its note")
 	}
 }
+
+// A stub that runs `pipeline setup` must grant deployments: read.
+//
+// Setup ends by probing the configured deploy endpoint, which for
+// provider "github" is GET /repos/{owner}/{repo}/deployments. That probe
+// is the point of doing it at hookup — nothing else exercises deploy
+// detection until a ticket reaches Merged, hours later, where the
+// symptom is "stuck in Merged" and names neither the endpoint nor the
+// token.
+//
+// The admin stub shipped without the scope and a *dry run* failed on it,
+// which is the worst version: the run wrote nothing, printed a correct
+// three-action plan, and then 403'd on a read. The env block already
+// passed DIGITALOCEAN_TOKEN and GITHUB_TOKEN for that same probe, so
+// both providers were in mind — the DigitalOcean path needs only a
+// secret, the GitHub path needs a secret and a scope, and one half was
+// wired.
+func TestSetupStubsGrantDeploymentsRead(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "..", "examples", "stubs", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("found no stubs to check — the path must have moved")
+	}
+	checked := 0
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		if !strings.Contains(body, "pipeline setup") {
+			continue
+		}
+		checked++
+		if !strings.Contains(body, "\npermissions:") {
+			continue // inherits the repository default, deliberately
+		}
+		if !strings.Contains(body, "deployments:") {
+			t.Errorf("%s runs pipeline setup and declares permissions without deployments — setup's deploy probe will 403, on a dry run as readily as on an apply", filepath.Base(p))
+		}
+	}
+	if checked == 0 {
+		t.Error("no stub runs pipeline setup — the command moved and this test now checks nothing")
+	}
+}

@@ -13,7 +13,7 @@ bindings live.
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
 | `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass. Its job must be able to *run* that command — dependencies and services included, not just the toolchain |
-| `pipeline-admin.yml` | `setup` and `state ingest`, on demand. The two operations the author runs by hand, reachable without a terminal — which matters because both are reached for when something is already wrong |
+| `pipeline-admin.yml` | `setup` and `state ingest`, on demand. The two operations the author runs by hand, reachable without a terminal — which matters because both are reached for when something is already wrong. Note its `deployments: read`: `setup` ends by probing the deploy endpoint, and that probe runs on a dry run too |
 | `pipeline-order.yml` | What to start next and what can run beside it, on demand, rendered to the run summary. Reads the tracker; writes nothing |
 
 **Every stub that runs the project's own commands carries the same

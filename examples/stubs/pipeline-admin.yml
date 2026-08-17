@@ -28,8 +28,21 @@ on:
         type: boolean
         default: false
 
+# Declaring this block at all drops every permission it does not name
+# to none, so it has to name everything the tasks call — not just the
+# obvious one.
+#
+# `deployments: read` is the one that is easy to miss, and it was
+# missed: setup ends by probing the configured deploy endpoint, which
+# for provider "github" is GET /repos/{owner}/{repo}/deployments. The
+# env block below already passes DIGITALOCEAN_TOKEN and GITHUB_TOKEN for
+# that probe, so the two providers were both in mind — but the
+# DigitalOcean path needs only a secret while the GitHub path needs a
+# secret *and* a scope, and only the secret half was wired. A dry run,
+# which writes nothing, still failed on it: the probe runs either way.
 permissions:
   contents: read # the config
+  deployments: read # setup's deploy probe, when deploy.provider is "github"
 
 jobs:
   admin:
