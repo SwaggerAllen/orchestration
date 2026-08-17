@@ -710,8 +710,20 @@ signal that was missing.
 5. Author moves the boundary ticket to `In progress`. **This is the signal.**
 6. **Archive pass.** The milestone's `Done` issues are archived — which reclaims tracker
    headroom but makes them invisible to the "is this already filed?" check. So the archive pass
-   **emits a retro note into the repo**: issue keys, titles, one line each. Without it,
-   archiving silently breaks duplicate detection.
+   **emits a retro note into the repo**: issue keys, titles and merge shas, one line each.
+   Without it, archiving silently breaks duplicate detection.
+
+   **The shas are there for the rehearsal reset, and they are there for the same reason the
+   findings in step 7 are.** The reset learns what to revert by reading `merged` markers off
+   the tickets it archives, and this step archives those tickets first — so a reset run after a
+   boundary found no tickets, wrote an empty merge list, printed "the last rehearsal merged
+   nothing" and left the commits on `main`, on a green run. Measured on the dummy project:
+   ORC-1 and ORC-18 reverted, ORC-23 (PR #15) did not, with `retro: Rehearsal 1` sitting
+   directly above it in the log.
+
+   The general rule, which this section now instances twice: **information that exists at
+   exactly one moment is owned by the step that ends that moment.** Anything a later pass needs
+   about archived work has to be in the note, because the note is the only thing that survives.
 7. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
    skipped or deleted tests, dependency and advisory drift, and **the harness findings agents
    recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
@@ -723,8 +735,9 @@ signal that was missing.
    collects nothing and reports a milestone with no findings rather than a milestone whose
    findings it lost. The archive step therefore writes them onto its own step marker before
    removing the tickets, and a resumed claim unions what it can still collect with what that
-   marker preserved. Same rule as the rehearsal reset's merge list (§14): the information
-   exists at exactly one moment, and the step that ends that moment owns preserving it.
+   marker preserved. Same rule as the merge shas in step 6, and the same failure it was fixed
+   for: the information exists at exactly one moment, and the step that ends that moment owns
+   preserving it.
 
    Harness findings are the pipeline's own problems, filed by the runs that hit them
    (`kind: "harness"`, labelled `harness`). Every other input describes the project; this one
@@ -785,7 +798,7 @@ never visibility of the step; it was re-entry.
 | Archive | Naturally idempotent; already-archived is a no-op. |
 | Debt scan | Read-mostly and convergent. |
 | Grooming re-rank | Convergent — the same inputs produce the same order. |
-| Retro note | Writes a file. **Must check whether this milestone's note already exists.** |
+| Retro note | Writes a file. **Must check whether this milestone's note already exists.** Existing wins, so a note is written once with whatever the archive step knew then — a note from before the merge shas were recorded stays without them, and the rehearsal reset reads it as a milestone that landed nothing. |
 | Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. |
 
 ### Exclusions

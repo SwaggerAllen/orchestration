@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 )
 
 // Boundary step names, in §10 order. Each completed step posts a
@@ -148,22 +148,27 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 	if err != nil {
 		return err
 	}
-	var lines []string
+	var entries []retro.Entry
 	var toArchive []string
 	for _, t := range snap.Tickets {
 		if t.Milestone != plan.Milestone || t.IsBoundary() {
 			continue // the boundary ticket is the record of this pass
 		}
 		if t.State == protocol.Done {
-			lines = append(lines, fmt.Sprintf("- %s — %s", t.Key, t.Title))
+			// The shas go in the note because this step is what takes
+			// them away, exactly as the harness findings below do. The
+			// rehearsal reset reads `merged` markers off the tickets it
+			// is about to archive — and a boundary archives those same
+			// tickets first, so a reset run after one found no tickets,
+			// produced an empty merge list, and left the last
+			// rehearsal's commits on main while reporting a green run.
+			entries = append(entries, retro.Entry{Key: t.Key, Title: t.Title, SHAs: mergedSHAs(t)})
 			toArchive = append(toArchive, t.ID)
 		}
 	}
-	sort.Strings(lines)
 
-	path := "docs/retros/" + slug(plan.Milestone) + ".md"
-	content := fmt.Sprintf("# Retro — %s\n\nShipped (archived from the tracker; this note is what duplicate detection reads):\n\n%s\n",
-		plan.Milestone, strings.Join(lines, "\n"))
+	path := retro.Dir + "/" + slug(plan.Milestone) + ".md"
+	content := retro.Render(plan.Milestone, entries)
 	created, err := h.PutFileIfAbsent(ctx, path, content, "retro: "+plan.Milestone)
 	if err != nil {
 		return fmt.Errorf("boundary archive: retro note: %w", err)
@@ -182,13 +187,33 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 	// archived, and an archived issue vanishes from listings — so a run
 	// that dies between here and the scan comes back to a claim that
 	// collects nothing, and the milestone's harness findings are gone
-	// with no trace that there were any. The same shape as the
-	// rehearsal reset's merge list: the information exists at exactly
-	// one moment, and the step that ends that moment owns preserving it.
+	// with no trace that there were any. The same rule as the merge shas
+	// in the note above, which this step was already breaking when this
+	// comment was written: the information exists at exactly one moment,
+	// and the step that ends that moment owns preserving it.
 	if carried := carryFindings(plan.HarnessFindings); carried != "" {
 		prose += "\n\n" + carried
 	}
 	return stepDone(ctx, p, plan, StepArchive, prose)
+}
+
+// mergedSHAs reads a ticket's merge commits off its `merged` markers,
+// oldest first — the order the comments are in, which is the order the
+// commits landed. All of them, not just the newest: a ticket merged,
+// reverted by hand and merged again has two, and a note carrying one
+// would leave half of it on main when the reset ran.
+func mergedSHAs(t *core.Ticket) []string {
+	var out []string
+	for _, c := range t.Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok || m.Kind != marker.Merged {
+			continue
+		}
+		if sha := m.Fields["sha"]; sha != "" {
+			out = append(out, sha)
+		}
+	}
+	return out
 }
 
 // Proposal is one debt-scan or grooming finding headed for Triage.

@@ -79,8 +79,18 @@ func cmdScenarioReset(args []string) error {
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	confirm := fs.String("confirm", "", "the tracker project id, repeated back — reset archives every ticket in it")
 	mergedOut := fs.String("merged-out", "", "write the archived tickets' merge commits here, for the repo half of the reset")
+	// Required, and deliberately not defaulted to the config's directory
+	// the way `check --repo` is. A wrong path there loses every file
+	// expectation and the run says so; a wrong path here finds no retro
+	// notes, which is indistinguishable from a project that has never
+	// reached a milestone boundary — the silent half of the bug this
+	// flag exists to close.
+	repo := fs.String("repo", "", "checkout of the project repo, for the retro notes that record what an archived milestone merged")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *repo == "" {
+		return fmt.Errorf("scenario reset: --repo is required — the retro notes in the project checkout are the only record of what a milestone boundary archived")
 	}
 	t, cfg, err := scenarioDeps(*cfgPath)
 	if err != nil {
@@ -91,7 +101,7 @@ func cmdScenarioReset(args []string) error {
 	if err := scenario.Guard(cfg, *confirm); err != nil {
 		return err
 	}
-	res, err := scenario.Reset(context.Background(), t, cfg, *confirm, os.Stdout)
+	res, err := scenario.Reset(context.Background(), t, cfg, *confirm, *repo, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -107,22 +117,26 @@ func cmdScenarioReset(args []string) error {
 			return err
 		}
 	}
+	// The two counts are reported separately, and neither is derived from
+	// the other. An empty project used to end the story here — "nothing
+	// was archived" was printed and the run stopped reading — but a
+	// milestone boundary archives the tickets itself, so zero tickets and
+	// a full merge list is exactly what a rehearsal that reached one
+	// looks like.
 	summarize(func(w io.Writer) {
 		summaryHeading(w, "Rehearsal reset")
 		if res.Archived == 0 {
-			fmt.Fprintln(w, "The project was already empty; nothing was archived.")
+			fmt.Fprintln(w, "No live tickets to archive — the project was already empty, or a milestone boundary archived them.")
 		} else {
-			fmt.Fprintf(w, "Archived **%d** ticket(s), carrying **%d** merge commit(s) for the repo half to revert. Milestones were left in place. Tickets are archived rather than deleted — Linear keeps them recoverable.\n",
-				res.Archived, len(res.Merges))
+			fmt.Fprintf(w, "Archived **%d** ticket(s). Milestones were left in place. Tickets are archived rather than deleted — Linear keeps them recoverable.\n",
+				res.Archived)
 		}
+		fmt.Fprintf(w, "\n**%d** merge commit(s) for the repo half to revert, **%d** of them from retro notes (work a milestone boundary had already archived).\n",
+			len(res.Merges), res.FromNotes)
 	})
 
-	if res.Archived == 0 {
-		fmt.Println("nothing to do: the project is already empty")
-		return nil
-	}
-	fmt.Printf("archived %d ticket(s) with %d merge commit(s) to revert; milestones left in place\n",
-		res.Archived, len(res.Merges))
+	fmt.Printf("archived %d ticket(s); %d merge commit(s) to revert (%d from retro notes); milestones left in place\n",
+		res.Archived, len(res.Merges), res.FromNotes)
 	return nil
 }
 

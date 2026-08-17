@@ -9,6 +9,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
@@ -154,6 +155,68 @@ func TestBoundaryResumeIsIdempotent(t *testing.T) {
 	}
 	if proposals != 1 {
 		t.Errorf("proposal filed %d times across a resume, want exactly 1", proposals)
+	}
+}
+
+// The archive step carries the merge shas out, for the same reason it
+// carries the harness findings out: it is the step that destroys them.
+// The rehearsal reset learns what to revert from `merged` markers on the
+// tickets it archives, and a boundary archives those tickets first — so
+// a reset run after one found nothing, wrote an empty merge list, said
+// "the last rehearsal merged nothing" and left the commits on main.
+// Measured on orchestration-dummy: ORC-23 (PR #15) survived, with
+// `retro: Rehearsal 1` directly above it in the log.
+func TestBoundaryArchiveRecordsWhatEachTicketMerged(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
+	landed := seed(t, tr, cfg, "Add a farewell to the home screen", "d", protocol.Done)
+	if err := tr.Mutate(landed.ID, func(i *tracker.Issue) { i.Milestone = "M1" }); err != nil {
+		t.Fatal(err)
+	}
+	sha := "0655929c405d57bc77b341c476267e45472e3985"
+	m := marker.Marker{Kind: marker.Merged, Fields: map[string]string{"sha": sha, "pr": "15"}}
+	if err := tr.CommentOnIssue(ctx, landed.ID, m.Comment("Reconciled and merged.")); err != nil {
+		t.Fatal(err)
+	}
+	// Done without landing anything, which most boundaries also archive.
+	closed := seed(t, tr, cfg, "Decide the greeting copy", "d", protocol.Done)
+	if err := tr.Mutate(closed.ID, func(i *tracker.Issue) { i.Milestone = "M1" }); err != nil {
+		t.Fatal(err)
+	}
+
+	boundary := seedBoundary(t, tr, cfg)
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_70", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+		t.Fatal(err)
+	}
+
+	note, ok := h.Files["docs/retros/m1.md"]
+	if !ok {
+		t.Fatalf("no retro note; files = %v", h.Files)
+	}
+	got := retro.Parse(note)
+	if len(got) != 2 {
+		t.Fatalf("note carries %d entries, want both archived tickets:\n%s", len(got), note)
+	}
+	for _, e := range got {
+		switch e.Key {
+		case landed.Key:
+			if len(e.SHAs) != 1 || e.SHAs[0] != sha {
+				t.Errorf("%s: shas = %v, want the merge the reset has to revert", e.Key, e.SHAs)
+			}
+		case closed.Key:
+			if len(e.SHAs) != 0 {
+				t.Errorf("%s never merged, but the note claims %v", e.Key, e.SHAs)
+			}
+		default:
+			t.Errorf("unexpected entry %+v", e)
+		}
 	}
 }
 

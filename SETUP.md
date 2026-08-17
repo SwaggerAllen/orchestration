@@ -500,6 +500,26 @@ tickets it is about to archive — the harness's own record of what it
 merged. It has to happen in that order: an archived issue drops out of
 Linear's listings, so after the archive the answer no longer exists.
 
+**And something else archives first.** A milestone boundary archives
+the milestone's `Done` tickets as step 6 of its own pass (DESIGN §10),
+which is long before anyone runs a reset — so for a rehearsal that ran
+to a boundary, the markers are already gone and the tracker half of the
+reset finds nothing. It reported exactly that, cheerfully: "the last
+rehearsal merged nothing; main is left as it is", on a green run, with
+the commits still on `main`.
+
+So the boundary's retro note carries the shas too, and the reset reads
+`docs/retros/` in the project checkout and unions what it finds there
+with whatever tickets are still live. That is why `scenario reset` now
+takes `--repo` and refuses to run without it: a reset that cannot read
+the notes reverts some of the last rehearsal and calls it done, which
+is the same silence in a smaller size.
+
+Notes are never reverted away, so every past milestone's shas come back
+on every reset. They cost nothing — the revert loop skips a commit that
+is already reverted or no longer on `main` — and the alternative is the
+harness deciding which note is "current", which it has no way to know.
+
 Two consequences worth knowing:
 
 - **No force-push**, so branch protection on `main` and rehearsals can
