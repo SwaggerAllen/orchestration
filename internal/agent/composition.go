@@ -26,6 +26,46 @@ type CompositionEntry struct {
 	Priority int
 }
 
+// DebtBacklog is the unscheduled tech-debt tickets, in the order the
+// composition rule reads them: gating first, then by priority (1 =
+// Urgent is highest; Linear's 0 means "no priority", which sorts last
+// rather than first), then key so the list is stable across re-runs.
+//
+// Shared by the two passes that need it, which want it at different
+// moments. The composition proposal computes it after filing, when this
+// boundary's own findings are tickets. The grooming pass needs it at
+// claim, before the model runs — DESIGN §10 asks that pass to re-rank
+// the debt backlog, and it had no way to see one: the prompt carried the
+// milestone roster and nothing else, so two boundaries in a row returned
+// an empty ranking because they could not read the ordering, not because
+// the ordering looked right.
+func DebtBacklog(tickets []*core.Ticket) []CompositionEntry {
+	var out []CompositionEntry
+	for _, t := range tickets {
+		if t.Resolved() || t.IsBoundary() || t.Milestone != "" {
+			continue // resolved, machinery, or already scheduled
+		}
+		if !t.HasLabel("tech-debt") {
+			continue
+		}
+		out = append(out, CompositionEntry{
+			Key: t.Key, Title: t.Title, Priority: t.Priority,
+			Gating: gatingFromDescription(t),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Gating != b.Gating {
+			return a.Gating
+		}
+		if pri(a.Priority) != pri(b.Priority) {
+			return pri(a.Priority) < pri(b.Priority)
+		}
+		return a.Key < b.Key
+	})
+	return out
+}
+
 // ProposeComposition computes what the next debt milestone should hold
 // and posts it on the boundary ticket (DESIGN §10). It proposes only —
 // assigning a milestone is a commitment, and the invariant that
@@ -41,33 +81,7 @@ func ProposeComposition(ctx context.Context, p *plane.Plane, plan *BoundaryPlan,
 		return err
 	}
 
-	var candidates []CompositionEntry
-	for _, t := range snap.Tickets {
-		if t.Resolved() || t.IsBoundary() || t.Milestone != "" {
-			continue // resolved, machinery, or already scheduled
-		}
-		if !t.HasLabel("tech-debt") {
-			continue
-		}
-		candidates = append(candidates, CompositionEntry{
-			Key: t.Key, Title: t.Title, Priority: t.Priority,
-			Gating: gatingFromDescription(t),
-		})
-	}
-
-	// Gating first, then by priority (1 = Urgent is highest; Linear's 0
-	// means "no priority", which sorts last rather than first), then key
-	// so the list is stable across re-runs.
-	sort.Slice(candidates, func(i, j int) bool {
-		a, b := candidates[i], candidates[j]
-		if a.Gating != b.Gating {
-			return a.Gating
-		}
-		if pri(a.Priority) != pri(b.Priority) {
-			return pri(a.Priority) < pri(b.Priority)
-		}
-		return a.Key < b.Key
-	})
+	candidates := DebtBacklog(snap.Tickets)
 
 	var chosen []CompositionEntry
 	nonGating := 0

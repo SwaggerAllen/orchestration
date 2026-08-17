@@ -520,7 +520,22 @@ and nothing is re-evaluated.
 | `re-evaluate` | Unresolved collision (§7). |
 | `needs-review` | Reconciliation couldn't tell. Deployed, clean, awaiting the author's eye (§11). |
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
+| `scope-satisfied` | The run found the whole scope already on `main` and changed nothing (§12). Almost always a duplicate to cancel. |
+| `pushback` | The design can't be built as drawn (§2.7). Parked for the author to redesign or rescope. |
+| `author-only` | This work is legal for nobody else. No design pass is dispatched and the dev queue skips it, in every state, so it moves only when the author moves it. |
+| `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
+
+**`author-only` exists because some tickets have no agent-legal path to completion.** The
+quality gates live in `pipeline.config.json` and `ci.yml`, both author-owned (§5), so a ticket
+scoped to change the gate set could be claimed by the dev agent and then finished by nobody:
+every file it needed was closed to it. That is a full run — checkout, toolchain, model — spent
+to be told no, and repeated on every beat, because a refusal leaves the ticket in the queue.
+
+A label rather than a state, by the admission test: it says who owns the work, not where the
+work is, and the ticket still travels the ordinary states as the author does it. The author
+applies it; the boundary agent may propose it on a finding it can see is author-only, the same
+way it proposes everything else.
 
 **Ordering is derived, never stored.** Which ticket to start next, and what can run beside it,
 is a pure function of the graph the tracker already holds: open blocking relations, mutex

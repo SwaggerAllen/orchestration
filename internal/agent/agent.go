@@ -74,6 +74,15 @@ type ClaimResult struct {
 	// exists yet (DESIGN §5: the branch name carries the issue key).
 	Branch   string
 	PRNumber int // 0 = no PR yet
+	// Labels are the ticket's labels as the claim found them.
+	//
+	// Carried because they are what the run is judged against and the
+	// agent could not see them: CI fails a diff that touches a path
+	// mapped to a screen or system doc whose label the ticket does not
+	// carry (DESIGN §6, §9), and the prompt told the agent to stay inside
+	// labels it was never shown. Guessing them from the scope is exactly
+	// the guess the mutex exists to prevent.
+	Labels []string `json:",omitempty"`
 	// BaseSHA is the recorded merge-base, "" if the description has none.
 	// The base check flags rather than blocks (DESIGN §9): the harness
 	// surfaces it, the agent judges it.
@@ -206,7 +215,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-		Description: t.Description,
+		Description: t.Description, Labels: append([]string(nil), t.Labels...),
 	}
 	claimState := protocol.InProgress
 	res.Mode = "dev"

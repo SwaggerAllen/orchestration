@@ -340,6 +340,22 @@ const (
 	// forth indefinitely, each one correct on its own terms. Blocked puts
 	// a human in the loop, which is the only thing here that can break it.
 	LabelPushback = "pushback"
+	// LabelAuthorOnly routes a ticket to the author instead of an agent:
+	// no design pass is dispatched for it and the dev queue skips it, in
+	// every state, so it moves only when a human moves it.
+	//
+	// It exists because some work is legal for nobody else. The quality
+	// gates live in pipeline.config.json and ci.yml; both are author-only
+	// (DESIGN §5), so a ticket scoped to change the gate set had no
+	// agent-legal path to completion — the dev agent would claim it, find
+	// every file it needed closed to it, and hand back. That is a full
+	// run spent to be told no, repeated on every beat, because the
+	// refusal leaves the ticket in the queue.
+	//
+	// A label rather than a state: it says who owns the work, not where
+	// the work is, and the ticket still moves through the ordinary states
+	// as the author does it.
+	LabelAuthorOnly = "author-only"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {

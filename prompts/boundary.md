@@ -62,13 +62,20 @@ should change. The author reviews your ranking before the queue resumes.
 
 ## Output
 
+`kind` is one of three, and the third is easy to miss because its input
+arrives further down: `debt` and `design` are findings about the
+project, and `harness` is a finding about the pipeline — the section
+below headed "Harness findings this milestone" is what you file under
+it. A boundary that reads only this schema files them as `debt` or drops
+them, which puts a pipeline problem in the product backlog or nowhere.
+
 Write JSON to the outcome path given below:
 
 ```json
 {
   "proposals": [
     {"title": "...", "description": "the argument — why this is worth doing",
-     "kind": "debt" | "design", "gating": true|false,
+     "kind": "debt" | "design" | "harness", "gating": true|false,
      "subject": "<the file, key, task, gate or module this is about>",
      "dedupe": "<milestone>/<finding-slug>"}
   ],

@@ -2,6 +2,11 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -426,5 +431,112 @@ func TestDifferentSubjectsKeepDifferentKeys(t *testing.T) {
 	b := dedupeKey("M", Proposal{Subject: "pipeline.config.json", Dedupe: "x"})
 	if a == b {
 		t.Errorf("two subjects collapsed to one key: %s", a)
+	}
+}
+
+// The prompt's schema and the parser have to name the same kinds.
+//
+// They drifted: the schema said `"kind": "debt" | "design"` while the
+// harness-findings section four paragraphs up said to file those with
+// `"kind": "harness"`, which ParseProposals accepts. A boundary reading
+// only the schema files a pipeline problem as product debt or drops it,
+// and the one channel for "the harness is broken" quietly empties.
+//
+// Asserted against the prompt file rather than restated here, because a
+// second copy of the list is the thing that drifted in the first place.
+func TestBoundaryPromptSchemaNamesEveryKindTheParserAccepts(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "prompts", "boundary.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"kind":`) && strings.Contains(line, "|") {
+			schema = line
+		}
+	}
+	if schema == "" {
+		t.Fatal("no kind line in the prompt's output schema — it moved or was dropped")
+	}
+
+	// Every kind the schema offers must parse.
+	quoted := regexp.MustCompile(`"([a-z]+)"`).FindAllStringSubmatch(schema, -1)
+	offered := map[string]bool{}
+	for _, m := range quoted {
+		if m[1] == "kind" || m[1] == "gating" {
+			continue
+		}
+		offered[m[1]] = true
+		body := fmt.Sprintf(`{"proposals":[{"title":"t","kind":%q,"dedupe":"m/d"}]}`, m[1])
+		if _, err := ParseProposals([]byte(body)); err != nil {
+			t.Errorf("the schema offers kind %q and the parser rejects it: %v", m[1], err)
+		}
+	}
+	// And every kind the parser accepts must be offered, or a boundary
+	// reading the schema never learns the channel exists.
+	for _, kind := range []string{"debt", "design", "harness"} {
+		if !offered[kind] {
+			t.Errorf("the parser accepts kind %q and the schema never names it: %s", kind, strings.TrimSpace(schema))
+		}
+	}
+}
+
+// The grooming pass is asked to re-rank the debt backlog (DESIGN §10)
+// and could not see one. The claim carried the milestone roster — names
+// and open counts — and nothing else, so the pass reordered an invisible
+// list and returned an empty ranking, twice in a row. On the ticket that
+// is indistinguishable from a pass that read the order and approved it.
+func TestClaimBoundaryCarriesTheDebtBacklog(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	now := time.Now()
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
+
+	debt := func(title string, priority int, gating bool) tracker.Issue {
+		i := seed(t, tr, cfg, title, "d", protocol.Backlog)
+		if err := tr.AddIssueLabel(ctx, cfg.Tracker.TeamID, i.ID, "tech-debt"); err != nil {
+			t.Fatal(err)
+		}
+		if err := tr.Mutate(i.ID, func(is *tracker.Issue) {
+			is.Priority = priority
+			is.Description = fmt.Sprintf("[pipeline:v1:triage-proposal] dedupe=m/%s gating=%t\n\nx", title, gating)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return i
+	}
+	low := debt("low", 4, false)
+	high := debt("high", 2, false)
+	gate := debt("gate", 4, true)
+	// Not debt, and already scheduled debt: neither is backlog.
+	seed(t, tr, cfg, "A feature", "d", protocol.Backlog)
+	scheduled := debt("scheduled", 1, false)
+	if err := tr.Mutate(scheduled.ID, func(is *tracker.Issue) { is.Milestone = "M1" }); err != nil {
+		t.Fatal(err)
+	}
+
+	boundary := seedBoundary(t, tr, cfg)
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_80", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []string
+	for _, c := range plan.Backlog {
+		got = append(got, c.Key)
+	}
+	// Gating first, then by priority. The scheduled one is committed
+	// scope, and the feature is not debt.
+	want := []string{gate.Key, high.Key, low.Key}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("backlog = %v, want %v", got, want)
+	}
+	for _, c := range plan.Backlog {
+		if c.Key == gate.Key && !c.Gating {
+			t.Error("gating read from the triage marker was lost")
+		}
+		if c.Key == high.Key && c.Priority != 2 {
+			t.Errorf("priority = %d, want the current one — a ranking is a diff against it", c.Priority)
+		}
 	}
 }

@@ -199,3 +199,36 @@ func TestBoundaryPromptScopesTheStepFlagsToAnEarlierRun(t *testing.T) {
 		t.Errorf("the prompt never names %s, which its own scan instructions call the duplicate detector:\n%s", retro.Dir, got)
 	}
 }
+
+// The agent is judged against its labels and could not see them.
+//
+// CI fails a diff touching a path mapped to a screen or system doc whose
+// label the ticket does not carry, and prompts/dev.md tells the agent to
+// stay inside its labels — while claim.json had no Labels key at all, so
+// the binding was to a set the run never received. Inferring them from
+// the scope is the guess the mutex exists to prevent.
+func TestDevPromptStatesTheLabelsTheRunIsJudgedAgainst(t *testing.T) {
+	got := assemblePrompt("ROLE-PROMPT", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "dev", Scope: "s", Branch: "b",
+		Labels: []string{"frontend", "screen:home", "system:greetings"},
+	}, "/tmp/handback.md", "/tmp/outcome.json")
+
+	for _, want := range []string{"screen:home", "system:greetings", "frontend"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt never names %q, which CI will audit the diff against", want)
+		}
+	}
+}
+
+// No labels and "nobody told me" are different facts to an agent
+// deciding whether a path is in bounds, and an absent section reads as
+// the second — so the empty case is stated rather than skipped.
+func TestDevPromptSaysSoWhenTheTicketCarriesNoLabels(t *testing.T) {
+	got := assemblePrompt("ROLE-PROMPT", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "dev", Scope: "s", Branch: "b",
+	}, "/tmp/handback.md", "/tmp/outcome.json")
+
+	if !strings.Contains(got, "Your labels") || !strings.Contains(got, "carries none") {
+		t.Errorf("a ticket with no labels gets no section, which reads as the harness staying silent:\n%s", got)
+	}
+}

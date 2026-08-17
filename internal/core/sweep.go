@@ -744,7 +744,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// design is the thread that clears it (DESIGN §7).
 	if !s.agentBusy(AgentDesign) {
 		for _, t := range ordered {
-			if t.IsBoundary() || t.LiveRun("") {
+			if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) || t.LiveRun("") {
 				continue
 			}
 			switch {
@@ -765,13 +765,15 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	}
 
 	// Dev agent: singular, from the queues, respecting the pause, blocking
-	// relations, re-evaluate, and the boundary label (DESIGN §5, §7, §10).
+	// relations, re-evaluate, and the boundary and author-only labels
+	// (DESIGN §5, §7, §8, §10).
 	if !devBusy(s) {
 		for _, t := range ordered {
 			if t.State != protocol.ReadyForDev && t.State != protocol.ReadyForRework {
 				continue
 			}
-			if t.IsBoundary() || t.HasLabel(LabelBoundary) || t.HasLabel(LabelReEvaluate) || t.LiveRun("") {
+			if t.IsBoundary() || t.HasLabel(LabelBoundary) || t.HasLabel(LabelReEvaluate) ||
+				t.HasLabel(LabelAuthorOnly) || t.LiveRun("") {
 				continue
 			}
 			if blockedByOpen(s, t) {

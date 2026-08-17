@@ -323,6 +323,7 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outco
 	if res.Mode == "rework" && res.Description != "" {
 		add("\n## Original argument (context only — do not re-implement)\n\n" + res.Description + "\n")
 	}
+	add(labelsSection(res.Labels))
 	add("\n## Base check\n\n")
 	if res.BaseSHA != "" {
 		add(fmt.Sprintf("The design was drawn against `%s`. Diff it against origin/main; if main moved and both changes touch the same behavior, DO NOT reconcile by guessing — abort with a push-back (DESIGN §2.4).\n", res.BaseSHA))
@@ -337,6 +338,27 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outco
 		add(fmt.Sprintf("- If you changed no files, write `%s`: `{\"outcome\": \"scope-satisfied\"|\"needs-setup\"|\"pushback\", \"summary\": \"...\"}` — see Outcomes above. Omit the file when you did the work; that is the ordinary case.\n", outcomePath))
 	}
 	return string(b)
+}
+
+// labelsSection states the labels the run is judged against.
+//
+// CI fails a diff that touches a path mapped to a screen or system doc
+// whose label the ticket does not carry (DESIGN §6, §9), and the role
+// prompt tells the agent to stay inside its labels — while the claim
+// carried none, so it was bound to a set it could not read. An agent
+// that has to infer them from the scope is making exactly the guess the
+// mutex exists to prevent.
+//
+// The empty case is stated rather than skipped. No labels and "the
+// harness did not tell me" are different facts to an agent deciding
+// whether a path is in bounds, and an absent section reads as the
+// second.
+func labelsSection(labels []string) string {
+	if len(labels) == 0 {
+		return "\n## Your labels\n\nThis ticket carries none. Any path mapped to a screen or system doc is therefore out of bounds — touching one fails the build (DESIGN §6, §9). If the scope needs one, that is the re-evaluation flow, not a silent expansion.\n"
+	}
+	return fmt.Sprintf("\n## Your labels\n\n%s\n\nCI audits the diff against these: a path mapped to a screen or system doc whose label is not here fails the build (DESIGN §6, §9). This is the list, not a summary of it.\n",
+		"- "+strings.Join(labels, "\n- "))
 }
 
 // assembleReconcilePrompt is the reconcile counterpart: the argument, the
@@ -462,6 +484,7 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 		add("\nThe gating test asks about the next PRODUCT milestone — read it off this list rather than assuming a naming convention.\n")
 	}
 	if !plan.Done[agent.StepScan] {
+		add(debtBacklogSection(plan.Backlog))
 		add(harnessFindingsForBoundary(plan.HarnessFindings))
 		add(nonAsksSection(plan.NonAsks, "filing proposals", false))
 	}
@@ -844,6 +867,34 @@ true on a project using none of this machinery, it does not belong here.
 `+"`dedupe`"+` names the thing, never the run: ten runs hitting one gap
 should produce one ticket.
 `, path)
+}
+
+// debtBacklogSection renders the backlog the grooming pass re-ranks.
+//
+// DESIGN §10 asks that pass to re-rank existing debt, and the prompt
+// used to carry no debt at all — only the milestone roster, which is
+// names and open counts. So the pass was asked to reorder a list it
+// could not see, and did the only honest thing available: returned an
+// empty ranking, twice in a row, indistinguishable on the ticket from a
+// pass that read the order and approved of it.
+//
+// Current priorities are stated because a ranking is a diff against
+// them: the schema asks for entries "only where the rank should change",
+// which is unanswerable without knowing what the rank is.
+func debtBacklogSection(backlog []agent.CompositionEntry) string {
+	if len(backlog) == 0 {
+		return "\n## The debt backlog\n\nEmpty — no unscheduled tech-debt tickets. There is nothing to re-rank, so an empty `ranking` is the right answer here rather than a gap in the input.\n"
+	}
+	var b strings.Builder
+	b.WriteString("\n## The debt backlog\n\nUnscheduled tech-debt, in its current order — gating first, then by priority. This is what your `ranking` re-orders; emit an entry only where the rank should change.\n\n")
+	for _, c := range backlog {
+		kind := "non-gating"
+		if c.Gating {
+			kind = "GATING"
+		}
+		fmt.Fprintf(&b, "- %s — %s  (%s, priority %d)\n", c.Key, c.Title, kind, c.Priority)
+	}
+	return b.String()
 }
 
 // harnessFindingsForBoundary renders what the milestone's agents
