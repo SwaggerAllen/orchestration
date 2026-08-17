@@ -240,6 +240,40 @@ jobs:
             fi
           done
 
+          # The retro notes go too, and they go here: after every revert
+          # above has landed, and only if none of them stopped the run.
+          #
+          # A boundary writes one note per milestone and writes it only
+          # if absent (DESIGN §10) — right for a real project, where the
+          # check is what stops a resumed pass clobbering a record, and
+          # wrong for a rehearsal, where the scenario names its milestone
+          # "Rehearsal 1" on every run. The second boundary would find
+          # the first one's note already there and skip it, so the second
+          # rehearsal's merge shas would be recorded nowhere, and the
+          # reset after it would read a note describing a rehearsal two
+          # runs ago. That is the same silence this step exists to end,
+          # one layer down: a green reset that reverts nothing.
+          #
+          # Clearing them in the workflow rather than in `scenario reset`
+          # is what keeps the ordering honest. The Go step has already
+          # read them; a conflicting revert exits above without reaching
+          # this line, so the notes the re-run still needs survive; and
+          # what replaces them as the record of a reverted commit is the
+          # revert commit, which is what the loop above checks anyway.
+          #
+          # Only ever the disposable project. On a real one a retro note
+          # is the record of a milestone and nothing deletes it — which
+          # is why this lives in the rehearse workflow, which is
+          # deliberately absent from examples/stubs.
+          CLEARED=""
+          if [ -n "$(git ls-files docs/retros)" ]; then
+            CLEARED="$(git ls-files docs/retros)"
+            git rm -r -q docs/retros
+            git commit -q -m "rehearsal reset: clear the retro notes"
+            echo "cleared the retro notes:"
+            echo "$CLEARED" | sed 's/^/  /'
+          fi
+
           # What survived, so a stale baseline is visible rather than
           # assumed. The seed tag is the anchor this is measured from.
           #
@@ -253,6 +287,14 @@ jobs:
           {
             echo "## Baseline"
             echo
+            if [ -n "$CLEARED" ]; then
+              echo "Cleared the retro notes, so this rehearsal's boundary writes its own rather than skipping past one it did not make:"
+              echo
+              echo '```'
+              echo "$CLEARED"
+              echo '```'
+              echo
+            fi
             if [ -z "$KEPT" ]; then
               echo "Nothing on \`main\` since the seed tag — this rehearsal starts from the scaffold itself."
             else
