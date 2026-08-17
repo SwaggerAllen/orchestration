@@ -321,15 +321,28 @@ const (
 	// reads as a failure in a Blocked column otherwise, which is how the
 	// Blocked count stops being a health signal.
 	LabelNeedsSetup = "needs-setup"
-	// LabelNoChanges is Blocked's fourth flavor (DESIGN §12): the run
-	// finished and produced nothing, because there was nothing to
-	// produce. A ticket reaches an agent because something is meant to
-	// change, so a run with no diff is exceptional and almost always
-	// means the work reached main by another route and the ticket
-	// duplicates it. Parked for the author rather than routed
-	// automatically: whether it is a duplicate to cancel or a scope that
-	// needs rewriting is a judgment, and the pipeline has no way to make
-	// it that is not a guess.
+	// A run that changes no files is exceptional — work reaches an agent
+	// because something is meant to change — and there are three
+	// different reasons for it, wanting three different things from a
+	// human. They get three labels rather than one, because a Blocked
+	// column that cannot tell them apart is one somebody has to open
+	// every ticket to read.
+	//
+	// LabelScopeSatisfied: everything the ticket asks for is already on
+	// main. Almost always a duplicate of merged work, which is Canceled
+	// rather than Done (DESIGN §2.6) — but sometimes a scope that went
+	// stale and wants rewriting, and only a human can tell which.
+	LabelScopeSatisfied = "scope-satisfied"
+	// LabelPushback marks a ticket the dev pass sent back to Designing
+	// because the design cannot be built as drawn (DESIGN §2.7). Unlike
+	// the other two this is not a Blocked flavor — the ticket keeps
+	// moving, and the label is what makes a bounce visible in a column
+	// where a re-designing ticket otherwise looks like a new one.
+	LabelPushback = "pushback"
+	// LabelNoChanges is the honest fallback: the run produced nothing and
+	// did not say why. Distinct from the three above on purpose — it is
+	// the harness admitting it does not know, which is worth telling
+	// apart from a run that named its reason.
 	LabelNoChanges = "no-changes"
 )
 

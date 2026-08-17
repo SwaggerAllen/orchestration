@@ -163,10 +163,10 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Finish(ctx, p, h, res, "", 3); err == nil {
+	if err := Finish(ctx, p, h, res, "", 3, nil); err == nil {
 		t.Error("empty hand-back must be refused")
 	}
-	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope.", 3); err != nil {
+	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope.", 3, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Checks {
@@ -192,7 +192,7 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 	if res2.PRNumber != draft.Number {
 		t.Fatalf("claim did not find the draft PR: %+v", res2)
 	}
-	if err := Finish(ctx, p, h, res2, "hand-back", -1); err != nil {
+	if err := Finish(ctx, p, h, res2, "hand-back", -1, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, pr := range h.PRs {
@@ -454,7 +454,7 @@ func TestReconcileBounceReworkHasNoFailingBuildSection(t *testing.T) {
 // reason for. Which of "duplicate, cancel it" and "stale scope, rewrite
 // it" applies is a judgment, and both the hand-back and the label are
 // there so a human can make it.
-func TestFinishWithNoCommitsParksTheTicketForTheAuthor(t *testing.T) {
+func TestFinishWithNoCommitsAndNoReasonParksTheTicket(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
 	i := seed(t, tr, cfg, "Add a farewell to the home screen", "d", protocol.ReadyForDev)
@@ -464,7 +464,7 @@ func TestFinishWithNoCommitsParksTheTicketForTheAuthor(t *testing.T) {
 	}
 
 	handback := "Nothing landed, deliberately: every clause of the scope is already on main."
-	if err := Finish(ctx, p, h, res, handback, 0); err != nil {
+	if err := Finish(ctx, p, h, res, handback, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -476,7 +476,7 @@ func TestFinishWithNoCommitsParksTheTicketForTheAuthor(t *testing.T) {
 	}
 	issue := findIssue(t, tr, cfg, i.ID)
 	if !hasLabel(issue.Labels, core.LabelNoChanges) {
-		t.Errorf("labels = %v, want %s so Blocked stays readable as what is broken", issue.Labels, core.LabelNoChanges)
+		t.Errorf("labels = %v, want %s — the harness saying it does not know, told apart from the three named reasons", issue.Labels, core.LabelNoChanges)
 	}
 	// The run's own account survives, and so does the protocol's. The
 	// hand-back is the half that looked at the repository.
@@ -485,7 +485,7 @@ func TestFinishWithNoCommitsParksTheTicketForTheAuthor(t *testing.T) {
 		if strings.Contains(c.Body, handback) {
 			handbackSeen = true
 		}
-		if strings.Contains(c.Body, "No changes were needed") {
+		if strings.Contains(c.Body, "No changes, and no reason given") {
 			explained = true
 		}
 	}
@@ -506,7 +506,7 @@ func TestFinishRefusesToGuessWhetherAnythingLanded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Finish(ctx, p, h, res, "hand-back", -1)
+	err = Finish(ctx, p, h, res, "hand-back", -1, nil)
 	if err == nil || !strings.Contains(err.Error(), "--commits") {
 		t.Fatalf("want a refusal naming the flag that fixes it, got %v", err)
 	}
@@ -530,7 +530,7 @@ func hasLabel(labels []string, want string) bool {
 // project that has never heard of it — worth pinning, because the
 // alternative failure is the one this route was built to stop: a park
 // that cannot attach its label becomes a run recorded as broken.
-func TestNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
+func TestUnexplainedNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
 	tr.DropLabel(cfg.Tracker.TeamID, core.LabelNoChanges)
@@ -539,7 +539,7 @@ func TestNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Finish(ctx, p, h, res, "Nothing landed; the scope is already on main.", 0); err != nil {
+	if err := Finish(ctx, p, h, res, "Nothing landed; the scope is already on main.", 0, nil); err != nil {
 		t.Fatalf("a project without the label could not park a ticket: %v", err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
@@ -547,5 +547,119 @@ func TestNoChangesParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	}
 	if issue := findIssue(t, tr, cfg, i.ID); !hasLabel(issue.Labels, core.LabelNoChanges) {
 		t.Errorf("labels = %v, want the label provisioned on demand", issue.Labels)
+	}
+}
+
+// The three reasons a run legitimately changes nothing, each landing
+// somewhere different. Collapsing them was tried first and rejected: a
+// duplicate ticket, a missing secret and an unbuildable design want
+// three different things from a human, and a Blocked column that renders
+// them identically is one where every ticket has to be opened to be
+// read.
+func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
+	cases := []struct {
+		outcome string
+		state   protocol.State
+		label   string
+	}{
+		{"scope-satisfied", protocol.Blocked, core.LabelScopeSatisfied},
+		{"needs-setup", protocol.Blocked, core.LabelNeedsSetup},
+		// Designing, not Blocked: §2.7 sends a push-back back to be
+		// re-decided rather than parking it. The label is what makes the
+		// bounce visible in a column where a ticket designing for the
+		// second time looks like one designing for the first.
+		{"pushback", protocol.Designing, core.LabelPushback},
+	}
+	for _, c := range cases {
+		t.Run(c.outcome, func(t *testing.T) {
+			ctx := context.Background()
+			tr, h, cfg, p := world(t)
+			i := seed(t, tr, cfg, "Add a farewell", "d", protocol.ReadyForDev)
+			res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &DevOutcome{Outcome: c.outcome, Summary: "The argument for " + c.outcome + "."}
+			if err := Finish(ctx, p, h, res, "hand-back", 0, o); err != nil {
+				t.Fatal(err)
+			}
+			if got := issueState(t, tr, cfg, i.ID); got != c.state {
+				t.Errorf("state = %q, want %q", got, c.state)
+			}
+			if len(h.PRs) != 0 {
+				t.Errorf("opened a PR for a run that changed nothing: %+v", h.PRs)
+			}
+			issue := findIssue(t, tr, cfg, i.ID)
+			if !hasLabel(issue.Labels, c.label) {
+				t.Errorf("labels = %v, want %s", issue.Labels, c.label)
+			}
+			var argued bool
+			for _, cm := range issue.Comments {
+				if strings.Contains(cm.Body, "The argument for "+c.outcome) {
+					argued = true
+				}
+			}
+			if !argued {
+				t.Error("the model's argument did not reach the ticket, so nobody can act on it")
+			}
+		})
+	}
+}
+
+// An outcome without its argument is a ticket nobody can act on — each
+// of the three ends with a human reading it and deciding something.
+func TestDevOutcomeRequiresItsArgument(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "outcome.json")
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if _, err := LoadDevOutcome(write(`{"outcome":"pushback"}`)); err == nil {
+		t.Error("a push-back with no argument was accepted")
+	}
+	if _, err := LoadDevOutcome(write(`{"outcome":"nonsense","summary":"x"}`)); err == nil {
+		t.Error("an unknown outcome was accepted")
+	}
+	// Absent means done: an older prompt that never wrote one still
+	// finishes, and a run that changed nothing without saying why is
+	// caught by the commit count instead.
+	o, err := LoadDevOutcome(filepath.Join(dir, "never-written.json"))
+	if err != nil || o.Outcome != "done" {
+		t.Errorf("missing file = %+v, %v; want done", o, err)
+	}
+}
+
+// A named outcome says the run changed nothing, so commits contradict
+// it. Reported rather than refused: the outcome is the model's own
+// account, overriding it would be the harness guessing, and failing here
+// would land the ticket in Blocked/failed — the outcome these routes
+// exist to avoid.
+func TestNamedOutcomeWithCommitsSaysSoRatherThanFailing(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Add a farewell", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DevOutcome{Outcome: "scope-satisfied", Summary: "Already on main."}
+	if err := Finish(ctx, p, h, res, "hand-back", 2, o); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want the model's outcome honoured", got)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	var noted bool
+	for _, c := range issue.Comments {
+		if strings.Contains(c.Body, "left 2 commit(s)") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Error("the contradiction is not on the ticket, so the commits are invisible to whoever reads it")
 	}
 }

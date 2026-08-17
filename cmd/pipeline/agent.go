@@ -73,7 +73,7 @@ func cmdAgentReprompt(args []string) error {
 	promptTemplate := fs.String("prompt-template", "", "agent base prompt file")
 	repoContext := fs.String("repo-context", "", "shared repo orientation (prompts/repo-context.md)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to")
-	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
+	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func cmdAgentClaim(args []string) error {
 	handbackPath := fs.String("handback-path", "", "path the model must write its hand-back to (dev)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to (all kinds)")
 	verdictPath := fs.String("verdict-path", "", "path the model must write its verdict to (reconcile)")
-	outcomePath := fs.String("outcome-path", "", "path the model must write its outcome to (design)")
+	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -261,7 +261,7 @@ func cmdAgentClaim(args []string) error {
 		case "boundary":
 			prompt = assembleBoundaryPrompt(base, plan, *outcomePath)
 		default:
-			prompt = assemblePrompt(base, res, *handbackPath)
+			prompt = assemblePrompt(base, res, *handbackPath, *outcomePath)
 		}
 		// Every kind, including boundary: the boundary agent is as
 		// likely as any other to meet a harness gap, and its own scan
@@ -308,7 +308,7 @@ func composeBase(rolePrompt, repoContext string) string {
 // template is the protocol half; this is the per-run half. Everything the
 // model must treat as work-to-judge is fenced under explicit headings so
 // the base prompt can point at it (DESIGN §9's trust boundary).
-func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string) string {
+func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outcomePath string) string {
 	var b []byte
 	add := func(s string) { b = append(b, s...) }
 	add(template)
@@ -331,6 +331,9 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath string
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out).\n- Commit your work with clear messages; the harness pushes.\n", res.Branch))
 	if handbackPath != "" {
 		add(fmt.Sprintf("- Write your hand-back to `%s` before you finish: what landed, the commit, anything deliberately not done and why, any open question you resolved (DESIGN vocabulary: Hand-back).\n", handbackPath))
+	}
+	if outcomePath != "" {
+		add(fmt.Sprintf("- If you changed no files, write `%s`: `{\"outcome\": \"scope-satisfied\"|\"needs-setup\"|\"pushback\", \"summary\": \"...\"}` — see Outcomes above. Omit the file when you did the work; that is the ordinary case.\n", outcomePath))
 	}
 	return string(b)
 }
@@ -556,7 +559,7 @@ func cmdAgentFinish(args []string) error {
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
 	handback := fs.String("handback", "", "file containing the hand-back comment (dev)")
 	verdict := fs.String("verdict", "", "verdict.json written by the model (reconcile)")
-	outcome := fs.String("outcome", "", "outcome.json written by the model (design)")
+	outcome := fs.String("outcome", "", "outcome.json written by the model (design, dev)")
 	baseSHA := fs.String("base-sha", "", "merge-base the design was drawn against (design mode)")
 	previewURL := fs.String("preview-url", "", "where this pass's storybook export was published (design)")
 	findings := fs.String("findings", "", "harness findings the model recorded (any kind)")
@@ -627,17 +630,25 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return fmt.Errorf("agent finish: reading hand-back: %w (an issue that moves without one is a state change nobody can audit)", err)
 	}
-	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits); err != nil {
+	devOutcome, err := agent.LoadDevOutcome(*outcome)
+	if err != nil {
+		return err
+	}
+	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {
 		return err
 	}
-	// Findings post either way, above, because a run that found nothing
-	// to do is a likely place to have met a harness gap — which is how
-	// this outcome was discovered in the first place.
+	// Findings post either way, above, because a run that changed nothing
+	// is a likely place to have met a harness gap — which is how these
+	// outcomes were discovered in the first place.
+	if devOutcome.Outcome != "done" {
+		fmt.Printf("%s: %s — routed for the author, no PR opened\n", res.TicketKey, devOutcome.Outcome)
+		return nil
+	}
 	if res.PRNumber == 0 && *commits == 0 {
-		fmt.Printf("parked %s: no changes were needed, blocked with the no-changes label for the author\n", res.TicketKey)
+		fmt.Printf("parked %s: the run changed nothing and named no reason; blocked with the no-changes label\n", res.TicketKey)
 		return nil
 	}
 	fmt.Printf("finished %s: PR #%d ready, ticket in Checks\n", res.TicketKey, res.PRNumber)
@@ -648,7 +659,7 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or no-changes")
+	reason := fs.String("reason", "failed", "pushback, failed, needs-setup, scope-satisfied or no-changes")
 	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.

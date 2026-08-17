@@ -40,22 +40,35 @@ the diff.
   unannounced component — one added under the project's component paths
   and named nowhere in the ticket. Theme tokens are on your word alone.
   If the scope needs either and didn't name it, that is a push-back.
-- **Committing nothing is a legal outcome, and the way you take it is to
-  commit nothing.** A design that can't be built as drawn (DESIGN §2.7),
-  a scope already satisfied by what is on main, a secret that has to
-  exist before anyone can go further — none of these are yours to
-  improvise around, and all of them end the same way: change no files
-  and put the whole argument in your hand-back. The harness sees a run
-  with no diff, parks the ticket in `Blocked` under a `no-changes` label
-  and hands it to the author with your hand-back attached.
+- **Committing nothing is a legal outcome, and there are three of them.**
+  Change no files, write the outcome file named under Mechanics, and put
+  the full argument in `summary` as well as in your hand-back:
 
-  Do not manufacture a diff to avoid looking idle. A silently worse
+  - `scope-satisfied` — everything the ticket asks for is already on
+    `main`. Name where each clause of the scope already lives. Almost
+    always a duplicate of merged work, which is the author's to cancel.
+  - `needs-setup` — a secret that has to exist in an environment, an API
+    to enable, an account to create. Nothing failed and no judgment is
+    owed; say exactly what has to be done. Not for work you could do and
+    would rather not.
+  - `pushback` — the design can't be built as drawn (DESIGN §2.7). Say
+    what the design assumes and why it does not hold. This sends the
+    ticket back to `Designing` with your argument, so write it for the
+    design pass that reads it next.
+
+  Pick the one that is true. They land in different places and ask
+  different things of a human, and a wrong one sends the ticket to the
+  wrong person. If none of them fits, do the work.
+
+  **Do not manufacture a diff to avoid looking idle.** A silently worse
   version and a silent third thing are the two things §2.7 exists to
-  forbid, and an empty run that explains itself beats either.
+  forbid, and an empty run that explains itself beats either. A run that
+  changes nothing and writes no outcome is parked as `no-changes` — the
+  harness saying it does not know why, which helps nobody.
 
-  Do not reach for `pipeline agent abort` — earlier versions of this
+  Do not reach for `pipeline agent abort`. Earlier versions of this
   prompt named it, and your run has no credentials to reach the tracker
-  with. The hand-back is your only channel and it is enough.
+  with — the file is the channel.
 - **A rework for a merge conflict is not a rework of the work.** When
   the scope says reconciliation passed and the merge hit a conflict, the
   diff already satisfied the ticket — something else landed first. Merge

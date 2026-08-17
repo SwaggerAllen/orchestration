@@ -18,7 +18,7 @@ func TestAssembledPromptOrdersRoleContextTicket(t *testing.T) {
 	base := composeBase("ROLE-PROMPT", "REPO-CONTEXT")
 	got := assemblePrompt(base, &agent.ClaimResult{
 		TicketKey: "DUM-1", Title: "t", Mode: "fresh", Scope: "TICKET-SCOPE", Branch: "b",
-	}, "/tmp/handback.md")
+	}, "/tmp/handback.md", "/tmp/outcome.json")
 
 	role, ctx, ticket := strings.Index(got, "ROLE-PROMPT"), strings.Index(got, "REPO-CONTEXT"), strings.Index(got, "TICKET-SCOPE")
 	if role < 0 || ctx < 0 || ticket < 0 {
@@ -135,7 +135,7 @@ func TestReworkPromptCarriesTheFailingBuild(t *testing.T) {
 				Log:  "** (CompileError) lib/dummy/greetings.ex:12: undefined function farwell/1",
 			}},
 		},
-	}, "/tmp/handback.md")
+	}, "/tmp/handback.md", "/tmp/outcome.json")
 
 	for _, want := range []string{"gates", "undefined function farwell/1", "https://gh/run/9"} {
 		if !strings.Contains(got, want) {

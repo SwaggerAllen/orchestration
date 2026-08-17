@@ -101,6 +101,7 @@ runs:
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/dev.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
           --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the ticket branch
@@ -215,6 +216,7 @@ runs:
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --handback "$RUNNER_TEMP/pipeline/handback.md" \
           --commits "${{ steps.push.outputs.commits || -1 }}" \
+          --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure

@@ -97,7 +97,9 @@ and the drift shows up as agents disagreeing about what a state means.
 6. **Rejected proposals are `Canceled`, never `Done`.** `Done` stays a clean record of what
    shipped.
 7. **Push-back has a channel.** A design that can't be built as drawn goes back to `Designing`
-   with a comment — never a silently worse version, never a silent third thing.
+   with a comment and a `pushback` label — never a silently worse version, never a silent third
+   thing. An agent takes it by changing no files and naming the outcome (§12); it has no
+   credential with which to move a ticket itself.
 8. **A new component, token, context, table or dependency is a decision, not a port.** It
    must be named — components and tokens in the issue, structure in the sketch (§4) — because
    a decision nobody named is a decision nobody reviewed. Enforced in CI (§9), not by
@@ -935,7 +937,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has four flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has five flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -949,22 +951,30 @@ the comment and a label say which:
   another name with a duplicate copy of every rule attached to it. It is a label because the
   distinction it carries is "is anything broken", and a `Blocked` column where waiting and
   broken look identical answers that question wrongly.
-- **Nothing failed, and there was nothing to do.** The `no-changes` case: the run finished and
-  produced no diff. A ticket reaches an agent because something is meant to change, so this is
-  exceptional, and the overwhelmingly likely explanation is that the work reached `main` by
-  another route and the ticket duplicates it. The harness parks it with the label and the run's
-  hand-back and names no cause, because the two candidates want opposite answers — a duplicate
-  of merged work is `Canceled` (§2.6), a scope that has gone stale is a rewrite — and choosing
-  between them from inside the pipeline is the silent third thing §2.7 forbids.
+- **Nothing failed, and the ticket asks for what is already there.** The `scope-satisfied`
+  case: the run read the scope, found every clause of it on `main`, and changed nothing.
+  Almost always a duplicate of merged work, which is `Canceled` rather than `Done` (§2.6) so
+  `Done` stays a record of what actually shipped — but sometimes a scope that went stale and
+  wants rewriting, and the pipeline cannot tell which. It parks with the run's hand-back and
+  the author decides.
+- **Nothing failed, and the run produced nothing without saying why.** The `no-changes` case,
+  and the only one of these the harness raises on its own: no commits, and no outcome naming a
+  reason. It is deliberately its own label rather than being folded into the others, because
+  it is the harness admitting it does not know — putting a confident label on the one case
+  where nobody was confident is worse than saying so.
 
-  **This is deliberately one route for several situations.** A design that can't be built as
-  drawn, a scope already on `main`, a secret that has to exist first: an agent takes all of
-  them by changing no files and writing the argument in its hand-back, and they all land here.
-  Push-back to `Designing` (§2.7) stays the protocol's answer for the first of those, but no
-  agent can currently invoke it — the model runs with no tracker credentials — so in practice
-  the author reads the hand-back and moves the ticket. Collapsing the distinction is the price
-  of not building a second channel for a case that should be rare; if it stops being rare,
-  that is the signal to build one.
+**A run that changes nothing states which of these it is, in a file.** The model has the model
+credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,
+and that is the boundary rather than an oversight (§9). It writes `{"outcome": ..., "summary":
+...}` alongside its hand-back and the harness routes it: `scope-satisfied` and `needs-setup`
+park here, `pushback` goes back to `Designing` with the argument (§2.7) and carries a `pushback`
+label, because a ticket being designed for the second time looks exactly like one being
+designed for the first.
+
+The three are not collapsed into one, and the reason is what a label is for: a duplicate ticket,
+a missing secret and an unbuildable design want three different actions from a human. A `Blocked`
+column that renders them identically is one where every ticket has to be opened before it can be
+triaged, which is the same failure as a column where waiting and broken look alike.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation
