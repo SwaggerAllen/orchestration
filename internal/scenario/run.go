@@ -2,13 +2,18 @@ package scenario
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
@@ -52,6 +57,40 @@ type Merged struct {
 type ResetResult struct {
 	Archived int      `json:"archived"`
 	Merges   []Merged `json:"merges"`
+	// FromNotes is how many of Merges came from retro notes rather than
+	// from live tickets. Reported because it is the difference between a
+	// rehearsal that ended at a milestone boundary and one that did not,
+	// and because the bug this fixes was silent: the run summary said
+	// "merged nothing" and was believed.
+	FromNotes int `json:"fromNotes"`
+}
+
+// ReadRetroNotes collects every retro note in a project checkout, in
+// path order. A repo with no notes yet is not an error — no boundary has
+// run there — but a repo that cannot be read is, because the difference
+// between "no notes" and "wrong directory" is the whole value of the
+// check.
+func ReadRetroNotes(repoRoot string) ([]retro.Entry, error) {
+	dir := filepath.Join(repoRoot, retro.Dir)
+	names, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading retro notes: %w", err)
+	}
+	var out []retro.Entry
+	for _, n := range names {
+		if n.IsDir() || !strings.HasSuffix(n.Name(), ".md") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, n.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("reading retro note %s: %w", n.Name(), err)
+		}
+		out = append(out, retro.Parse(string(raw))...)
+	}
+	return out, nil
 }
 
 // Reset archives every issue in the project, returning it to empty, and
@@ -63,15 +102,31 @@ type ResetResult struct {
 // which is what keeps "the next milestone" ordering stable (DESIGN §10).
 //
 // The merge list is collected here, before anything is archived, because
-// this is the only moment it exists: an archived issue drops out of
-// Linear's listings, so a later pass cannot ask what a previous
-// rehearsal landed. It comes from each ticket's `merged` marker, which
-// reconcile writes with the squash commit's sha — the harness's own
-// record of what it merged, rather than a guess made later from commit
-// subjects or branch names.
-func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmProjectID string, log io.Writer) (*ResetResult, error) {
+// for the live tickets this is the only moment it exists: an archived
+// issue drops out of Linear's listings, so a later pass cannot ask what
+// a previous rehearsal landed. It comes from each ticket's `merged`
+// marker, which reconcile writes with the squash commit's sha — the
+// harness's own record of what it merged, rather than a guess made later
+// from commit subjects or branch names.
+//
+// repoRoot is a checkout of the project repo, and it is not optional: a
+// milestone boundary archives the milestone's Done tickets before any
+// reset runs (DESIGN §10 step 6), so a rehearsal that reached one has
+// already lost its merge markers to the tracker. What it has instead is
+// the retro note that step writes, which carries the same shas — read
+// here and unioned with whatever tickets are still live. Measured on
+// orchestration-dummy: ORC-1 and ORC-18 reverted, ORC-23 (PR #15) left
+// on main by a reset that reported success, with `retro: Rehearsal 1`
+// directly above it in the log.
+func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmProjectID, repoRoot string, log io.Writer) (*ResetResult, error) {
 	if err := Guard(cfg, confirmProjectID); err != nil {
 		return nil, err
+	}
+	if repoRoot == "" {
+		return nil, fmt.Errorf(
+			"refusing to reset: no project checkout given, so the retro notes cannot be read.\n" +
+				"Everything a past milestone boundary archived is recorded only there, and a reset that\n" +
+				"skipped them would revert some of the last rehearsal and report a clean run.")
 	}
 	issues, err := t.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
 	if err != nil {
@@ -84,13 +139,40 @@ func Reset(ctx context.Context, t tracker.Tracker, cfg *config.Config, confirmPr
 	// instead of printing "merged nothing" and carrying on. The empty
 	// case is the one the revert loop was never run against.
 	res := &ResetResult{Merges: []Merged{}}
+	seen := map[string]bool{}
+	add := func(m Merged, where string) {
+		if m.SHA == "" || seen[m.SHA] {
+			return
+		}
+		seen[m.SHA] = true
+		res.Merges = append(res.Merges, m)
+		fmt.Fprintf(log, "  merged   %s %s (%s)\n", m.Key, m.SHA, where)
+	}
 	for _, i := range issues {
 		for _, m := range mergedMarkers(i) {
 			m.Key = i.Key
-			res.Merges = append(res.Merges, m)
-			fmt.Fprintf(log, "  merged   %s %s\n", i.Key, m.SHA)
+			add(m, "ticket")
 		}
 	}
+	// After the live tickets, so a ticket still carrying its marker wins
+	// the dedupe and keeps its PR number. Notes from every past
+	// milestone are read, not just this rehearsal's: a note is never
+	// reverted away, so old shas come back every run. They cost nothing
+	// — the revert loop skips a commit that is already reverted or no
+	// longer on main — and singling out "the last one" would mean the
+	// harness deciding which note was current, which it cannot know.
+	notes, err := ReadRetroNotes(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	fromTickets := len(res.Merges)
+	for _, e := range notes {
+		for _, sha := range e.SHAs {
+			add(Merged{Key: e.Key, SHA: sha}, "retro note")
+		}
+	}
+	res.FromNotes = len(res.Merges) - fromTickets
+
 	for _, i := range issues {
 		fmt.Fprintf(log, "  archive %s %s\n", i.Key, i.Title)
 		if err := t.ArchiveIssue(ctx, i.ID); err != nil {

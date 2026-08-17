@@ -3,13 +3,17 @@ package scenario
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
@@ -52,7 +56,7 @@ func TestResetRefusesAProjectThatIsNotDisposable(t *testing.T) {
 	tr, cfg := world(t)
 	cfg.Disposable = false
 
-	_, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	_, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{})
 	if err == nil {
 		t.Fatal("reset ran against a config that never opted in")
 	}
@@ -70,7 +74,7 @@ func TestResetRefusesAMismatchedConfirmation(t *testing.T) {
 	if err := seedOne(t, tr, cfg); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Reset(context.Background(), tr, cfg, "some-other-project", &strings.Builder{})
+	_, err := Reset(context.Background(), tr, cfg, "some-other-project", t.TempDir(), &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("want a refusal naming the mismatch, got %v", err)
 	}
@@ -101,7 +105,7 @@ func TestSeedThenResetReturnsTheProjectToEmpty(t *testing.T) {
 		t.Errorf("seeded issue lost its milestone or priority: %+v", issues[0])
 	}
 
-	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &log)
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +130,7 @@ func TestSeedReusesMilestonesAcrossRuns(t *testing.T) {
 		if _, err := Seed(ctx, tr, cfg, basic(), &log); err != nil {
 			t.Fatalf("run %d: %v", i+1, err)
 		}
-		if _, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &log); err != nil {
+		if _, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &log); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -201,7 +205,7 @@ func TestCheckExplainsAMissingTicket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{}); err != nil {
+	if _, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
 	failures, err := Check(ctx, tr, cfg, s, seeded, nil)
@@ -317,7 +321,7 @@ func TestResetReportsWhatTheTicketsMergedBeforeArchivingThem(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,6 +336,151 @@ func TestResetReportsWhatTheTicketsMergedBeforeArchivingThem(t *testing.T) {
 	}
 }
 
+// The reset that measured green and did nothing.
+//
+// A milestone boundary archives the milestone's Done tickets (DESIGN §10
+// step 6), and it runs before any reset does. Reset learns what to
+// revert from `merged` markers on the tickets it archives — so after a
+// boundary there are no tickets, the merge list came out empty, the repo
+// half printed "the last rehearsal merged nothing" and main kept the
+// rehearsal's commits. Nothing anywhere reported a failure.
+//
+// The retro note the archive step writes is the durable copy, and this
+// is the whole point of reading it: the tracker is empty and the answer
+// still exists.
+func TestResetAfterABoundaryArchiveStillFindsWhatToRevert(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg := world(t)
+
+	// The project as a boundary leaves it: no tickets at all.
+	repo := t.TempDir()
+	writeRetroNote(t, repo, "rehearsal-1.md", "Rehearsal 1", []retro.Entry{
+		{Key: "ORC-23", Title: "Add a farewell to the home screen",
+			SHAs: []string{"0655929c405d57bc77b341c476267e45472e3985"}},
+		{Key: "ORC-9", Title: "Decide the greeting copy"},
+	})
+
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, repo, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Archived != 0 {
+		t.Fatalf("archived = %d, want 0 — the boundary already did it", res.Archived)
+	}
+	if len(res.Merges) != 1 || res.Merges[0].SHA != "0655929c405d57bc77b341c476267e45472e3985" {
+		t.Fatalf("merges = %+v, want the commit the boundary archived out of reach", res.Merges)
+	}
+	if res.Merges[0].Key != "ORC-23" {
+		t.Errorf("merge lost its ticket key: %+v", res.Merges[0])
+	}
+	if res.FromNotes != 1 {
+		t.Errorf("fromNotes = %d, want 1 — the run summary is how a human sees this working", res.FromNotes)
+	}
+}
+
+// The two sources union rather than either winning, the same way a
+// resumed boundary unions the findings it can still collect with the
+// ones its archive step carried. A rehearsal stopped partway through a
+// boundary is exactly this: some tickets archived into the note, the
+// rest still live and still carrying their markers.
+func TestResetUnionsLiveTicketsWithTheRetroNotes(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg := world(t)
+
+	live, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Still open", StateID: doneState(t, tr, cfg),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := marker.Marker{Kind: marker.Merged, Fields: map[string]string{"sha": "aaaa111", "pr": "20"}}
+	if err := tr.CommentOnIssue(ctx, live.ID, m.Comment("Reconciled and merged.")); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	writeRetroNote(t, repo, "rehearsal-1.md", "Rehearsal 1", []retro.Entry{
+		{Key: "ORC-23", Title: "Archived", SHAs: []string{"bbbb222"}},
+		// The same ticket the note already recorded — a boundary that
+		// archived it, then a resume that re-listed it before the
+		// archive took. One revert, not two.
+		{Key: live.Key, Title: "Still open", SHAs: []string{"aaaa111"}},
+	})
+	// An older milestone's note. Its commits were reverted rehearsals
+	// ago, but a note is never reverted away, so they come back every
+	// run — harmless, because the revert loop skips a commit already
+	// reverted or no longer on main.
+	writeRetroNote(t, repo, "m-zero.md", "M: zero", []retro.Entry{
+		{Key: "ORC-1", Title: "Ancient", SHAs: []string{"cccc333"}},
+	})
+
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, repo, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, mg := range res.Merges {
+		got = append(got, mg.SHA)
+	}
+	// Each sha once. Their order among themselves is deliberately not
+	// asserted: the revert step re-orders the whole list against
+	// `git rev-list`, because neither tracker order nor a note's
+	// key-sorted lines is landing order, and landing order is what
+	// reverts cleanly.
+	if len(got) != 3 {
+		t.Fatalf("merges = %v, want three, each once", got)
+	}
+	sorted := append([]string(nil), got...)
+	sort.Strings(sorted)
+	if want := []string{"aaaa111", "bbbb222", "cccc333"}; !reflect.DeepEqual(sorted, want) {
+		t.Fatalf("merges = %v, want %v", sorted, want)
+	}
+	// The live ticket won the dedupe, so its PR number survived.
+	if res.Merges[0].PR != "20" {
+		t.Errorf("merge = %+v, want the live ticket's marker to win the dedupe", res.Merges[0])
+	}
+	if res.FromNotes != 2 {
+		t.Errorf("fromNotes = %d, want 2", res.FromNotes)
+	}
+}
+
+// A reset with no project checkout cannot read the notes, and a reset
+// that cannot read the notes reverts some of the last rehearsal and
+// reports a clean run — which is the bug, not a degraded mode of it.
+func TestResetRefusesWithoutAProjectCheckout(t *testing.T) {
+	tr, cfg := world(t)
+	_, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, "", &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "retro notes") {
+		t.Fatalf("want a refusal naming the notes it could not read, got %v", err)
+	}
+}
+
+// A checkout with no notes at all is a project that has never reached a
+// boundary, not a misconfiguration — the common case for the first few
+// rehearsals, and it must not fail.
+func TestResetAcceptsACheckoutWithNoNotesYet(t *testing.T) {
+	tr, cfg := world(t)
+	res, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Merges) != 0 {
+		t.Errorf("merges = %+v, want none", res.Merges)
+	}
+}
+
+func writeRetroNote(t *testing.T, repo, name, milestone string, entries []retro.Entry) {
+	t.Helper()
+	dir := filepath.Join(repo, retro.Dir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(retro.Render(milestone, entries)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A rehearsal that merged nothing must report an empty list rather than
 // an error: the repo step tells "this run landed nothing" from "the
 // tracker step never ran", and it can only do that if empty is a legal
@@ -339,7 +488,7 @@ func TestResetReportsWhatTheTicketsMergedBeforeArchivingThem(t *testing.T) {
 func TestResetOnAProjectThatMergedNothingReportsNoMerges(t *testing.T) {
 	ctx := context.Background()
 	tr, cfg := world(t)
-	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	res, err := Reset(ctx, tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +524,7 @@ func TestResetWritesAnArrayWhenNothingMerged(t *testing.T) {
 	if err := seedOne(t, tr, cfg); err != nil {
 		t.Fatal(err)
 	}
-	res, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, &strings.Builder{})
+	res, err := Reset(context.Background(), tr, cfg, cfg.Tracker.ProjectID, t.TempDir(), &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}

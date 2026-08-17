@@ -140,9 +140,15 @@ jobs:
       - name: reset the tracker
         if: inputs.phase == 'reset' || inputs.phase == 'full'
         run: |
+          # --repo is the project checkout above. A milestone boundary
+          # archives the milestone's Done tickets before any reset runs,
+          # taking their `merged` markers with them, and the retro note
+          # it writes into that repo is the only surviving record of what
+          # they landed.
           go run ./cmd/pipeline scenario reset \
             --config "$CONFIG" \
             --confirm "${{ steps.cfg.outputs.project }}" \
+            --repo .project \
             --merged-out "$RUNNER_TEMP/merges.json"
 
       # Undo what the last rehearsal landed, and nothing else.
@@ -192,15 +198,31 @@ jobs:
           # Newest first: reverting in reverse landing order is the only
           # order that applies cleanly when two tickets touched the same
           # file.
-          SHAS="$(jq -r '.[].sha' "$MERGES" | tac)"
-          if [ -z "$SHAS" ]; then
+          #
+          # Ordered by git rather than by the list's own order, which
+          # used to be reversed with `tac`. That worked while every sha
+          # came from one place — the tickets being archived, in tracker
+          # order — but the list now unions those with shas read out of
+          # retro notes, which are sorted by ticket key. Key order is not
+          # landing order, and the cost of getting it wrong is a revert
+          # conflict that stops the reset and wants a human on main.
+          # `git rev-list` prints history newest-first, so intersecting
+          # with it is the real answer rather than an approximation of
+          # one. Full shas throughout — `merged` markers carry what the
+          # merge API returned, and `grep -Fx` matches nothing less.
+          jq -r '.[].sha' "$MERGES" | sort -u > "$RUNNER_TEMP/want-shas"
+          if [ ! -s "$RUNNER_TEMP/want-shas" ]; then
             echo "the last rehearsal merged nothing; main is left as it is"
           fi
+          SHAS="$(git rev-list HEAD | grep -Fx -f "$RUNNER_TEMP/want-shas" || true)"
+
+          # Named rather than silently dropped: a sha in the list that is
+          # not in main's history is either already reverted by hand or
+          # never landed, and both are things to see.
+          comm -23 "$RUNNER_TEMP/want-shas" <(echo "$SHAS" | sort) \
+            | sed 's/^/  not on main (reverted by hand, or never landed) — skipping /'
+
           for sha in $SHAS; do
-            if ! git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
-              echo "  $sha is not on main (reverted by hand, or never landed) — skipping"
-              continue
-            fi
             if git rev-list --grep="^This reverts commit ${sha}" HEAD | grep -q .; then
               echo "  $sha already reverted — skipping"
               continue
