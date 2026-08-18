@@ -24,8 +24,12 @@ import (
 func cmdOrder(args []string) error {
 	fs := flag.NewFlagSet("order", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
-	milestone := fs.String("milestone", "", "scope to one milestone by name (default: the current one)")
-	all := fs.Bool("all", false, "span every milestone; anything outside the current one is held out of the startable layers and says so")
+	milestone := fs.String("milestone", "", "scope to one milestone by name (default: every milestone)")
+	// Accepted and inert: spanning every milestone is now the default,
+	// and project stubs carrying the old input would fail to parse a
+	// flag that had simply been deleted. A stub lives in a project repo
+	// and updates on its own schedule; the binary it calls tracks main.
+	_ = fs.Bool("all", false, "deprecated: spanning every milestone is the default")
 	format := fs.String("format", "text", "text, or markdown for a GitHub step summary")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -47,21 +51,24 @@ func cmdOrder(args []string) error {
 	if err != nil {
 		return err
 	}
-	// The current milestone by default. Milestones are worked in
-	// sequence, so a later one's tickets are commonly filed with no
-	// dependencies — the milestone is the dependency — and a
-	// project-wide default would put them in "Ready now" beside work
-	// that can genuinely start today.
+	// Every milestone by default; --milestone narrows.
+	//
+	// It used to default to the current milestone, on the reasoning that
+	// milestones are worked in sequence and a later one's tickets are
+	// commonly filed with no dependencies, so a project-wide answer
+	// would put them in "Ready now" beside work that can start today.
+	// That reasoning is sound and it is still enforced — those tickets
+	// are gated into the last layer with the reason attached — but it
+	// belonged in the layering rather than in the scope. As a default
+	// scope it also dropped every ticket accepted out of Triage without
+	// a milestone yet assigned: startable work the queue will take
+	// regardless of what this prints, absent from the one report whose
+	// job is naming what to start.
+	//
+	// Asking for a milestone by name asks what is in it; asking for
+	// nothing asks what can be started. Those are different questions
+	// and only the second one has a useful default.
 	want := *milestone
-	if want == "" && !*all {
-		want = snap.CurrentMilestone
-		if want == "" {
-			fmt.Fprintln(os.Stderr, "order: no current milestone in the tracker; spanning the whole project")
-		}
-	}
-	if *all {
-		want = ""
-	}
 	o := core.ComputeOrder(snap, want)
 	if *format == "markdown" {
 		printOrderMarkdown(os.Stdout, o, want)

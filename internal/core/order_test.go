@@ -255,3 +255,65 @@ func TestStartedWorkIsNeverHeldBackByItsMilestone(t *testing.T) {
 		t.Errorf("in-flight work from another milestone is in %q, want %q", got, LayerStarted)
 	}
 }
+
+// A ticket with no milestone is startable but uncommitted, and those
+// are separate axes.
+//
+// It arrives that way honestly: the boundary files proposals into
+// Triage, accepting one means moving it out and assigning a milestone,
+// and the assignment is a commitment only the author can make (DESIGN
+// §10) — so the accept happens and the assignment lags. Nothing
+// sequences the ticket and neither dispatcher filters on milestone, so
+// the queue will take it as soon as it reaches Designing.
+//
+// The wide view therefore names it as startable; a milestone's own
+// scope does not, because that scope is the work committed to that
+// milestone and nobody committed this. Measured on Catapult: ORC-48,
+// ORC-50, ORC-51 and ORC-52 in Todo, and an order that named one ticket.
+func TestOrderTreatsMilestonelessTicketsAsStartableButUncommitted(t *testing.T) {
+	inM1 := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "M1" })
+	// tk() defaults to M1, so a genuinely bare ticket has to say so.
+	bare := tk("B", protocol.Todo, func(t *Ticket) { t.Milestone = "" })
+	later := tk("C", protocol.Todo, func(t *Ticket) { t.Milestone = "M2" })
+	s := snap(inM1, bare, later)
+	s.CurrentMilestone = "M1"
+
+	// Wide scope: startable beside the current milestone's work, and not
+	// gated with the later milestone — nothing sequences it.
+	wide := ComputeOrder(s, "")
+	if got := layerOf(wide, "B"); got != LayerReady {
+		t.Errorf("bare ticket is in %q, want %q — nothing is in front of it", got, LayerReady)
+	}
+	if got := layerOf(wide, "C"); got == LayerReady {
+		t.Error("a later milestone's ticket still must not read as startable")
+	}
+
+	// Narrow scope: absent from every milestone, including the current
+	// one. A milestone's roster is what was committed to it.
+	for _, m := range []string{"M1", "M2"} {
+		if got := layerOf(ComputeOrder(s, m), "B"); got != "" {
+			t.Errorf("bare ticket appeared under %s in %q — nobody committed it there", m, got)
+		}
+	}
+	// And the milestone's own ticket is still there when asked for.
+	if layerOf(ComputeOrder(s, "M1"), "A") == "" {
+		t.Error("scoping to M1 lost M1's own ticket")
+	}
+}
+
+// With no current milestone at all there is nothing to read a bare
+// ticket as, so it stays bare and nothing is gated. The report is still
+// useful; it just cannot make that claim.
+func TestOrderWithNoCurrentMilestoneGatesNothing(t *testing.T) {
+	bare := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "" })
+	other := tk("B", protocol.Todo, func(t *Ticket) { t.Milestone = "M2" })
+	s := snap(bare, other)
+	s.CurrentMilestone = ""
+
+	o := ComputeOrder(s, "")
+	for _, k := range []string{"A", "B"} {
+		if got := layerOf(o, k); got != LayerReady {
+			t.Errorf("%s is in %q, want %q", k, got, LayerReady)
+		}
+	}
+}

@@ -554,11 +554,19 @@ real. If a sequencing constraint is worth remembering, it is worth recording as 
 
 One constraint deliberately lives outside the graph: **milestones are worked in sequence**
 (§2.9), and a later milestone's tickets are commonly filed with no dependencies at all, because
-the milestone *is* the dependency. Read literally, such a ticket has nothing blocking it. So
-the ordering is scoped to the current milestone by default, and across a wider scope anything
-outside it is held out of the startable layers and says why — the alternative is a report
-confidently recommending work that must not be started yet, which is the one failure that would
-make it cost more than it saves.
+the milestone *is* the dependency. Read literally, such a ticket has nothing blocking it. So anything
+outside the current milestone is held out of the startable layers and says why — the
+alternative is a report confidently recommending work that must not be started yet, which is
+the one failure that would make it cost more than it saves.
+
+**The default scope is every milestone**, with that gate doing the work. Scoping to the current
+milestone was the older default and hid a case: a ticket accepted out of Triage but not yet
+assigned a milestone. **Startable and committed are separate axes.** Nothing sequences a
+milestone-less ticket and no dispatcher reads milestones, so the queue takes it as soon as it
+reaches `Designing` — it belongs in the startable layers. But it is absent from any milestone's
+scope, because that scope is the work committed to that milestone and nobody committed this
+one. Asking for a milestone by name asks what is in it; asking for nothing asks what can be
+started.
 
 It answers a question that gets asked between sessions, away from a keyboard, so each project
 also carries a dispatch-only `pipeline-order` workflow that runs it and renders the layers to
