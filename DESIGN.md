@@ -440,6 +440,18 @@ trustworthy for the same reason in both cases: design *creates* the screen files
 sketch *is* the system touch list — with CI auditing both against the file maps (§9), because
 a diff that wanders outside its declared labels is a mutex nobody took.
 
+**The label's spelling is the doc's filename, and the design pass is refused if it is not.**
+CI derives the label it requires as `system:` plus the doc's filename without `.md`, so the
+name in the touch list and the name on disk are one string living in two places. A pass
+declaring a doc that does not exist now fails at the moment it declares it, naming the near
+miss. It used to succeed: the label was created from whatever was declared, took part in the
+mutex like any other, and could not be satisfied by any diff. Catapult's `ORC-5` declared
+`core-dsl` against `systems/core_dsl.md` and the mismatch survived design, the author's
+sign-off and a full dev run — 22 modules, 60 tests, three commits — before surfacing as 28
+audit violations on every path the ticket was about, with a push-back asking a human to rename
+a label as the only outcome left. The information needed to refuse existed at the moment the
+label was created.
+
 **"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
 commits are on main, so a ticket starting afterwards contains that work rather than racing it —
 there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
