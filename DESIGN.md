@@ -542,7 +542,7 @@ and nothing is re-evaluated.
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing (§12). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn (§2.7). Parked for the author to redesign or rescope. |
-| `author-only` | This work is legal for nobody else. No design pass is dispatched and the dev queue skips it, in every state, so it moves only when the author moves it. |
+| `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
 
@@ -554,6 +554,23 @@ to be told no, and repeated on every beat, because a refusal leaves the ticket i
 
 A label rather than a state, by the admission test: it says who owns the work, not where the
 work is, and the ticket still travels the ordinary states as the author does it.
+
+**The pipeline routes around a labelled ticket rather than handling it specially.** Skipping
+the dispatch alone was not enough: every other rule still applied to a ticket no agent would
+ever touch, and each one broke in its own way.
+
+| Rule | Author-only | Because |
+|---|---|---|
+| Dispatch (§13) | Skipped, in every state | Nothing an agent can land |
+| Pickup assertion (§9) | Refuses, every agent kind | The half that holds when a run arrives by hand or from a dispatch planned a beat before the label |
+| Writer matrix (§9) | Not judged | The workflow is Todo → Done and only the post-deploy check writes Done, so the author's close read as a violation and got reverted — and the revert is an arrival, so the next sweep judged it again |
+| Mutex (§6) | Not held | No agent ever observes it finishing, so a shared screen or system label would park the queue behind a human's calendar |
+| Dev singularity (§6) | Not counted | The dev agent is busy if any ticket sits in a dev-owned state, which infers a run from a state. An author dragging theirs into In progress — the obvious thing to do while working on it — would stop the whole queue |
+| CI and reconcile (§13) | Not dispatched | The gates are the pipeline's. Reconcile would spend a model pass judging a diff no agent wrote against a scope no agent was given |
+
+The boundary archive still sweeps them up. Its filter is the milestone and the state, not the
+labels, so a Done author-only ticket is archived and named in the retro note with the rest
+(§10) — routing around a ticket is not forgetting it.
 
 **Three things apply it**, and the first two are the ones that matter, because a label nothing
 writes is a label nobody remembers:

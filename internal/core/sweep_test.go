@@ -997,3 +997,101 @@ func TestAuthorOnlyTicketsAreNeverDispatched(t *testing.T) {
 		t.Error("an author-only ticket at the head of the queue blocked the ticket behind it")
 	}
 }
+
+// The rest of "the pipeline ignores it": Todo to Done is the author's
+// workflow for these, and the §9 writer matrix has no row for it. Only
+// the post-deploy check writes Done, so the author closing an
+// author-only ticket read as a done-writer violation and got reverted —
+// and since the revert is itself an arrival the author then moved again,
+// every sweep, forever.
+func TestAuthorOnlyClosuresAreNotReverted(t *testing.T) {
+	mine := tk("A1", protocol.Done, func(t *Ticket) {
+		t.Labels = []string{LabelAuthorOnly}
+	}, arrived(protocol.Todo, RoleAuthor))
+
+	for _, a := range Sweep(snap(mine)) {
+		if a.Kind == ActTransition && a.TicketID == mine.ID {
+			t.Errorf("reverted an author-only closure: %+v", a)
+		}
+	}
+
+	// The exemption is the label, not the states: the same move on an
+	// ordinary ticket is still a violation.
+	ordinary := tk("B1", protocol.Done, arrived(protocol.Todo, RoleAuthor))
+	if a := find(Sweep(snap(ordinary)), ActTransition, "B1"); a == nil {
+		t.Error("an ordinary Todo to Done went unjudged")
+	}
+}
+
+// Author-only work never reaches an agent, so nothing in the pipeline
+// ever observes it finishing. Counting it in the mutex would park every
+// ticket sharing its screen or system behind a human's calendar.
+func TestAuthorOnlyDoesNotHoldTheMutex(t *testing.T) {
+	mine := tk("A1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{"screen:home", LabelAuthorOnly}
+	})
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+
+	s := snap(mine, queued)
+	if other, l := MutexHolder(s, queued); other != nil {
+		t.Errorf("an author-only ticket holds %q", l)
+	}
+	if d := find(Sweep(s), ActDispatch, "T2"); d == nil {
+		t.Error("the queued ticket was held behind an author-only ticket")
+	}
+}
+
+// The gates are the pipeline's, and author-only work bypasses them
+// (DESIGN §8). A ticket the author parked in Checks would otherwise
+// spend a reconcile pass judging a diff no agent wrote against a scope
+// no agent was given.
+func TestAuthorOnlyDoesNotDispatchReconcile(t *testing.T) {
+	mine := tk("A1", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{LabelAuthorOnly}
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+	})
+	for _, a := range Sweep(snap(mine)) {
+		if a.TicketID == mine.ID {
+			t.Errorf("the sweep acted on an author-only ticket in Checks: %+v", a)
+		}
+	}
+}
+
+// And the agent-side half, for a run that arrives some other way — a
+// hand-fired workflow, or a dispatch planned in the beat before the
+// label went on.
+func TestAuthorOnlyPickupIsRefused(t *testing.T) {
+	for _, k := range []struct {
+		kind  AgentKind
+		state protocol.State
+	}{
+		{AgentDev, protocol.ReadyForDev},
+		{AgentDesign, protocol.Designing},
+		{AgentReconcile, protocol.Reconciling},
+	} {
+		mine := tk("A1", k.state, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
+		err := VerifyPickup(snap(mine), mine.ID, k.kind)
+		if err == nil {
+			t.Errorf("%s claimed an author-only ticket", k.kind)
+			continue
+		}
+		if !strings.Contains(err.Error(), LabelAuthorOnly) {
+			t.Errorf("%s refusal does not name the label: %v", k.kind, err)
+		}
+	}
+}
+
+// The dev agent's singularity is inferred from state as well as from live
+// runs, because a dead run in a dev state must not be double-dispatched.
+// That inference only holds for tickets a dev run could have moved: an
+// author-only ticket in In progress means a human is working on it, and
+// reading it as "the dev agent is busy" stops the whole queue.
+func TestAuthorOnlyInADevStateDoesNotFreezeTheQueue(t *testing.T) {
+	for _, st := range []protocol.State{protocol.InProgress, protocol.Reworking} {
+		mine := tk("A1", st, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
+		queued := tk("T2", protocol.ReadyForDev)
+		if d := find(Sweep(snap(mine, queued)), ActDispatch, "T2"); d == nil {
+			t.Errorf("an author-only ticket in %s held the dev agent", st)
+		}
+	}
+}

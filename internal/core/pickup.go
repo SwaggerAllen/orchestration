@@ -20,6 +20,14 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 	if s.KillSwitch {
 		return fmt.Errorf("pickup %s: kill switch is on", t.Key)
 	}
+	// Author-only work is not the pipeline's, whatever state it is in
+	// (DESIGN §8). The sweep already skips these when it dispatches;
+	// this is the half that holds when a run arrives some other way — a
+	// hand-fired workflow, or a dispatch planned in the beat before the
+	// label was applied.
+	if t.HasLabel(LabelAuthorOnly) {
+		return fmt.Errorf("pickup %s: labelled %s — the author owns this one end to end (DESIGN §8)", t.Key, LabelAuthorOnly)
+	}
 	// Singularity, asked here because the dispatcher cannot answer it in
 	// time. The sweep's guard reads Run.Live, and that marker is posted
 	// by the claim — which happens inside the dispatched job, after
