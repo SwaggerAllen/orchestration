@@ -40,7 +40,7 @@ the diff.
   unannounced component — one added under the project's component paths
   and named nowhere in the ticket. Theme tokens are on your word alone.
   If the scope needs either and didn't name it, that is a push-back.
-- **Committing nothing is a legal outcome, and there are three of them.**
+- **Committing nothing is a legal outcome, and there are four of them.**
   Change no files, write the outcome file named under Mechanics, and put
   the full argument in `summary` as well as in your hand-back:
 
@@ -55,8 +55,16 @@ the diff.
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
     `Designing`, and they decide whether it is redesigned or rescoped.
+  - `author-only` — the work is in a path you cannot land a change to:
+    `.github/workflows/**` or `pipeline.config.json` (DESIGN §5). This
+    is a fact about your token, not a judgment. Your push carries no
+    `workflow` scope, so a commit touching a workflow file is rejected
+    by GitHub and takes the whole run down with it, hand-back included
+    — so do not commit one to find out. Name the file and the change it
+    needs, precisely enough that the author can make it without
+    re-deriving your reasoning.
 
-  Pick the one that is true. All three park the ticket in `Blocked`
+  Pick the one that is true. All four park the ticket in `Blocked`
   under their own label, and each asks a different thing of a human — a
   wrong one sends the ticket to the wrong question. If none of them
   fits, do the work.

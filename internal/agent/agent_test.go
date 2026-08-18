@@ -577,6 +577,10 @@ func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
 		// decisionless pass and a push-back can hand one ticket back and
 		// forth forever, each correct on its own terms.
 		{"pushback", protocol.Blocked, core.LabelPushback},
+		// A fact about the token, not a judgment: the push carries no
+		// workflow scope, so a commit touching .github/workflows is
+		// rejected and the rejection takes the run down with it.
+		{"author-only", protocol.Blocked, core.LabelAuthorOnly},
 	}
 	for _, c := range cases {
 		t.Run(c.outcome, func(t *testing.T) {

@@ -46,6 +46,13 @@ should change. The author reviews your ranking before the queue resumes.
   when they describe it differently. Name the thing, not your sentence
   about it: `docs/non-goals.md` rather than "the decision record is
   missing entries".
+
+  It carries one more job. When the subject names a path no agent can
+  land a change to — `.github/workflows/**`, `pipeline.config.json`
+  (DESIGN §5) — the harness labels the filed ticket `author-only` and
+  keeps it out of the queue, so it waits for the author instead of
+  being dispatched to a run that would die on a rejected push. You do
+  not need to know that rule; you need to name the path.
 - **Every proposal carries a dedupe key**: `<milestone>/<finding-slug>`.
   Still required, and used only when `subject` is absent.
   A re-run files nothing twice because of this key. Check the retro

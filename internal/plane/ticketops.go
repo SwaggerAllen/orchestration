@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -118,7 +119,7 @@ func (p *Plane) StateIDFor(ctx context.Context, s protocol.State) (string, error
 // team's Triage state when one exists, Backlog otherwise — Triage is
 // Linear-managed, so setup can't guarantee it. The dedupe marker rides in
 // the description; a re-run checks it before filing (DESIGN §10).
-func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind string, gating bool, dedupe string) error {
+func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind, subject string, gating bool, dedupe string) error {
 	if err := p.resolveStates(ctx); err != nil {
 		return err
 	}
@@ -147,7 +148,7 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 		"dedupe": dedupe,
 		"gating": fmt.Sprintf("%t", gating),
 	}}
-	_, err = p.Tracker.CreateIssue(ctx, tracker.NewIssue{
+	issue, err := p.Tracker.CreateIssue(ctx, tracker.NewIssue{
 		TeamID:      p.Config.Tracker.TeamID,
 		ProjectID:   p.Config.Tracker.ProjectID,
 		Title:       title,
@@ -155,7 +156,51 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 		StateID:     stateID,
 		Labels:      []string{label},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// The subject names the concrete thing the proposal is about — a
+	// file, a config key, a gate line — so when it names a path no agent
+	// can land a change to, that is knowable here rather than being left
+	// for whoever reads the ticket later. A proposal to change a
+	// workflow file dispatched to the dev agent is a run that ends on a
+	// rejected push, every time, because the push token has no workflow
+	// scope (DESIGN §5).
+	//
+	// Attached after the create rather than passed into it: creating an
+	// issue with a label the team does not carry fails the whole create,
+	// while AddTicketLabel provisions a missing label on the way through.
+	// The proposal landing under-labelled is recoverable; the proposal
+	// not landing is not.
+	if AuthorOnly(subject) {
+		if err := p.AddTicketLabel(ctx, issue.ID, core.LabelAuthorOnly); err != nil {
+			return fmt.Errorf("filed %s but could not mark it %s (its subject %q is author-only): %w",
+				issue.Key, core.LabelAuthorOnly, subject, err)
+		}
+	}
+	return nil
+}
+
+// AuthorOnly reports whether a proposal subject names a path only the
+// author can change (protocol.AuthorOnlyPaths).
+//
+// Subjects are free text — a path, a config key, a mix task, a module —
+// so this is a best-effort read of one that happens to be a path, and it
+// is deliberately one-directional: a match is reliable, a non-match only
+// means this subject did not name one. The dev agent's own outcome is
+// the other half, for the case discovered while working rather than
+// while proposing.
+func AuthorOnly(subject string) bool {
+	subject = strings.TrimSpace(strings.Trim(strings.TrimSpace(subject), "`"))
+	if subject == "" {
+		return false
+	}
+	for _, g := range protocol.AuthorOnlyPaths {
+		if filemap.Match(g, subject) {
+			return true
+		}
+	}
+	return false
 }
 
 // PRForTicket finds the open PR carrying the ticket key in its branch

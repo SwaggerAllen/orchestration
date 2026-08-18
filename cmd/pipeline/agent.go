@@ -335,7 +335,7 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outco
 		add(fmt.Sprintf("- Write your hand-back to `%s` before you finish: what landed, the commit, anything deliberately not done and why, any open question you resolved (DESIGN vocabulary: Hand-back).\n", handbackPath))
 	}
 	if outcomePath != "" {
-		add(fmt.Sprintf("- If you changed no files, write `%s`: `{\"outcome\": \"scope-satisfied\"|\"needs-setup\"|\"pushback\", \"summary\": \"...\"}` — see Outcomes above. Omit the file when you did the work; that is the ordinary case.\n", outcomePath))
+		add(fmt.Sprintf("- If you changed no files, write `%s`: `{\"outcome\": \"scope-satisfied\"|\"needs-setup\"|\"pushback\"|\"author-only\", \"summary\": \"...\"}` — see Outcomes above. Omit the file when you did the work; that is the ordinary case.\n", outcomePath))
 	}
 	return string(b)
 }

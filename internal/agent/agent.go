@@ -391,7 +391,8 @@ The hand-back above is the run's own account and the only thing here that looked
 // run `pipeline agent abort --reason pushback` for a long time, an
 // instruction it was never once able to follow.
 type DevOutcome struct {
-	// Outcome: "done", "scope-satisfied", "needs-setup" or "pushback".
+	// Outcome: "done", "scope-satisfied", "needs-setup", "pushback" or
+	// "author-only".
 	// Absent file means "done" — an older prompt that never wrote one
 	// still finishes, and a run that produced nothing without saying why
 	// is caught by the commit count instead.
@@ -409,6 +410,7 @@ var devOutcomes = map[string]string{
 	"scope-satisfied": "scope-satisfied",
 	"needs-setup":     "needs-setup",
 	"pushback":        "pushback",
+	"author-only":     "author-only",
 }
 
 // LoadDevOutcome reads the dev model's outcome. A missing file is not an
@@ -432,7 +434,7 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 		o.Outcome = "done"
 	}
 	if _, ok := devOutcomes[o.Outcome]; !ok && o.Outcome != "done" {
-		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback", o.Outcome)
+		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback, author-only", o.Outcome)
 	}
 	if o.Outcome != "done" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("dev outcome: %q without its argument is a ticket nobody can act on — say what you found", o.Outcome)
@@ -440,7 +442,7 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 	return &o, nil
 }
 
-// Abort routes a run that cannot finish. Four reasons, and only
+// Abort routes a run that cannot finish. Five reasons, and only
 // "failed" is a failure:
 //
 //   - pushback   -> Blocked with the pushback label and the argument,
@@ -452,6 +454,9 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 //     account. Without its own flavor it lands in Blocked looking like a
 //     failure, and the Blocked column stops being readable as "what is
 //     broken".
+//   - author-only -> Blocked with the author-only label: the work is in
+//     a path no agent can land a change to (protocol.AuthorOnlyPaths).
+//     Not a failure and not a judgment — a fact about the token.
 //   - scope-satisfied -> Blocked with the scope-satisfied label: the
 //     ticket asks for what is already on main, so there was nothing to
 //     build. Almost always a duplicate of merged work. Also where a run
@@ -502,6 +507,13 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		to = protocol.Blocked
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"setup": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelNeedsSetup)
+	case "author-only":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: author-only without naming what has to change is a ticket the author cannot pick up")
+		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"author-only": "1"}}
+		message = softLabel(ctx, p, res, message, core.LabelAuthorOnly)
 	case "scope-satisfied":
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("abort: scope-satisfied without saying what is already there is a ticket nobody can adjudicate")
@@ -510,7 +522,7 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"scope-satisfied": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelScopeSatisfied)
 	default:
-		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup or scope-satisfied, got %q", reason)
+		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup, scope-satisfied or author-only, got %q", reason)
 	}
 	if m != nil {
 		m.Fields["from"] = string(res.State)

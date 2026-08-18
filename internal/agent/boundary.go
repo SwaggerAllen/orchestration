@@ -446,7 +446,7 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 			// Held so the rest of this scan dedupes against it too: two
 			// proposals from one scan can name one subject.
 			existing[key] = true
-			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Gating, key); err != nil {
+			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Subject, prop.Gating, key); err != nil {
 				// Collected, not returned. Returning on the first error
 				// left the tickets already filed in the tracker while the
 				// step comment said the step never ran — the audit trail

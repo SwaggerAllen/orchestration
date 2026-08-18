@@ -339,6 +339,26 @@ say so in the issue.
 | `systems/*.md` | Design (the sketch writes them; dev amends with a note, §4) |
 | Theme tokens | Design (by proposal; see §9) |
 | LiveViews, contexts, schemas, tests, everything else | Dev |
+| `.github/workflows/**` | **Author only** — no agent can land a change there |
+| `pipeline.config.json` | **Author only** — it declares what the run is judged by |
+
+**The last two rows are not a policy, they are a fact, and they are the reason `author-only`
+exists (§8).** An agent's push token carries no `workflow` scope on any GitHub repository, so a
+commit touching a workflow file is rejected by GitHub — and the rejected push takes the whole
+run down with it, hand-back included, which is the worst way to learn it. The config declares
+the gates, states and ownership the run is being scored against, so an agent editing it
+mid-ticket is an agent changing its own marking scheme.
+
+**A ticket whose work lives in either is labelled `author-only` and never dispatched.** Two
+things apply the label. A boundary proposal naming one of these paths as its `subject` is
+labelled when it is filed, which is mechanical and needs no judgment. A dev run that discovers
+it mid-work says so through its outcome file (§12) and parks — it must not commit the change to
+find out, because finding out costs the run.
+
+Neither route is complete on its own and neither is meant to be: a subject is free text and may
+name the work some other way, and a dev run only reaches the question if the ticket got that
+far. Between them they cover the cases anyone has hit. The author applies the label directly
+whenever they already know.
 
 **One PR per ticket, and it stays open through rework.** Design opens it as a draft; dev pushes
 to the same branch; reconciliation reviews it; a bounce is more commits on the same branch
@@ -533,9 +553,22 @@ every file it needed was closed to it. That is a full run — checkout, toolchai
 to be told no, and repeated on every beat, because a refusal leaves the ticket in the queue.
 
 A label rather than a state, by the admission test: it says who owns the work, not where the
-work is, and the ticket still travels the ordinary states as the author does it. The author
-applies it; the boundary agent may propose it on a finding it can see is author-only, the same
-way it proposes everything else.
+work is, and the ticket still travels the ordinary states as the author does it.
+
+**Three things apply it**, and the first two are the ones that matter, because a label nothing
+writes is a label nobody remembers:
+
+1. **Filing.** A boundary proposal whose `subject` names a path in §5's author-only rows is
+   labelled as it is filed. Mechanical, no judgment, and it catches the common case — the debt
+   scan finding a gate that is declared and not armed.
+2. **A dev run.** A run that discovers mid-work that its scope needs one of those paths says so
+   through its outcome file and parks (§12). It must not commit the change to find out: the
+   push is rejected and the run dies with the hand-back still in it.
+3. **The author**, directly, whenever they already know.
+
+Removing the label is how the ticket goes back to the pipeline, and that is deliberate — the
+skip applies in every state, so a ticket left labelled after the author has done the
+author-only half will sit still rather than being picked up for the rest.
 
 **Ordering is derived, never stored.** Which ticket to start next, and what can run beside it,
 is a pure function of the graph the tracker already holds: open blocking relations, mutex
@@ -974,7 +1007,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has five flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has six flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -996,6 +1029,9 @@ the comment and a label say which:
   the author decides.
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
   parks here rather than looping back to `Designing`.
+- **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
+  `.github/workflows/**` or `pipeline.config.json` (§5). A fact about the token rather than a
+  judgment, and the one flavor a run can reach without anything going wrong at all.
 
 **A run that changes nothing states which of these it is, in a file.** The model has the model
 credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,
