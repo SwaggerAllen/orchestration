@@ -1228,6 +1228,21 @@ read and no author reliably remembers.
   but bounded, because without a bound an active main and a slow ticket loop between
   `Reconciling` and the queue forever, burning an agent run each pass. That one is sequencing,
   and sequencing is the author's.
+- **A pass that changed no files still gets a fresh verdict**, because the harness commits an
+  empty one before pushing. CI fires on `pull_request`, which needs a push, which needs a
+  commit — so a rework that correctly changed nothing left the head sha exactly where the last
+  verdict was already recorded. The ticket entered `Checks`, the sweep read that verdict,
+  recognised a run it had already acted on and said nothing, and `Checks` has no agent and no
+  stale-claim timeout to catch it.
+
+  It is not a corner, because **the verdict is a function of the diff and the labels, not the
+  diff alone**: the mutex audit reads the ticket's labels from the tracker when it runs (§9), so
+  the same sha is legitimately red before a label is fixed and green after. Catapult's `ORC-5`
+  sat in `Checks` for half an hour on a rework whose entire fix was two label corrections. The
+  empty commit is what re-arms the trigger; a host capability to re-run a workflow would buy
+  nothing over it, and the port does not have one. Only on the route that reaches `Checks` — a
+  parked outcome hands the ticket to a human, and a commit asking for a verdict nobody will read
+  is a line in the log that lies about why it is there.
 - **A conflicted branch in `Checks` → the same conflict comment, then `Ready for rework`**,
   without waiting for CI. This is the same event as the rule above, caught earlier, and it has
   to be caught earlier because a conflicted PR never reaches the merge attempt at all: GitHub

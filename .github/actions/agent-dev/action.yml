@@ -105,6 +105,7 @@ runs:
           --findings-path "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: check out the ticket branch
+      id: checkout
       shell: bash
       run: |
         git config user.name "pipeline-dev-agent"
@@ -114,6 +115,11 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+        # Where this pass started. The push step compares against it to
+        # tell "the model changed nothing" from "the branch is empty" —
+        # two different facts that the commit count against main cannot
+        # separate, because it counts every pass's work.
+        echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     - name: run the dev agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
@@ -157,6 +163,47 @@ runs:
         if [ "$COMMITS" -eq 0 ]; then
           echo "the run produced nothing main does not already have; not pushing an empty branch"
           exit 0
+        fi
+
+        # A pass that changed no files still needs a fresh verdict, and
+        # cannot get one: CI fires on `pull_request`, which needs a
+        # push, which needs a commit. So the ticket enters Checks, the
+        # sweep reads the verdict already recorded against this same
+        # sha, recognises it as one it has already acted on, and says
+        # nothing — and Checks has no agent and no stale-claim timeout,
+        # so nothing else ever moves it.
+        #
+        # This is not a corner. The audit reads the ticket's labels from
+        # the tracker at CI time, so the verdict is a function of the
+        # diff AND the labels: the same sha can be red on Monday and
+        # green on Tuesday because a label changed. Catapult's ORC-5 sat
+        # in Checks for half an hour that way, on a rework whose entire
+        # fix was two label corrections.
+        #
+        # The empty commit is the cheapest thing that re-arms the
+        # trigger. The alternative wants a host capability to re-run a
+        # workflow, which the port does not have and which this buys
+        # nothing over.
+        #
+        # Only on the route that reaches Checks: a parked outcome hands
+        # the ticket to a human, and a commit asking for a verdict
+        # nobody will read is a line in the log that lies about why it
+        # is there. Unparseable outcome falls through to making it,
+        # which costs a build rather than a stuck ticket.
+        OUTCOME=""
+        if [ -f "$RUNNER_TEMP/pipeline/outcome.json" ]; then
+          # `|| true` because this step runs under `set -e -o pipefail`
+          # and a file with no outcome key exits grep 1 — which would
+          # take the push down over a field whose absence means "done".
+          OUTCOME="$(tr -d ' \t\n' < "$RUNNER_TEMP/pipeline/outcome.json" \
+            | grep -oE '"outcome":"[a-z-]+"' | head -1 | sed 's/.*:"//; s/"$//' || true)"
+        fi
+        if [ "$(git rev-parse HEAD)" = "${{ steps.checkout.outputs.head }}" ] \
+          && { [ -z "$OUTCOME" ] || [ "$OUTCOME" = "done" ]; }; then
+          echo "this pass changed no files; committing empty so the gates re-run against the ticket as it stands now"
+          git commit -q --allow-empty \
+            -m "re-run the gates: this pass changed no files" \
+            -m "The verdict on this sha predates the pass, and the audit reads the ticket's labels as well as the diff — so it is not an answer to the question being asked now."
         fi
         git push -u origin "${{ steps.claim.outputs.branch }}"
 
