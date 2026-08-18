@@ -317,3 +317,30 @@ func TestOrderWithNoCurrentMilestoneGatesNothing(t *testing.T) {
 		}
 	}
 }
+
+// The narrowing on the rule above: a bare ticket earns its place in the
+// wide view by being in Todo. Todo is somebody saying the work is ready
+// and only the scheduling has lagged, which is the case worth surfacing.
+// Backlog is an idea, and a triage-category state is a proposal nobody
+// has accepted — listing those beside genuinely startable work turns a
+// report meant to answer "what next" into the whole tracker.
+func TestOrderTakesBareTicketsOnlyFromTodo(t *testing.T) {
+	ready := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "" })
+	idea := tk("B", protocol.Backlog, func(t *Ticket) { t.Milestone = "" })
+	// The same states inside a milestone are unaffected: this rule is
+	// about tickets nobody has committed, not about Backlog.
+	committed := tk("C", protocol.Backlog, func(t *Ticket) { t.Milestone = "M1" })
+	s := snap(ready, idea, committed)
+	s.CurrentMilestone = "M1"
+
+	o := ComputeOrder(s, "")
+	if got := layerOf(o, "A"); got != LayerReady {
+		t.Errorf("a bare Todo ticket is in %q, want %q", got, LayerReady)
+	}
+	if got := layerOf(o, "B"); got != "" {
+		t.Errorf("a bare Backlog ticket appeared in %q — it is an idea, not work to start", got)
+	}
+	if layerOf(o, "C") == "" {
+		t.Error("a Backlog ticket committed to the current milestone went missing")
+	}
+}

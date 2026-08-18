@@ -104,6 +104,14 @@ const (
 // not, which is the difference between "ready now" and "in this
 // milestone".
 //
+// The wide view takes bare tickets only in Todo, and that narrowing is
+// the point of showing them at all. A bare ticket in Todo is work
+// somebody has said is ready and simply has not been scheduled — the
+// case this whole paragraph exists for. A bare ticket anywhere earlier
+// is an idea in Backlog or a proposal nobody has accepted, and putting
+// those beside genuinely startable work is how a report meant to answer
+// "what next" turns into the whole tracker.
+//
 // It arrives that way honestly: the boundary files proposals into
 // Triage, accepting one means moving it out and assigning a milestone,
 // and assigning a milestone is a commitment the author owns (DESIGN
@@ -122,6 +130,9 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 			continue
 		}
 		if milestone != "" && t.Milestone != milestone {
+			continue
+		}
+		if t.Milestone == "" && t.State != protocol.Todo {
 			continue
 		}
 		considered = append(considered, t)
