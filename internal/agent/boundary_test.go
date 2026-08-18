@@ -131,8 +131,9 @@ func TestBoundaryResumeIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Crash simulation: the author routes it back (Blocked -> In progress
-	// per DESIGN 10's recovery), and the whole pass re-runs from claim.
+	// A completed pass ends the resume window, so re-entry is a new pass
+	// with nothing done — archive, scan and file all run again over
+	// whatever has landed since (DESIGN 10).
 	if err := tr.UpdateIssueState(ctx, boundary.ID, stateID(t, tr, cfg, protocol.InProgress)); err != nil {
 		t.Fatal(err)
 	}
@@ -140,15 +141,15 @@ func TestBoundaryResumeIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan2.Done[StepArchive] || !plan2.Done[StepScan] || !plan2.Done[StepFile] {
-		t.Fatalf("resume must see completed steps: %+v", plan2.Done)
+	if plan2.Done[StepArchive] || plan2.Done[StepScan] || plan2.Done[StepFile] {
+		t.Fatalf("re-entry after a completed pass resumed it instead of starting a new one: %+v", plan2.Done)
 	}
 	if err := BoundaryArchive(ctx, p, h, plan2, now); err != nil {
 		t.Fatal(err)
 	}
-	// Filing again with nil proposals recovers from the scan comment and
-	// the dedupe keys keep it a no-op.
-	if err := BoundaryFile(ctx, p, plan2, nil, now); err != nil {
+	// The new pass scans afresh and proposes the same finding again —
+	// the dedupe key is what keeps that from becoming a second ticket.
+	if err := BoundaryFile(ctx, p, plan2, ps, now); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -159,7 +160,49 @@ func TestBoundaryResumeIsIdempotent(t *testing.T) {
 		}
 	}
 	if proposals != 1 {
-		t.Errorf("proposal filed %d times across a resume, want exactly 1", proposals)
+		t.Errorf("proposal filed %d times across two passes, want exactly 1", proposals)
+	}
+}
+
+// The other half of the same rule: a pass that died partway is resumed,
+// not restarted. The discriminator is the close marker, which only a
+// pass that got all the way to the hand-back posts.
+func TestBoundaryResumesAPassThatDiedPartway(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M: alpha", 1)
+	boundary, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Milestone boundary — M: alpha", Description: "machinery",
+		StateID: stateID(t, tr, cfg, protocol.InProgress),
+		Labels:  []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Mutate(boundary.ID, func(i *tracker.Issue) { i.Milestone = "M: alpha" }); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_71", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+		t.Fatal(err)
+	}
+	// Died here — archive landed, the model step never ran.
+	plan2, err := ClaimBoundary(ctx, p, boundary.Key, "run_72", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan2.Done[StepArchive] {
+		t.Error("a resumed pass re-runs the archive it already did")
+	}
+	if plan2.Done[StepScan] || plan2.Done[StepFile] {
+		t.Errorf("a resumed pass skipped steps it never ran: %+v", plan2.Done)
 	}
 }
 
@@ -221,6 +264,64 @@ func TestBoundaryArchiveRecordsWhatEachTicketMerged(t *testing.T) {
 			}
 		default:
 			t.Errorf("unexpected entry %+v", e)
+		}
+	}
+}
+
+// A second pass over a milestone archives the tickets that landed since
+// the first, and the retro note has to grow to hold them. It used to
+// refuse: the note was written with PutFileIfAbsent, so the second
+// pass's tickets were archived with nothing recording their keys or
+// their merge shas — invisible to the next duplicate check and missing
+// from the rehearsal reset's revert list, which is the one job the note
+// has.
+func TestASecondArchivePassAddsToTheRetroNoteRatherThanSkippingIt(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
+	boundary := seedBoundary(t, tr, cfg)
+
+	archivePass := func(title, sha, run string) {
+		t.Helper()
+		i := seed(t, tr, cfg, title, "d", protocol.Done)
+		if err := tr.Mutate(i.ID, func(is *tracker.Issue) { is.Milestone = "M1" }); err != nil {
+			t.Fatal(err)
+		}
+		m := marker.Marker{Kind: marker.Merged, Fields: map[string]string{"sha": sha, "pr": "1"}}
+		if err := tr.CommentOnIssue(ctx, i.ID, m.Comment("Reconciled and merged.")); err != nil {
+			t.Fatal(err)
+		}
+		plan, err := ClaimBoundary(ctx, p, boundary.Key, run, "u", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Each call is its own pass: the previous one's archive marker
+		// must not skip this one.
+		plan.Done = map[string]bool{}
+		if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := "0655929c405d57bc77b341c476267e45472e3985"
+	second := "aff0c45ba1c9d0f2e3b4a5968778695a4b3c2d1e"
+	archivePass("Add a farewell", first, "run_80")
+	archivePass("Pay down the greeting debt", second, "run_81")
+
+	got := retro.Parse(h.Files["docs/retros/m1.md"])
+	if len(got) != 2 {
+		t.Fatalf("note carries %d entries, want both passes' tickets:\n%s", len(got), h.Files["docs/retros/m1.md"])
+	}
+	shas := map[string]bool{}
+	for _, e := range got {
+		for _, s := range e.SHAs {
+			shas[s] = true
+		}
+	}
+	for _, want := range []string{first, second} {
+		if !shas[want] {
+			t.Errorf("the note lost %s, so a rehearsal reset would leave it on main:\n%s", want, h.Files["docs/retros/m1.md"])
 		}
 	}
 }

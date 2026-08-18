@@ -531,3 +531,29 @@ func (c *Client) Whoami(ctx context.Context) (*Identity, error) {
 	}
 	return id, nil
 }
+
+// LinkBlocking creates the "blocks" relation, in the direction ListIssues
+// reads it back: a relation on the blocker naming the blocked issue as
+// its relatedIssue.
+func (c *Client) LinkBlocking(ctx context.Context, blockerID, blockedID string) error {
+	const q = `mutation LinkBlocking($input: IssueRelationCreateInput!) {
+	  issueRelationCreate(input: $input) { success }
+	}`
+	var data struct {
+		IssueRelationCreate struct {
+			Success bool `json:"success"`
+		} `json:"issueRelationCreate"`
+	}
+	input := map[string]any{
+		"issueId":        blockerID,
+		"relatedIssueId": blockedID,
+		"type":           "blocks",
+	}
+	if err := c.do(ctx, q, map[string]any{"input": input}, &data); err != nil {
+		return err
+	}
+	if !data.IssueRelationCreate.Success {
+		return fmt.Errorf("linear: issueRelationCreate(%s blocks %s) reported failure", blockerID, blockedID)
+	}
+	return nil
+}

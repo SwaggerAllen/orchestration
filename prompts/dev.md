@@ -40,7 +40,7 @@ the diff.
   unannounced component — one added under the project's component paths
   and named nowhere in the ticket. Theme tokens are on your word alone.
   If the scope needs either and didn't name it, that is a push-back.
-- **Committing nothing is a legal outcome, and there are three of them.**
+- **Committing nothing is a legal outcome, and there are four of them.**
   Change no files, write the outcome file named under Mechanics, and put
   the full argument in `summary` as well as in your hand-back:
 
@@ -55,11 +55,33 @@ the diff.
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
     `Designing`, and they decide whether it is redesigned or rescoped.
+  - `author-only` — the work is somewhere you cannot land a change.
+    Two kinds, and both are facts about your run rather than judgments:
 
-  Pick the one that is true. All three park the ticket in `Blocked`
-  under their own label, and each asks a different thing of a human — a
-  wrong one sends the ticket to the wrong question. If none of them
-  fits, do the work.
+    A path in this repo that is author-owned — `.github/workflows/**`
+    or `pipeline.config.json` (DESIGN §5). Your push carries no
+    `workflow` scope, so a commit touching a workflow file is rejected
+    by GitHub and takes the whole run down with it, hand-back included.
+    Do not commit one to find out.
+
+    Or another repository entirely. The fix for a gate that never runs,
+    a runner that lacks a service, or a prompt that misleads you lives
+    in the pipeline's own repo, and you are checked out in this one.
+
+    Either way: name the file and the change it needs, precisely enough
+    that the author can make it without re-deriving your reasoning.
+    Your summary becomes a ticket: the harness files the author-only
+    half as its own issue and links it as a blocker of this one, so
+    write it for someone who has not read your scope.
+
+    Reach for this last. Project code has almost no reason to touch the
+    machinery that delivers it, so a ticket that needs an author-only
+    path is usually one that was scoped wrong — check that the change
+    you think you need is really there before you park on it.
+
+  Pick the one that is true. All four park the ticket in `Blocked`, and
+  each asks a different thing of a human — a wrong one sends the ticket
+  to the wrong question. If none of them fits, do the work.
 
   **Do not manufacture a diff to avoid looking idle.** A silently worse
   version and a silent third thing are the two things §2.7 exists to

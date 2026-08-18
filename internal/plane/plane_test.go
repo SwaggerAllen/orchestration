@@ -289,3 +289,134 @@ func TestBuildSkipsTriageProposals(t *testing.T) {
 		t.Error("the real ticket went missing — triage skipping must not swallow the queue")
 	}
 }
+
+// A proposal about a path no agent can land a change to is labelled as
+// it is filed, so it never reaches a queue that would dispatch it into
+// a rejected push.
+//
+// The push token carries no `workflow` scope on any GitHub repository,
+// and the rejected push takes the whole run down with it, hand-back
+// included — so "the dev agent tries and finds out" is the one outcome
+// worth spending a label to avoid.
+func TestFileTriageProposalMarksAuthorOnlySubjects(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+
+	cases := []struct {
+		subject string
+		want    bool
+	}{
+		{".github/workflows/ci.yml", true},
+		{".github/workflows/pipeline-agent-dev.yml", true},
+		{"pipeline.config.json", true},
+		// Back-quoted the way a prompt renders a path.
+		{"`.github/workflows/ci.yml`", true},
+		// Ordinary subjects, which are most of them.
+		{"lib/catapult/foundation.ex", false},
+		{"qualityGates", false},
+		{"mix xref graph --label compile-connected", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		title := "proposal about " + c.subject
+		if err := p.FileTriageProposal(ctx, title, "why", "debt", c.subject, false, "m/"+c.subject); err != nil {
+			t.Fatalf("%q: %v", c.subject, err)
+		}
+		issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got bool
+		for _, i := range issues {
+			if i.Title != title {
+				continue
+			}
+			for _, l := range i.Labels {
+				if l == core.LabelAuthorOnly {
+					got = true
+				}
+			}
+		}
+		if got != c.want {
+			t.Errorf("subject %q: author-only = %v, want %v", c.subject, got, c.want)
+		}
+	}
+}
+
+// The label is provisioned on the way through rather than passed into
+// the create. Creating an issue with a label the team does not carry
+// fails the whole create — which is how a boundary loses a proposal it
+// spent a model run computing — while attaching one afterwards goes
+// through the path that creates it on demand.
+func TestFileTriageProposalSurvivesAMissingAuthorOnlyLabel(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	tr.DropLabel(cfg.Tracker.TeamID, core.LabelAuthorOnly)
+
+	if err := p.FileTriageProposal(ctx, "Arm the gates", "why", "debt", ".github/workflows/ci.yml", true, "m/gates"); err != nil {
+		t.Fatalf("a project without the label lost the proposal: %v", err)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	var labelled bool
+	for _, i := range issues {
+		for _, l := range i.Labels {
+			if l == core.LabelAuthorOnly {
+				labelled = true
+			}
+		}
+	}
+	if !labelled {
+		t.Error("the label was not provisioned on demand, so the ticket would be dispatched")
+	}
+}
+
+// The dedupe set is "what this project has already filed", not "what is
+// still sitting in Triage". Filtering to triage-category states meant a
+// proposal dropped out of the set the moment the author accepted it and
+// moved it into the queue — so the next scan that found the same thing
+// filed it a second time. Invisible while a milestone had one boundary
+// pass; routine once a second pass over the same milestone became an
+// ordinary thing to ask for.
+func TestFiledProposalsStayDedupedAfterLeavingTriage(t *testing.T) {
+	ctx := context.Background()
+	tr := tracker.NewMemory()
+	cfg := config.Sample()
+	if _, err := setup.Run(ctx, tr, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+	p := New(tr, cfg)
+
+	if err := p.FileTriageProposal(ctx, "Extract the cap module", "why", "debt", "lib/cap.ex", false, "M1/extract-cap"); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The author accepts it: out of intake and into the queue.
+	for _, i := range issues {
+		if strings.Contains(i.Description, "M1/extract-cap") {
+			id, err := p.StateIDFor(ctx, protocol.ReadyForDev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tr.UpdateIssueState(ctx, i.ID, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	filed, err := p.ListTriageProposals(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, f := range filed {
+		if f.Dedupe == "M1/extract-cap" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("an accepted proposal left the dedupe set, so the next scan would file it again: %+v", filed)
+	}
+}

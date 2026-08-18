@@ -238,6 +238,12 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 		// The boundary ticket has its own state meanings and its own
 		// owner; the matrix below would misjudge it (DESIGN §10).
 		return nil, false
+	case t.HasLabel(LabelAuthorOnly):
+		// An author-only ticket is the author's from Todo to Done, and
+		// the matrix below has no row for that: it would revert their
+		// close as a done-writer violation, every sweep, because the
+		// author moving it again is another arrival to judge (DESIGN §8).
+		return nil, false
 	case last.From == protocol.Blocked && last.Actor == RoleAuthor:
 		// Only the author moves a ticket out of Blocked, and they choose
 		// the state — any state (DESIGN §12).
@@ -490,6 +496,13 @@ func conflictBounce(t *Ticket) []Action {
 // sweep computes the same answers so the polled loop backstops lost events.
 func ciFor(s *Snapshot, t *Ticket) []Action {
 	if t.State != protocol.Checks || t.IsBoundary() {
+		return nil
+	}
+	// Author-only work bypasses the gates entirely (DESIGN §8). If one
+	// is sitting in Checks the author put it there by hand; dispatching
+	// reconcile against it would spend a model pass judging a diff no
+	// agent wrote against a scope no agent was given.
+	if t.HasLabel(LabelAuthorOnly) {
 		return nil
 	}
 	// A conflicted branch is checked first, and before CI, because it is
@@ -850,12 +863,22 @@ func awaitingDispatch(t *Ticket) bool {
 // devBusy: the dev agent is singular — busy if any ticket holds a live dev
 // run, or is sitting in a dev-owned state at all (a dead run there is the
 // stale-claim rule's business, not a reason to double-dispatch).
+//
+// The state clause is a proxy for "a dev run is out there", so it only
+// holds where a dev run could have put the ticket. Author-only tickets
+// are excluded for the same reason boundary tickets are: no agent will
+// ever be dispatched against one, and an author dragging theirs into In
+// progress — the obvious thing to do while working on it — would
+// otherwise freeze the whole dev queue until they closed it.
 func devBusy(s *Snapshot) bool {
 	for _, t := range s.Tickets {
 		if t.LiveRun(AgentDev) {
 			return true
 		}
-		if !t.IsBoundary() && (t.State == protocol.InProgress || t.State == protocol.Reworking) {
+		if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+			continue
+		}
+		if t.State == protocol.InProgress || t.State == protocol.Reworking {
 			return true
 		}
 	}

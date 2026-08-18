@@ -357,6 +357,36 @@ func softLabel(ctx context.Context, p *plane.Plane, res *ClaimResult, message, l
 	return message
 }
 
+// fileAuthorOnlyBlocker splits a dev run's author-only discovery in two:
+// the part no agent can do becomes its own ticket in Triage under the
+// author-only label, and it blocks the ticket that found it.
+//
+// Labelling the original instead was the first shape and it was wrong in
+// a way that only shows up later. The label makes the pipeline route
+// around a ticket in every state (DESIGN §8), so the ticket the run was
+// halfway through would stop being the pipeline's at all — and the
+// author, having made the one-line workflow change, would have to
+// remember to take the label off before anything else could move it.
+// The split says the same thing and costs nothing: the original stays
+// in the queue's world, parked in Blocked with an open blocker, which
+// the dispatcher and the pickup assertion already refuse to start.
+//
+// Soft, like the labels: a filing that fails says so in the comment
+// rather than taking the park down with it. The park is the part that
+// has to happen — an aborted run whose ticket stayed In progress is a
+// stale claim nobody filed.
+func fileAuthorOnlyBlocker(ctx context.Context, p *plane.Plane, res *ClaimResult, message string) string {
+	title := fmt.Sprintf("Author-only change needed by %s: %s", res.TicketKey, res.Title)
+	key, err := p.FileAuthorOnlyBlocker(ctx, res.TicketID, res.TicketKey, title, message)
+	if err != nil {
+		if key != "" {
+			return message + fmt.Sprintf("\n\n---\n\n_Filed `%s` for the author-only half, but it is not fully wired up (%v). Check its label and its blocking relation by hand._", key, err)
+		}
+		return message + fmt.Sprintf("\n\n---\n\n_The author-only half could not be filed as its own ticket (%v). This ticket is parked; file the change described above and link it as a blocker._", err)
+	}
+	return message + fmt.Sprintf("\n\n---\n\n_Filed `%s` for the author-only change, labelled `%s` and linked as a blocker of this ticket. This one stays in the queue's world: it starts again once that blocker closes._", key, core.LabelAuthorOnly)
+}
+
 // unexplainedMessage is what a zero-diff run leaves on the ticket when
 // it named no outcome of its own.
 //
@@ -391,7 +421,8 @@ The hand-back above is the run's own account and the only thing here that looked
 // run `pipeline agent abort --reason pushback` for a long time, an
 // instruction it was never once able to follow.
 type DevOutcome struct {
-	// Outcome: "done", "scope-satisfied", "needs-setup" or "pushback".
+	// Outcome: "done", "scope-satisfied", "needs-setup", "pushback" or
+	// "author-only".
 	// Absent file means "done" — an older prompt that never wrote one
 	// still finishes, and a run that produced nothing without saying why
 	// is caught by the commit count instead.
@@ -409,6 +440,7 @@ var devOutcomes = map[string]string{
 	"scope-satisfied": "scope-satisfied",
 	"needs-setup":     "needs-setup",
 	"pushback":        "pushback",
+	"author-only":     "author-only",
 }
 
 // LoadDevOutcome reads the dev model's outcome. A missing file is not an
@@ -432,7 +464,7 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 		o.Outcome = "done"
 	}
 	if _, ok := devOutcomes[o.Outcome]; !ok && o.Outcome != "done" {
-		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback", o.Outcome)
+		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback, author-only", o.Outcome)
 	}
 	if o.Outcome != "done" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("dev outcome: %q without its argument is a ticket nobody can act on — say what you found", o.Outcome)
@@ -440,7 +472,7 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 	return &o, nil
 }
 
-// Abort routes a run that cannot finish. Four reasons, and only
+// Abort routes a run that cannot finish. Five reasons, and only
 // "failed" is a failure:
 //
 //   - pushback   -> Blocked with the pushback label and the argument,
@@ -452,6 +484,10 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 //     account. Without its own flavor it lands in Blocked looking like a
 //     failure, and the Blocked column stops being readable as "what is
 //     broken".
+//   - author-only -> Blocked, plus an author-only ticket filed in Triage
+//     and linked as a blocker: the work is in a path no agent can land
+//     a change to (protocol.AuthorOnlyPaths). Not a failure and not a
+//     judgment — a fact about the token.
 //   - scope-satisfied -> Blocked with the scope-satisfied label: the
 //     ticket asks for what is already on main, so there was nothing to
 //     build. Almost always a duplicate of merged work. Also where a run
@@ -502,6 +538,13 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		to = protocol.Blocked
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"setup": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelNeedsSetup)
+	case "author-only":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: author-only without naming what has to change is a ticket the author cannot pick up")
+		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"author-only": "1"}}
+		message = fileAuthorOnlyBlocker(ctx, p, res, message)
 	case "scope-satisfied":
 		if strings.TrimSpace(message) == "" {
 			return fmt.Errorf("abort: scope-satisfied without saying what is already there is a ticket nobody can adjudicate")
@@ -510,7 +553,7 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"scope-satisfied": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelScopeSatisfied)
 	default:
-		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup or scope-satisfied, got %q", reason)
+		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup, scope-satisfied or author-only, got %q", reason)
 	}
 	if m != nil {
 		m.Fields["from"] = string(res.State)

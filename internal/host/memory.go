@@ -20,7 +20,7 @@ type Memory struct {
 	// Ancestry scripts IsAncestor: "ancestor..descendant" -> true.
 	// Identical SHAs are always ancestors, as in git.
 	Ancestry map[string]bool
-	// Files holds PutFileIfAbsent writes: path -> content.
+	// Files holds PutFile writes: path -> content.
 	Files map[string]string
 	// Deployments records RecordDeployment calls, in order.
 	Deployments []Deployment
@@ -170,12 +170,16 @@ func (m *Memory) RecordDeployment(_ context.Context, sha, environment string) er
 	return nil
 }
 
-func (m *Memory) PutFileIfAbsent(_ context.Context, path, content, _ string) (bool, error) {
+func (m *Memory) ReadFile(_ context.Context, path string) (string, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.Files[path]; exists {
-		return false, nil
-	}
+	c, ok := m.Files[path]
+	return c, ok, nil
+}
+
+func (m *Memory) PutFile(_ context.Context, path, content, _ string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Files[path] = content
-	return true, nil
+	return nil
 }

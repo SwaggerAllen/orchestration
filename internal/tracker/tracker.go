@@ -152,4 +152,11 @@ type Tracker interface {
 	// AssignIssue sets the assignee; "" unassigns. Assignment mirrors who
 	// has the ball (DESIGN §3).
 	AssignIssue(ctx context.Context, issueID, userID string) error
+	// LinkBlocking records that blockerID blocks blockedID — the same
+	// relation Issue.Blocks and Issue.BlockedBy are read back from, in
+	// the same direction. The pipeline reads blocking relations
+	// everywhere (ordering, pickup, the queue) and until now could only
+	// read them, so a run that discovered a dependency could name it in
+	// prose and nothing downstream could act on it.
+	LinkBlocking(ctx context.Context, blockerID, blockedID string) error
 }

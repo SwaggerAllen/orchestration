@@ -339,6 +339,26 @@ say so in the issue.
 | `systems/*.md` | Design (the sketch writes them; dev amends with a note, §4) |
 | Theme tokens | Design (by proposal; see §9) |
 | LiveViews, contexts, schemas, tests, everything else | Dev |
+| `.github/workflows/**` | **Author only** — no agent can land a change there |
+| `pipeline.config.json` | **Author only** — it declares what the run is judged by |
+
+**The last two rows are not a policy, they are a fact, and they are the reason `author-only`
+exists (§8).** An agent's push token carries no `workflow` scope on any GitHub repository, so a
+commit touching a workflow file is rejected by GitHub — and the rejected push takes the whole
+run down with it, hand-back included, which is the worst way to learn it. The config declares
+the gates, states and ownership the run is being scored against, so an agent editing it
+mid-ticket is an agent changing its own marking scheme.
+
+**A ticket whose work lives in either is labelled `author-only` and never dispatched.** Two
+things apply the label. A boundary proposal naming one of these paths as its `subject` is
+labelled when it is filed, which is mechanical and needs no judgment. A dev run that discovers
+it mid-work says so through its outcome file (§12) and parks — it must not commit the change to
+find out, because finding out costs the run.
+
+Neither route is complete on its own and neither is meant to be: a subject is free text and may
+name the work some other way, and a dev run only reaches the question if the ticket got that
+far. Between them they cover the cases anyone has hit. The author applies the label directly
+whenever they already know.
 
 **One PR per ticket, and it stays open through rework.** Design opens it as a draft; dev pushes
 to the same branch; reconciliation reviews it; a bounce is more commits on the same branch
@@ -522,7 +542,7 @@ and nothing is re-evaluated.
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing (§12). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn (§2.7). Parked for the author to redesign or rescope. |
-| `author-only` | This work is legal for nobody else. No design pass is dispatched and the dev queue skips it, in every state, so it moves only when the author moves it. |
+| `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
 
@@ -533,9 +553,42 @@ every file it needed was closed to it. That is a full run — checkout, toolchai
 to be told no, and repeated on every beat, because a refusal leaves the ticket in the queue.
 
 A label rather than a state, by the admission test: it says who owns the work, not where the
-work is, and the ticket still travels the ordinary states as the author does it. The author
-applies it; the boundary agent may propose it on a finding it can see is author-only, the same
-way it proposes everything else.
+work is, and the ticket still travels the ordinary states as the author does it.
+
+**The pipeline routes around a labelled ticket rather than handling it specially.** Skipping
+the dispatch alone was not enough: every other rule still applied to a ticket no agent would
+ever touch, and each one broke in its own way.
+
+| Rule | Author-only | Because |
+|---|---|---|
+| Dispatch (§13) | Skipped, in every state | Nothing an agent can land |
+| Pickup assertion (§9) | Refuses, every agent kind | The half that holds when a run arrives by hand or from a dispatch planned a beat before the label |
+| Writer matrix (§9) | Not judged | The workflow is Todo → Done and only the post-deploy check writes Done, so the author's close read as a violation and got reverted — and the revert is an arrival, so the next sweep judged it again |
+| Mutex (§6) | Not held | No agent ever observes it finishing, so a shared screen or system label would park the queue behind a human's calendar |
+| Dev singularity (§6) | Not counted | The dev agent is busy if any ticket sits in a dev-owned state, which infers a run from a state. An author dragging theirs into In progress — the obvious thing to do while working on it — would stop the whole queue |
+| CI and reconcile (§13) | Not dispatched | The gates are the pipeline's. Reconcile would spend a model pass judging a diff no agent wrote against a scope no agent was given |
+
+The boundary archive still sweeps them up. Its filter is the milestone and the state, not the
+labels, so a Done author-only ticket is archived and named in the retro note with the rest
+(§10) — routing around a ticket is not forgetting it.
+
+**Three things apply it**, and the first two are the ones that matter, because a label nothing
+writes is a label nobody remembers:
+
+1. **Filing.** A boundary proposal whose `subject` names a path in §5's author-only rows is
+   labelled as it is filed. Mechanical, no judgment, and it catches the common case — the debt
+   scan finding a gate that is declared and not armed.
+2. **A dev run**, on a ticket it files rather than on its own. A run that discovers mid-work
+   that its scope needs one of those paths says so through its outcome file; the harness files
+   the author-only half as its own ticket under this label, links it as a blocker, and parks
+   the original in `Blocked` (§12). It must not commit the change to find out: the push is
+   rejected and the run dies with the hand-back still in it. This is an escape hatch and
+   should stay a rare one — see §12 for why.
+3. **The author**, directly, whenever they already know.
+
+Removing the label is how the ticket goes back to the pipeline, and that is deliberate — the
+skip applies in every state, so a ticket left labelled after the author has done the
+author-only half will sit still rather than being picked up for the rest.
 
 **Ordering is derived, never stored.** Which ticket to start next, and what can run beside it,
 is a pure function of the graph the tracker already holds: open blocking relations, mutex
@@ -826,6 +879,27 @@ mechanism: no extra states, no special-casing of which state it re-entered from,
 comment thread doubles as a readable record of where it got to — which is what you want when it
 stalls overnight.
 
+**A completed pass ends the window, and a fourth comment says so.** The boundary ticket outlives
+its pass: the author closes the review, works the proposals through the pipeline, and moves it
+back to `In progress` for another look at what has landed since. That is a second pass, not a
+resume, and the two are indistinguishable to a reader that just unions every step comment on the
+ticket. So the hand-back posts a `close` comment — not a step to resume into, the terminator that
+says everything above it belongs to a pass that finished. A claim that sees one starts from
+nothing.
+
+Catapult's boundary is where this was found. `ORC-45` ran a full pass, filed five tickets, and
+was sent back two days later for a second look at the harness findings the runs since had
+recorded. The claim read the old `scan` and `file` comments, the workflow skipped the model step
+on `scan_done`, the file step skipped itself, and the run reached `Boundary review` in three
+seconds having read nothing and filed nothing — overwriting the previous pass's composition
+proposal with an empty one on the way past. Fast and green, which is the worst way for a pass to
+do nothing.
+
+The window still has one edge: a run that dies between posting `close` and moving the ticket
+leaves a pass that reads as finished, so the next entry redoes it. That costs one debt scan and
+files nothing new — the dedupe keys hold — and it is the trade for having the terminator be the
+last thing written rather than something a crash could skip.
+
 Deliberately not states. `Archiving`, `Scanning` and `Grooming` would all answer *who has the
 ball* identically — the boundary agent — and so fail the state admission test. The problem was
 never visibility of the step; it was re-entry.
@@ -837,8 +911,9 @@ never visibility of the step; it was re-entry.
 | Archive | Naturally idempotent; already-archived is a no-op. |
 | Debt scan | Read-mostly and convergent. |
 | Grooming re-rank | Convergent — the same inputs produce the same order. |
-| Retro note | Writes a file. **Must check whether this milestone's note already exists.** Existing wins, so a note is written once with whatever the archive step knew then — a note from before the merge shas were recorded stays without them, and the rehearsal reset reads it as a milestone that landed nothing. |
-| Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. |
+| Retro note | Writes a file. **Merged by issue key, not written once.** Existing-wins was the first rule and it made the note whatever the first pass knew, permanently: a second pass archived its tickets and their merge shas with nothing recording them, which is the one thing the note exists to prevent. Merging is idempotent for a resumed pass and additive for a new one, and a later entry wins on conflict because a pass that has shas for a ticket knows more than one that had none. |
+| Close comment | Posted last, after the hand-back's composition proposal. It is what makes the steps above belong to a pass rather than to a ticket. |
+| Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. The set it dedupes against is every issue in the project carrying a proposal marker — not just the ones still in Triage. Filtering to Triage meant a proposal left the set the moment the author accepted it, so the next pass that found the same thing filed it again. |
 
 ### Exclusions
 
@@ -974,7 +1049,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has five flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has six flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -996,6 +1071,27 @@ the comment and a label say which:
   the author decides.
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
   parks here rather than looping back to `Designing`.
+- **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
+  `.github/workflows/**` or `pipeline.config.json` (§5), or in another repository the run is
+  not checked out in — the pipeline's own, most often, when what needs fixing is a gate, a
+  runner or a prompt. A fact about the run rather than a judgment, and the one flavor reachable
+  without anything going wrong at all.
+
+  **This one splits the ticket rather than labelling it.** The harness files the author-only
+  half as its own ticket in Triage, labelled `author-only`, and links it as a blocker of the
+  ticket that found it; the original parks in `Blocked` unlabelled. Labelling the original was
+  the first shape, and it retires a ticket the pipeline can otherwise still do: the skip
+  applies in every state (§8), so after the author made the one-line workflow change they
+  would have to remember to take the label off before anything could move it. The blocking
+  relation says the same thing with machinery the queue already has — an open blocker stops
+  the dispatch and the pickup assertion both (§9) — and it closes on its own when the author
+  closes their half.
+
+  **It should almost never fire.** Project code has no reason to know about the workflows that
+  deliver it, so whether a ticket is author-only is normally knowable when it is written —
+  filed at the boundary from the proposal's `subject`, or by the author directly (§8). A dev
+  run discovering it mid-flight means the ticket was scoped wrong, and the filed blocker is
+  the record of that as much as it is the work.
 
 **A run that changes nothing states which of these it is, in a file.** The model has the model
 credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,

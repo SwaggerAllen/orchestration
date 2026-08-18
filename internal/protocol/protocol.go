@@ -152,3 +152,24 @@ const (
 	ScreenLabelPrefix = "screen:"
 	SystemLabelPrefix = "system:"
 )
+
+// AuthorOnlyPaths are the paths no agent can land a change to, whatever
+// the ticket says. A ticket whose work is in one of them carries the
+// author-only label (DESIGN §5, §8) and is never dispatched.
+//
+// Protocol rather than per-project config, because neither constraint is
+// a project's choice:
+//
+//   - .github/workflows/** — the agent's push token carries no `workflow`
+//     scope on any GitHub repository, and the rejected push takes the
+//     whole run down with it, hand-back included. Nothing about a
+//     project changes that.
+//   - pipeline.config.json — it declares the gates, the states and the
+//     ownership the run is being judged against. An agent editing it
+//     mid-ticket is an agent changing the rules it is scored by.
+//
+// Matched with filemap.Match, so `**` spans directories.
+var AuthorOnlyPaths = []string{
+	".github/workflows/**",
+	"pipeline.config.json",
+}

@@ -275,7 +275,14 @@ type RecordedMove struct {
 // author sends it back for rework it re-enters the queue and re-takes the
 // mutex then, which is the ordinary contention case rather than a special
 // one.
+// Author-only tickets never hold it: they are the author's from Todo to
+// Done and no agent will ever be dispatched against one (DESIGN §8), so
+// counting one would park every ticket sharing its screen or system
+// behind work the pipeline is not doing and cannot observe finishing.
 func (t *Ticket) HoldsMutex() bool {
+	if t.HasLabel(LabelAuthorOnly) {
+		return false
+	}
 	return t.InFlight() && t.State != protocol.Merged
 }
 
