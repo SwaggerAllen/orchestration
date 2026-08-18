@@ -98,9 +98,12 @@ func printOrder(w io.Writer, o *core.Order, milestone string) {
 		for _, t := range l.Tickets {
 			fmt.Fprintf(w, "\n  %s  %s\n", t.Key, t.Title)
 			fmt.Fprintf(w, "    %s\n", t.URL)
-			if t.Milestone != "" {
+			switch {
+			case t.Milestone != "":
 				fmt.Fprintf(w, "    state: %s   milestone: %s\n", t.State, t.Milestone)
-			} else {
+			case t.Uncommitted:
+				fmt.Fprintf(w, "    state: %s   milestone: none\n", t.State)
+			default:
 				fmt.Fprintf(w, "    state: %s\n", t.State)
 			}
 			if t.Note != "" {
@@ -146,8 +149,11 @@ func printOrderMarkdown(w io.Writer, o *core.Order, milestone string) {
 		}
 		for _, t := range l.Tickets {
 			fmt.Fprintf(w, "**[%s · %s](%s)** — `%s`", t.Key, t.Title, t.URL, t.State)
-			if t.Milestone != "" {
+			switch {
+			case t.Milestone != "":
 				fmt.Fprintf(w, " · milestone %s", t.Milestone)
+			case t.Uncommitted:
+				fmt.Fprintf(w, " · **no milestone**")
 			}
 			fmt.Fprintln(w)
 			if t.Note != "" {
