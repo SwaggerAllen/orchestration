@@ -161,7 +161,12 @@ type Ticket struct {
 	CI         CIInfo
 	Deploy     DeployStatus
 	Run        *Run
-	CreatedAt  time.Time
+	// LiveRuns is every run still executing against this ticket. Run
+	// collapses to one and that is right for every rule but one — see
+	// OtherLiveRun, and the two boundary agents that ran one ticket to
+	// completion because nothing could see them both.
+	LiveRuns  []Run
+	CreatedAt time.Time
 }
 
 // Snapshot is everything one sweep may consider. Durations that would
@@ -327,6 +332,32 @@ func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
 // kind ("" for any kind).
 func (t *Ticket) LiveRun(kind AgentKind) bool {
 	return t.Run != nil && t.Run.Live && (kind == "" || t.Run.Kind == kind)
+}
+
+// OtherLiveRun returns a run of this kind executing against this ticket
+// that is not the caller's, or nil.
+//
+// Run collapses to one run per ticket — the live one, or the most
+// recently ended — which is what every other rule wants and is exactly
+// wrong for this question. Two boundary agents ran ORC-45 to completion
+// concurrently and nothing refused the second: the pickup assertion asks
+// whether another *ticket* holds a live run of the kind, and both runs
+// were on the same ticket, so the ticket's own run was skipped as "mine"
+// by both of them. Whichever run Run happened to collapse to, the other
+// one recognised it as itself.
+func (t *Ticket) OtherLiveRun(kind AgentKind, runID string) *Run {
+	if runID == "" {
+		// No id to compare against, so every run looks like somebody
+		// else's. Refusing on that would break a claim whose harness
+		// could not tell it its own run id, which is worse than the race.
+		return nil
+	}
+	for i, r := range t.LiveRuns {
+		if r.ID != runID && (kind == "" || r.Kind == kind) {
+			return &t.LiveRuns[i]
+		}
+	}
+	return nil
 }
 
 // Label names the sweep reads. Defined here rather than in protocol to

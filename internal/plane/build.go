@@ -36,6 +36,10 @@ type Plane struct {
 	// triageStates are the team's Linear intake states, which the
 	// protocol deliberately does not map.
 	triageStates map[string]bool
+	// categoryByID is every team state's category, mapped or not. It is
+	// what lets an unmapped state be read rather than refused when its
+	// category already answers the only question the pipeline has.
+	categoryByID map[string]protocol.Category
 	// keyByID is filled by Build; Execute needs keys for dispatch inputs.
 	keyByID map[string]string
 	// stateOf is likewise filled by Build: the state each ticket was in
@@ -114,7 +118,9 @@ func (p *Plane) resolveStates(ctx context.Context) error {
 	// boundary agent just filed a finding" from "a protocol state was
 	// renamed in Linear".
 	p.triageStates = map[string]bool{}
+	p.categoryByID = map[string]protocol.Category{}
 	for _, s := range states {
+		p.categoryByID[s.ID] = s.Category
 		if s.Category == protocol.CategoryTriage {
 			p.triageStates[s.ID] = true
 		}
@@ -196,10 +202,32 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 				})
 				continue
 			}
-			// A state outside the protocol's table (a leftover team
-			// default) makes the ticket unreadable; failing loudly beats
-			// sweeping around it as if it weren't there.
-			return nil, fmt.Errorf("plane: issue %s is in a state the config doesn't map (state id %s)", i.Key, i.StateID)
+			// A resolved state the config doesn't name is still
+			// readable: its category answers the only question the
+			// pipeline has about it, which is that it is finished and
+			// not in the queue. Linear ships built-in Duplicate and
+			// Canceled states outside whatever the config named, and
+			// they are two taps away in the UI.
+			//
+			// Failing loudly was the original rule and it is right for a
+			// state that could mean work in flight — guessing there
+			// would put a ticket in the queue nobody put there. It was
+			// badly wrong here: marking ORC-47 Duplicate on Catapult
+			// took every sweep down for two hours, roughly thirty failed
+			// runs, because one ticket's state made the whole project's
+			// snapshot unreadable. The blast radius, not the strictness,
+			// was the defect.
+			if cat, known := p.categoryByID[i.StateID]; known {
+				switch cat {
+				case protocol.CategoryCanceled:
+					st = protocol.Canceled
+				case protocol.CategoryCompleted:
+					st = protocol.Done
+				}
+			}
+			if st == "" {
+				return nil, fmt.Errorf("plane: issue %s is in a state the config doesn't map (state id %s)", i.Key, i.StateID)
+			}
 		}
 		p.keyByID[i.ID] = i.Key
 		p.stateOf[i.ID] = st

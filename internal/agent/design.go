@@ -34,7 +34,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	if t == nil {
 		return nil, fmt.Errorf("design claim: no ticket %q in the project scope", ticketKey)
 	}
-	if err := core.VerifyPickup(snap, t.ID, core.AgentDesign); err != nil {
+	if err := core.VerifyPickup(snap, t.ID, core.AgentDesign, dispatchID); err != nil {
 		return nil, err
 	}
 

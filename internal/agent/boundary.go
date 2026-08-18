@@ -83,7 +83,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	if t == nil {
 		return nil, fmt.Errorf("boundary claim: no ticket %q in the project scope", ticketKey)
 	}
-	if err := core.VerifyPickup(snap, t.ID, core.AgentBoundary); err != nil {
+	if err := core.VerifyPickup(snap, t.ID, core.AgentBoundary, dispatchID); err != nil {
 		return nil, err
 	}
 

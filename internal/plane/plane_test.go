@@ -420,3 +420,54 @@ func TestFiledProposalsStayDedupedAfterLeavingTriage(t *testing.T) {
 		t.Errorf("an accepted proposal left the dedupe set, so the next scan would file it again: %+v", filed)
 	}
 }
+
+// One ticket in an unmapped state used to make the whole project's
+// snapshot unreadable. Marking ORC-47 with Linear's built-in Duplicate
+// state — two taps in the UI, not a misconfiguration — took every sweep
+// on Catapult down for about two hours and roughly thirty runs.
+//
+// A resolved state the config does not name is still readable: its
+// category answers the only question the pipeline has, which is that the
+// ticket is finished and not in the queue. Failing loudly stays the rule
+// where guessing could put work in the queue nobody put there.
+func TestBuildReadsUnmappedResolvedStatesByCategory(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+
+	dup, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Duplicate", Category: protocol.CategoryCanceled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shipped, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Released", Category: protocol.CategoryCompleted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := seedIssue(t, tr, cfg, "Filed twice", protocol.Todo)
+	released := seedIssue(t, tr, cfg, "Out the door", protocol.Todo)
+	bystander := seedIssue(t, tr, cfg, "Ordinary work", protocol.Todo)
+	if err := tr.UpdateIssueState(ctx, duplicate.ID, dup.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.UpdateIssueState(ctx, released.ID, shipped.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("one ticket's state broke the whole snapshot: %v", err)
+	}
+	want := map[string]protocol.State{
+		duplicate.ID: protocol.Canceled,
+		released.ID:  protocol.Done,
+		bystander.ID: protocol.Todo,
+	}
+	got := map[string]protocol.State{}
+	for _, tk := range snap.Tickets {
+		got[tk.ID] = tk.State
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("%s read as %q, want %q", id, got[id], w)
+		}
+	}
+}

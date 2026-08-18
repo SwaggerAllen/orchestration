@@ -12,7 +12,7 @@ import (
 // refusing to act when these checks fail is what closes that window. It
 // mirrors the sweep's dispatch conditions — a pickup the sweep would not
 // have planned is one the agent must not perform.
-func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
+func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) error {
 	t := s.ticket(ticketID)
 	if t == nil {
 		return fmt.Errorf("pickup: no ticket %q in the project scope — the project filter is part of the queue (DESIGN §2)", ticketID)
@@ -47,6 +47,22 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind) error {
 	if other := liveRunOfKind(s, t.ID, kind); other != nil {
 		return fmt.Errorf("pickup %s: %s agent already running on %s (run %s) — one agent of a kind at a time (DESIGN §6)",
 			t.Key, kind, other.Key, other.Run.ID)
+	}
+	// And the same question asked of this ticket, which the check above
+	// cannot answer because it skips the ticket's own run — deliberately,
+	// so a claim re-entering after a resume is not mistaken for a second
+	// agent. The exclusion is by ticket, so two runs on one ticket each
+	// looked at the other and saw themselves.
+	//
+	// That is what happened. ORC-45 was dispatched twice, 82 seconds
+	// apart, and both runs scanned the tree, filed proposals and aborted
+	// the ticket: about twenty-two minutes of duplicate model spend and
+	// a duplicated set of tickets. Comparing run ids rather than tickets
+	// keeps the resume case — a resumed claim carries the same id its
+	// run was dispatched under — and refuses the second agent.
+	if other := t.OtherLiveRun(kind, runID); other != nil {
+		return fmt.Errorf("pickup %s: %s run %s is already live on this ticket (this run is %s) — one agent of a kind at a time (DESIGN §6)",
+			t.Key, kind, other.ID, runID)
 	}
 
 	switch kind {

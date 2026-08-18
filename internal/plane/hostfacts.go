@@ -27,6 +27,7 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 	}
 
 	latestRun := map[string]host.AgentRun{}
+	liveRuns := map[string][]core.Run{}
 	for _, r := range runs {
 		prev, seen := latestRun[r.TicketKey]
 		// Prefer a live run; otherwise the most recently ended one. A
@@ -35,12 +36,21 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 		if !seen || (r.Live && !prev.Live) || (r.Live == prev.Live && r.EndedAt.After(prev.EndedAt)) {
 			latestRun[r.TicketKey] = r
 		}
+		// Kept unfolded as well, because the collapse above loses the
+		// one fact the pickup assertion needs: that there is more than
+		// one. Two boundary runs on ORC-45 each read the collapsed Run,
+		// each recognised it as its own, and both scanned the tree.
+		if r.Live {
+			liveRuns[r.TicketKey] = append(liveRuns[r.TicketKey],
+				core.Run{ID: r.ID, Kind: core.AgentKind(r.Kind), Live: true, EndedAt: r.EndedAt})
+		}
 	}
 
 	for _, t := range tickets {
 		if r, ok := latestRun[t.Key]; ok {
 			t.Run = &core.Run{ID: r.ID, Kind: core.AgentKind(r.Kind), Live: r.Live, EndedAt: r.EndedAt}
 		}
+		t.LiveRuns = liveRuns[t.Key]
 		pr := prForTicket(prs, t.Key)
 		if pr == nil {
 			continue
