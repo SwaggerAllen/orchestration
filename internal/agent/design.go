@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -210,6 +212,9 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 // ensureMutexLabels attaches the declared touch lists as mutex labels,
 // creating per-name labels on demand (DESIGN §6).
 func ensureMutexLabels(ctx context.Context, p *plane.Plane, ticketID string, o *DesignOutcome) error {
+	if err := verifyDeclaredDocs(p.Config.Root, o); err != nil {
+		return err
+	}
 	for _, s := range o.Screens {
 		if err := p.EnsureMutexLabel(ctx, ticketID, protocol.ScreenLabelPrefix+s); err != nil {
 			return err
@@ -221,4 +226,90 @@ func ensureMutexLabels(ctx context.Context, p *plane.Plane, ticketID string, o *
 		}
 	}
 	return nil
+}
+
+// verifyDeclaredDocs refuses a touch list naming a doc that does not
+// exist, before the label is created from it.
+//
+// The label and the doc filename are one string in two places: the CI
+// audit derives the label it requires as "system:" plus the doc's
+// filename without .md (internal/filemap), and nothing until now
+// compared the declared name against the directory. A design pass that
+// wrote core-dsl where the doc is core_dsl.md therefore produced
+// system:core-dsl — a real label, taking part in the mutex, that no
+// diff could ever satisfy.
+//
+// Catapult's ORC-5 is the measurement. The mismatch survived the design
+// pass, the author's sign-off and a full dev run — 22 modules, 60 tests,
+// three commits — and surfaced as 28 audit violations on every path the
+// ticket was about, at which point the only available outcome was a
+// push-back asking a human to rename a label. The information needed to
+// refuse was present at the moment the label was created.
+//
+// A directory with no docs at all is not an error and is not checked:
+// the audit iterates docs, so with none of them no path is mapped, no
+// label is required, and a declared name constrains nothing. Refusing
+// there would fail every project that has not written its first system
+// doc, over a label that cannot fail CI.
+func verifyDeclaredDocs(root string, o *DesignOutcome) error {
+	var problems []string
+	check := func(dir, prefix string, declared []string) error {
+		if len(declared) == 0 {
+			return nil
+		}
+		docs, err := filemap.LoadDir(filepath.Join(root, dir))
+		if err != nil {
+			return fmt.Errorf("design finish: reading %s/: %w", dir, err)
+		}
+		if len(docs) == 0 {
+			return nil
+		}
+		known := map[string]bool{}
+		for _, d := range docs {
+			known[d.Name] = true
+		}
+		for _, name := range declared {
+			if known[name] {
+				continue
+			}
+			msg := fmt.Sprintf("%s%s names %s/%s.md, which does not exist", prefix, name, dir, name)
+			if near := nearestDoc(name, docs); near != "" {
+				// The near miss is almost always the whole story — a
+				// hyphen for an underscore — and naming it turns a
+				// refusal into an instruction.
+				msg += fmt.Sprintf(" (did you mean %s%s, for %s/%s.md?)", prefix, near, dir, near)
+			}
+			problems = append(problems, msg)
+		}
+		return nil
+	}
+	if err := check("screens", protocol.ScreenLabelPrefix, o.Screens); err != nil {
+		return err
+	}
+	if err := check("systems", protocol.SystemLabelPrefix, o.Systems); err != nil {
+		return err
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	// All of them, not the first: a pass that declared two bad names
+	// should not have to be run twice to learn the second one.
+	return fmt.Errorf("design finish: the touch list names %d doc(s) that do not exist, and a mutex label the CI audit derives from a filename can only be satisfied by that exact spelling (DESIGN §6, §9):\n  - %s",
+		len(problems), strings.Join(problems, "\n  - "))
+}
+
+// nearestDoc finds a doc whose name differs from the declared one only
+// in the separators and case — the mismatch that actually happens,
+// since both spellings read identically to a person.
+func nearestDoc(name string, docs []filemap.Doc) string {
+	fold := func(s string) string {
+		return strings.ToLower(strings.NewReplacer("-", "", "_", "", " ", "").Replace(s))
+	}
+	want := fold(name)
+	for _, d := range docs {
+		if fold(d.Name) == want {
+			return d.Name
+		}
+	}
+	return ""
 }

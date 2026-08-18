@@ -349,3 +349,103 @@ func TestBaseSHAFallsBackToTheDescription(t *testing.T) {
 		t.Errorf("baseSHA = %q, want empty", got)
 	}
 }
+
+// The label and the doc filename are one string in two places: CI
+// derives the label it requires from the filename, and the design pass
+// declares the name the label is made from. Nothing compared them.
+//
+// Catapult's ORC-5 measured the cost. A pass declared `core-dsl` where
+// the doc is `systems/core_dsl.md`, and `system:core-dsl` — a real
+// label, taking part in the mutex — survived design, the author's
+// sign-off and a full dev run (22 modules, 60 tests, three commits)
+// before surfacing as 28 audit violations on every path the ticket was
+// about. The only outcome left to the run was a push-back asking a
+// human to rename a label.
+func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "core_dsl", "lib/dsl/**")
+	writeDoc(t, cfg, "screens", "home", "lib/web/home/**")
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_60", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl"}}
+	err = FinishDesign(ctx, p, h, res, o, "", "")
+	if err == nil {
+		t.Fatal("a touch list naming a doc that does not exist was accepted")
+	}
+	if !strings.Contains(err.Error(), "system:core_dsl") {
+		t.Errorf("the refusal does not name the spelling that would work: %v", err)
+	}
+	// And it refuses before anything moves: a ticket that advanced under
+	// an unsatisfiable label is the failure being prevented.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
+		t.Errorf("state = %q, want the ticket left where it was", got)
+	}
+
+	// The correct spelling passes, and so does a screen beside it.
+	o = &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core_dsl"}, Screens: []string{"home"}}
+	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+		t.Fatalf("a touch list naming real docs was refused: %v", err)
+	}
+}
+
+// Every bad name at once. A pass that declared two should not have to be
+// re-run to learn about the second.
+func TestDesignReportsEveryUnknownDocAtOnce(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "core_dsl", "lib/dsl/**")
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_61", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl", "foundation"}}
+	err = FinishDesign(ctx, p, h, res, o, "", "")
+	if err == nil {
+		t.Fatal("unknown docs were accepted")
+	}
+	for _, want := range []string{"core-dsl", "foundation"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q: %v", want, err)
+		}
+	}
+}
+
+// A project that has not written its first system doc declares nothing
+// the audit can require, so a name there constrains nothing and cannot
+// fail CI. Refusing would break those projects over a label that is
+// inert — the check has to be silent exactly where it has no subject.
+func TestDesignAcceptsAnyNameWhenTheProjectHasNoDocs(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_62", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"anything"}}
+	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+		t.Fatalf("a project with no system docs was refused: %v", err)
+	}
+}
+
+func writeDoc(t *testing.T, cfg *config.Config, dir, name, glob string) {
+	t.Helper()
+	d := filepath.Join(cfg.Root, dir)
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\npaths:\n  - " + glob + "\n---\n\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
