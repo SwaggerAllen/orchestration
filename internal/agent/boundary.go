@@ -147,7 +147,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 		plan.Roster = append(plan.Roster, st)
 	}
 
-	plan.Backlog = DebtBacklog(snap.Tickets)
+	plan.Backlog = DebtBacklog(snap)
 
 	// The scan proposes tickets, so it is subject to the confirmed
 	// non-asks the same way design is (DESIGN §4) — a debt scan that

@@ -39,9 +39,24 @@ type CompositionEntry struct {
 // milestone roster and nothing else, so two boundaries in a row returned
 // an empty ranking because they could not read the ordering, not because
 // the ordering looked right.
-func DebtBacklog(tickets []*core.Ticket) []CompositionEntry {
+//
+// Reads the snapshot's Triage list as well as its tickets, and the
+// composition is why. Filed proposals sit in a triage-category state,
+// which Build skips — so a composition running seconds after the file
+// step could not see a single thing that step had just created. On
+// Catapult's ORC-45 that printed "Nothing to schedule — no unscheduled
+// tech-debt tickets" directly beneath "Filed 8 proposals". The code
+// already said this was meant to work: the composition is posted after
+// filing precisely because it "can only be computed once this
+// boundary's findings are tickets".
+//
+// An unaccepted proposal is a candidate, not a commitment. Naming one
+// here proposes it for the next debt milestone, which is the same thing
+// the author is about to accept or decline — and assigning the
+// milestone stays theirs either way.
+func DebtBacklog(snap *core.Snapshot) []CompositionEntry {
 	var out []CompositionEntry
-	for _, t := range tickets {
+	for _, t := range append(append([]*core.Ticket{}, snap.Tickets...), snap.Triage...) {
 		if t.Resolved() || t.IsBoundary() || t.Milestone != "" {
 			continue // resolved, machinery, or already scheduled
 		}
@@ -81,7 +96,7 @@ func ProposeComposition(ctx context.Context, p *plane.Plane, plan *BoundaryPlan,
 		return err
 	}
 
-	candidates := DebtBacklog(snap.Tickets)
+	candidates := DebtBacklog(snap)
 
 	var chosen []CompositionEntry
 	nonGating := 0

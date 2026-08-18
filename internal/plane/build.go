@@ -166,6 +166,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 	}
 
 	tickets := make([]*core.Ticket, 0, len(issues))
+	var triage []*core.Ticket
 	p.keyByID = map[string]string{}
 	p.stateOf = map[string]protocol.State{}
 	for _, i := range issues {
@@ -182,6 +183,17 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 				// its own next snapshot by doing its job: it filed three
 				// proposals and then died on the first one it read back,
 				// after all three steps had already succeeded.
+				//
+				// Collected into Triage rather than dropped. Skipping is
+				// still the rule for everything that reasons about
+				// state; the one pass that needs to see a filed proposal
+				// is the composition, which runs seconds after filing
+				// and reported an empty backlog because of this.
+				triage = append(triage, &core.Ticket{
+					ID: i.ID, Key: i.Key, Title: i.Title, Description: i.Description, URL: i.URL,
+					StateSince: i.StateSince, CreatedAt: i.CreatedAt,
+					Labels: i.Labels, Priority: i.Priority, Milestone: i.Milestone,
+				})
 				continue
 			}
 			// A state outside the protocol's table (a leftover team
@@ -250,6 +262,7 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 		StaleClaimGrace:  p.Config.StaleClaimGrace.Duration(),
 		DeployTimeout:    p.Config.Deploy.Timeout.Duration(),
 		Tickets:          tickets,
+		Triage:           triage,
 	}, nil
 }
 

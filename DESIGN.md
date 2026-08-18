@@ -983,6 +983,19 @@ the invariant above turns unstarted current-milestone work into `Todo`, so an ag
 milestones would be an agent committing scope nobody accepted. Milestone assignment is the
 author's, always.
 
+**Candidates include proposals still sitting in Triage,** which is the whole reason the
+composition is posted after the file step rather than before it — the tickets it names are the
+ones that step just created. Snapshots skip triage-category states, deliberately, because a
+proposal nobody has accepted is not dispatchable work; the snapshot therefore carries them in a
+separate list that only this pass reads. Without it the composition could not see a single thing
+the boundary had filed: Catapult's `ORC-45` printed "Nothing to schedule — no unscheduled
+tech-debt tickets" directly beneath "Filed 8 proposals". It went unnoticed while proposals landed
+in `Backlog` — the filer's fallback when a team has no Triage state — and surfaced the moment
+that team gained one.
+
+An unaccepted proposal is a candidate, not a commitment, which is the same thing every entry in
+this list is. The author accepts or declines it and assigns the milestone in one pass either way.
+
 ---
 
 ## 11. Reconciliation

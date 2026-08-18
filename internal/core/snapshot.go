@@ -193,6 +193,20 @@ type Snapshot struct {
 	StaleClaimGrace time.Duration
 	DeployTimeout   time.Duration
 	Tickets         []*Ticket
+	// Triage holds the issues in a triage-category state: filed
+	// proposals the author has not accepted or declined yet. They carry
+	// no protocol state, which is exactly why they are here and not in
+	// Tickets — every rule in this package quantifies over Tickets, and
+	// a proposal that appeared there would be dispatchable work nobody
+	// had agreed to (DESIGN §10).
+	//
+	// Kept rather than dropped because one pass does need them. The
+	// boundary's composition proposal names what the next debt milestone
+	// should hold, and it runs seconds after the file step created these
+	// — so a composition reading only Tickets reported "nothing to
+	// schedule" immediately after filing eight proposals. Catapult's
+	// ORC-45, second pass.
+	Triage []*Ticket
 }
 
 const urgentPriority = 1
