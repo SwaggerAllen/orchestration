@@ -1030,8 +1030,10 @@ the comment and a label say which:
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
   parks here rather than looping back to `Designing`.
 - **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
-  `.github/workflows/**` or `pipeline.config.json` (§5). A fact about the token rather than a
-  judgment, and the one flavor a run can reach without anything going wrong at all.
+  `.github/workflows/**` or `pipeline.config.json` (§5), or in another repository the run is
+  not checked out in — the pipeline's own, most often, when what needs fixing is a gate, a
+  runner or a prompt. A fact about the run rather than a judgment, and the one flavor reachable
+  without anything going wrong at all.
 
 **A run that changes nothing states which of these it is, in a file.** The model has the model
 credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,

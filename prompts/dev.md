@@ -55,14 +55,21 @@ the diff.
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
     `Designing`, and they decide whether it is redesigned or rescoped.
-  - `author-only` — the work is in a path you cannot land a change to:
-    `.github/workflows/**` or `pipeline.config.json` (DESIGN §5). This
-    is a fact about your token, not a judgment. Your push carries no
+  - `author-only` — the work is somewhere you cannot land a change.
+    Two kinds, and both are facts about your run rather than judgments:
+
+    A path in this repo that is author-owned — `.github/workflows/**`
+    or `pipeline.config.json` (DESIGN §5). Your push carries no
     `workflow` scope, so a commit touching a workflow file is rejected
-    by GitHub and takes the whole run down with it, hand-back included
-    — so do not commit one to find out. Name the file and the change it
-    needs, precisely enough that the author can make it without
-    re-deriving your reasoning.
+    by GitHub and takes the whole run down with it, hand-back included.
+    Do not commit one to find out.
+
+    Or another repository entirely. The fix for a gate that never runs,
+    a runner that lacks a service, or a prompt that misleads you lives
+    in the pipeline's own repo, and you are checked out in this one.
+
+    Either way: name the file and the change it needs, precisely enough
+    that the author can make it without re-deriving your reasoning.
 
   Pick the one that is true. All four park the ticket in `Blocked`
   under their own label, and each asks a different thing of a human — a
