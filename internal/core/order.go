@@ -83,18 +83,35 @@ const (
 
 // ComputeOrder builds the layering.
 //
-// Scope: a milestone name limits the answer to it; "" spans the project.
-// The wide case needs care, because milestones are worked in sequence
-// and that constraint lives nowhere in the blocker graph — a ticket in a
-// later milestone is commonly filed with no dependencies at all, since
-// the milestone itself is the dependency. Read literally, such a ticket
-// has nothing blocking it and lands in "Ready now" beside work that
-// genuinely can start today, which is the report confidently
-// recommending something that must not be started. So across a wide
-// scope, anything outside the current milestone is held out of the
-// startable layers and says why.
+// Scope: a milestone name limits the answer to it; "" spans the project,
+// which is the default the report is asked for. The wide case needs
+// care, because milestones are worked in sequence and that constraint
+// lives nowhere in the blocker graph — a ticket in a later milestone is
+// commonly filed with no dependencies at all, since the milestone itself
+// is the dependency. Read literally, such a ticket has nothing blocking
+// it and lands in "Ready now" beside work that genuinely can start
+// today, which is the report confidently recommending something that
+// must not be started. So across a wide scope, anything outside the
+// current milestone is held out of the startable layers and says why.
 //
-// Tickets already resolved are absent entirely — they are not waiting on
+// A ticket carrying no milestone is startable but uncommitted, and the
+// two are separate axes. It is not held out of the startable layers,
+// because nothing sequences it and the dispatchers do not read
+// milestones at all — the queue will take it the moment it reaches
+// Designing. But it is absent from any named milestone's scope, because
+// a milestone's roster is the work committed to it and nobody has
+// committed this. So the wide view names it and the narrow view does
+// not, which is the difference between "ready now" and "in this
+// milestone".
+//
+// It arrives that way honestly: the boundary files proposals into
+// Triage, accepting one means moving it out and assigning a milestone,
+// and assigning a milestone is a commitment the author owns (DESIGN
+// §10). So the accept happens and the assignment lags. Measured on
+// Catapult: four tech-debt tickets in Todo — ORC-48, ORC-50, ORC-51,
+// ORC-52 — invisible to a report that named one.
+//
+// Tickets already resolved are absent entirely: they are not waiting on
 // anything and nothing waits on them.
 func ComputeOrder(s *Snapshot, milestone string) *Order {
 	byID := map[string]*Ticket{}
@@ -164,7 +181,17 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 	gated := map[string]bool{}
 	if milestone == "" && s.CurrentMilestone != "" {
 		for _, t := range considered {
-			if t.Milestone != s.CurrentMilestone && !started[t.ID] {
+			// A ticket carrying no milestone is not held back by one.
+			// Startable and committed are different axes: the gate asks
+			// "is a milestone in front of this", and the answer for a
+			// bare ticket is no — nothing sequences it, and neither
+			// dispatcher filters on milestone, so the queue will take it
+			// as soon as it reaches Designing. It is uncommitted, not
+			// future, and those want opposite treatment.
+			if t.Milestone == "" || started[t.ID] {
+				continue
+			}
+			if t.Milestone != s.CurrentMilestone {
 				gated[t.ID] = true
 			}
 		}

@@ -21,14 +21,13 @@ on:
   workflow_dispatch:
     inputs:
       milestone:
-        description: Scope to one milestone by name (blank = the current one)
+        description: >
+          Scope to one milestone by name. Blank spans every milestone,
+          which is the useful default — anything outside the current one
+          is held out of the startable layers and says why, so the wide
+          view is honest rather than noisy.
         required: false
         type: string
-      all:
-        description: Span every milestone. Anything outside the current one is held out of the startable layers and says why.
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -56,13 +55,10 @@ jobs:
         # starts being shell. Harmless here and a habit worth keeping.
         env:
           MILESTONE: ${{ inputs.milestone }}
-          ALL: ${{ inputs.all }}
         run: |
           set -euo pipefail
           ARGS=(--config "$GITHUB_WORKSPACE/pipeline.config.json")
-          if [ "$ALL" = "true" ]; then
-            ARGS+=(--all)
-          elif [ -n "$MILESTONE" ]; then
+          if [ -n "$MILESTONE" ]; then
             ARGS+=(--milestone "$MILESTONE")
           fi
           pipeline order "${ARGS[@]}"
