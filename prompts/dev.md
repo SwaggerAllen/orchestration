@@ -70,11 +70,18 @@ the diff.
 
     Either way: name the file and the change it needs, precisely enough
     that the author can make it without re-deriving your reasoning.
+    Your summary becomes a ticket: the harness files the author-only
+    half as its own issue and links it as a blocker of this one, so
+    write it for someone who has not read your scope.
 
-  Pick the one that is true. All four park the ticket in `Blocked`
-  under their own label, and each asks a different thing of a human — a
-  wrong one sends the ticket to the wrong question. If none of them
-  fits, do the work.
+    Reach for this last. Project code has almost no reason to touch the
+    machinery that delivers it, so a ticket that needs an author-only
+    path is usually one that was scoped wrong — check that the change
+    you think you need is really there before you park on it.
+
+  Pick the one that is true. All four park the ticket in `Blocked`, and
+  each asks a different thing of a human — a wrong one sends the ticket
+  to the wrong question. If none of them fits, do the work.
 
   **Do not manufacture a diff to avoid looking idle.** A silently worse
   version and a silent third thing are the two things §2.7 exists to

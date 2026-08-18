@@ -123,15 +123,9 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 	if err := p.resolveStates(ctx); err != nil {
 		return err
 	}
-	states, err := p.Tracker.ListStates(ctx, p.Config.Tracker.TeamID)
+	stateID, err := p.triageStateID(ctx)
 	if err != nil {
 		return err
-	}
-	stateID := p.idByState[protocol.Backlog]
-	for _, s := range states {
-		if s.Category == protocol.CategoryTriage {
-			stateID = s.ID
-		}
 	}
 	label := "tech-debt"
 	switch kind {
@@ -256,4 +250,107 @@ func (p *Plane) ListTriageProposals(ctx context.Context) ([]TriageProposal, erro
 		out = append(out, tp)
 	}
 	return out, nil
+}
+
+// triageStateID resolves where a filed proposal lands: the team's Triage
+// state when one exists, Backlog otherwise. Triage is Linear-managed, so
+// setup cannot guarantee it (DESIGN §10). Callers must have resolved
+// states first.
+func (p *Plane) triageStateID(ctx context.Context) (string, error) {
+	states, err := p.Tracker.ListStates(ctx, p.Config.Tracker.TeamID)
+	if err != nil {
+		return "", err
+	}
+	stateID := p.idByState[protocol.Backlog]
+	for _, s := range states {
+		if s.Category == protocol.CategoryTriage {
+			stateID = s.ID
+		}
+	}
+	return stateID, nil
+}
+
+// FileAuthorOnlyBlocker is the dev run's escape hatch (DESIGN §8, §12).
+// A run that discovers mid-work that its scope needs a path no agent can
+// land a change to files the author-only half as its own ticket in
+// Triage and links it as a blocker of the ticket that found it.
+//
+// Split rather than labelled in place, and the difference matters. The
+// label makes the pipeline route around a ticket in every state, so
+// labelling the original would retire work the pipeline is otherwise
+// able to do — and hand the author a ticket they have to remember to
+// un-label before the rest of it can move. The blocking relation says
+// the same thing without that cost: the original stays the pipeline's,
+// parked in Blocked, and the queue already refuses to start a ticket
+// with an open blocker (DESIGN §9).
+//
+// Returns the filed ticket's key, or the existing one when an open
+// author-only blocker is already in front of this ticket — there is one
+// obstacle however many times a run walks into it.
+func (p *Plane) FileAuthorOnlyBlocker(ctx context.Context, blockedID, blockedKey, title, description string) (string, error) {
+	if err := p.resolveStates(ctx); err != nil {
+		return "", err
+	}
+	// Dedupe off the relation rather than off a marker key, because the
+	// relation is the thing that has to be true. A marker in a Triage
+	// description only reads back when the team has a Triage state at
+	// all — Triage is Linear-managed and setup cannot provision it — so
+	// a project without one would file a fresh blocker every run.
+	issues, err := p.Tracker.ListIssues(ctx, p.Config.Tracker.TeamID, p.Config.Tracker.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	byID := map[string]tracker.Issue{}
+	for _, i := range issues {
+		byID[i.ID] = i
+	}
+	for _, id := range byID[blockedID].BlockedBy {
+		other, ok := byID[id]
+		if !ok || !hasLabel(other.Labels, core.LabelAuthorOnly) {
+			continue
+		}
+		// A closed one is history: the author made that change and the
+		// run has walked into a different author-only path, or the same
+		// one again for a new reason. Either way it needs its own ticket.
+		if st, ok := p.stateByID[other.StateID]; ok && (st == protocol.Done || st == protocol.Canceled) {
+			continue
+		}
+		return other.Key, nil
+	}
+	stateID, err := p.triageStateID(ctx)
+	if err != nil {
+		return "", err
+	}
+	issue, err := p.Tracker.CreateIssue(ctx, tracker.NewIssue{
+		TeamID:      p.Config.Tracker.TeamID,
+		ProjectID:   p.Config.Tracker.ProjectID,
+		Title:       title,
+		Description: description,
+		StateID:     stateID,
+	})
+	if err != nil {
+		return "", err
+	}
+	// Label after the create, then link: a create carrying a label the
+	// team does not have fails outright, while AddTicketLabel provisions
+	// it on the way through. Neither failure is worth discarding the
+	// filed ticket over — an under-labelled or unlinked blocker is
+	// recoverable by hand, a lost one is not — so both are reported
+	// with the key so the caller can say what landed.
+	if err := p.AddTicketLabel(ctx, issue.ID, core.LabelAuthorOnly); err != nil {
+		return issue.Key, fmt.Errorf("filed %s but could not mark it %s: %w", issue.Key, core.LabelAuthorOnly, err)
+	}
+	if err := p.Tracker.LinkBlocking(ctx, issue.ID, blockedID); err != nil {
+		return issue.Key, fmt.Errorf("filed %s but could not link it as a blocker of %s: %w", issue.Key, blockedKey, err)
+	}
+	return issue.Key, nil
+}
+
+func hasLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }

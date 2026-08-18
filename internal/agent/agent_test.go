@@ -579,8 +579,10 @@ func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
 		{"pushback", protocol.Blocked, core.LabelPushback},
 		// A fact about the token, not a judgment: the push carries no
 		// workflow scope, so a commit touching .github/workflows is
-		// rejected and the rejection takes the run down with it.
-		{"author-only", protocol.Blocked, core.LabelAuthorOnly},
+		// rejected and the rejection takes the run down with it. No
+		// label on this ticket — the author-only half is split off into
+		// its own, which TestAuthorOnlyRunSplitsOffItsBlocker covers.
+		{"author-only", protocol.Blocked, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.outcome, func(t *testing.T) {
@@ -602,7 +604,7 @@ func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
 				t.Errorf("opened a PR for a run that changed nothing: %+v", h.PRs)
 			}
 			issue := findIssue(t, tr, cfg, i.ID)
-			if !hasLabel(issue.Labels, c.label) {
+			if c.label != "" && !hasLabel(issue.Labels, c.label) {
 				t.Errorf("labels = %v, want %s", issue.Labels, c.label)
 			}
 			var argued bool
@@ -673,5 +675,98 @@ func TestNamedOutcomeWithCommitsSaysSoRatherThanFailing(t *testing.T) {
 	}
 	if !noted {
 		t.Error("the contradiction is not on the ticket, so the commits are invisible to whoever reads it")
+	}
+}
+
+// The dev-run escape hatch (DESIGN §8, §12). A run that finds its scope
+// needs a path no agent can land a change to splits the ticket in two:
+// the author-only half is filed on its own and blocks the original,
+// which stays the pipeline's.
+//
+// Labelling the original was the first shape. The label makes the
+// pipeline route around a ticket in every state, so it would have
+// retired work the pipeline could still do, and left the author holding
+// a label they had to remember to remove.
+func TestAuthorOnlyRunSplitsOffItsBlocker(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Add a farewell", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DevOutcome{Outcome: "author-only", Summary: "`.github/workflows/ci.yml` needs the gate armed."}
+	if err := Finish(ctx, p, h, res, "hand-back", 0, o); err != nil {
+		t.Fatal(err)
+	}
+
+	original := findIssue(t, tr, cfg, i.ID)
+	if hasLabel(original.Labels, core.LabelAuthorOnly) {
+		t.Errorf("the original was labelled %s, which retires it from the pipeline entirely", core.LabelAuthorOnly)
+	}
+
+	var blocker *tracker.Issue
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range issues {
+		if issues[k].ID != i.ID {
+			blocker = &issues[k]
+		}
+	}
+	if blocker == nil {
+		t.Fatal("no ticket was filed for the author-only half")
+	}
+	if !hasLabel(blocker.Labels, core.LabelAuthorOnly) {
+		t.Errorf("the filed ticket's labels = %v, want %s", blocker.Labels, core.LabelAuthorOnly)
+	}
+	if !strings.Contains(blocker.Description, "ci.yml") {
+		t.Errorf("the filed ticket does not say what has to change: %q", blocker.Description)
+	}
+	if len(blocker.Blocks) != 1 || blocker.Blocks[0] != i.ID {
+		t.Errorf("filed ticket blocks %v, want [%s]", blocker.Blocks, i.ID)
+	}
+	if len(original.BlockedBy) != 1 || original.BlockedBy[0] != blocker.ID {
+		t.Errorf("original blocked by %v, want [%s]", original.BlockedBy, blocker.ID)
+	}
+	// And the ticket says where its other half went, because the comment
+	// is the only place the author sees the link before opening it.
+	var named bool
+	for _, cm := range original.Comments {
+		if strings.Contains(cm.Body, blocker.Key) {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("nothing on %s names the ticket filed for it", original.Key)
+	}
+
+	// And the relation is load-bearing rather than decorative: even put
+	// back in the queue, the ticket will not start again while its
+	// blocker is open. That is the whole reason this shape beats
+	// labelling the original — the queue already knew how to do this.
+	if err := tr.UpdateIssueState(ctx, i.ID, stateID(t, tr, cfg, protocol.ReadyForDev)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Claim(ctx, p, i.Key, "r2", "u", time.Now()); err == nil {
+		t.Error("claimed a ticket whose author-only blocker is still open")
+	}
+
+	// Filing twice for the same ticket files once: one obstacle in front
+	// of it however many times a run walks into it.
+	key, err := p.FileAuthorOnlyBlocker(ctx, i.ID, i.Key, "again", "again")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key != blocker.Key {
+		t.Errorf("re-filing returned %s, want the existing %s", key, blocker.Key)
+	}
+	after, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(issues) {
+		t.Errorf("a second filing duplicated the blocker: %d issues, was %d", len(after), len(issues))
 	}
 }

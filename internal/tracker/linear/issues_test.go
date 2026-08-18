@@ -349,3 +349,47 @@ func TestCommentsComeBackOldestFirst(t *testing.T) {
 		t.Error("the last comment is not the newest")
 	}
 }
+
+// The relation the pipeline has always read and never written. The
+// direction is the part worth pinning: ListIssues reads `relations` of
+// type "blocks" as "this issue blocks relatedIssue", so the mutation has
+// to put the blocker in issueId, not the other way round. Reversed, the
+// queue would hold the wrong ticket and neither end would look wrong.
+func TestLinkBlockingSendsTheRelationInTheDirectionListIssuesReads(t *testing.T) {
+	var input map[string]any
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		if !strings.Contains(query, "issueRelationCreate") {
+			t.Errorf("unexpected query: %s", query)
+		}
+		input = vars["input"].(map[string]any)
+		return map[string]any{"issueRelationCreate": map[string]any{"success": true}}, nil
+	})
+	defer srv.Close()
+
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	if err := c.LinkBlocking(context.Background(), "blocker_1", "blocked_1"); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]string{
+		"issueId": "blocker_1", "relatedIssueId": "blocked_1", "type": "blocks",
+	} {
+		if got, _ := input[k].(string); got != want {
+			t.Errorf("input[%q] = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// A mutation that reports failure without an error is the shape Linear
+// uses for a refused write, and swallowing it would leave a ticket
+// parked behind a blocker that does not exist.
+func TestLinkBlockingReportsAnUnsuccessfulMutation(t *testing.T) {
+	srv := fakeLinear(t, func(query string, vars map[string]any) (any, []gqlError) {
+		return map[string]any{"issueRelationCreate": map[string]any{"success": false}}, nil
+	})
+	defer srv.Close()
+
+	c := New("lin_api_test", WithEndpoint(srv.URL))
+	if err := c.LinkBlocking(context.Background(), "blocker_1", "blocked_1"); err == nil {
+		t.Error("a refused relation reported success")
+	}
+}

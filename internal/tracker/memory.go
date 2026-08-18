@@ -299,6 +299,40 @@ func (m *Memory) UpdateIssueState(_ context.Context, issueID, stateID string) er
 	return nil
 }
 
+// LinkBlocking mirrors both sides, because the real tracker does: Linear
+// stores one relation and serves it as `relations` on the blocker and
+// `inverseRelations` on the blocked, and the adapter reads both into
+// Blocks and BlockedBy. A fake that recorded only one side would let a
+// rule that reads the wrong end pass here and fail in production.
+func (m *Memory) LinkBlocking(_ context.Context, blockerID, blockedID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	blocker, err := m.find(blockerID)
+	if err != nil {
+		return err
+	}
+	blocked, err := m.find(blockedID)
+	if err != nil {
+		return err
+	}
+	if !contains(blocker.Blocks, blockedID) {
+		blocker.Blocks = append(blocker.Blocks, blockedID)
+	}
+	if !contains(blocked.BlockedBy, blockerID) {
+		blocked.BlockedBy = append(blocked.BlockedBy, blockerID)
+	}
+	return nil
+}
+
+func contains(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Memory) CommentOnIssue(_ context.Context, issueID, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

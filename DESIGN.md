@@ -578,9 +578,12 @@ writes is a label nobody remembers:
 1. **Filing.** A boundary proposal whose `subject` names a path in §5's author-only rows is
    labelled as it is filed. Mechanical, no judgment, and it catches the common case — the debt
    scan finding a gate that is declared and not armed.
-2. **A dev run.** A run that discovers mid-work that its scope needs one of those paths says so
-   through its outcome file and parks (§12). It must not commit the change to find out: the
-   push is rejected and the run dies with the hand-back still in it.
+2. **A dev run**, on a ticket it files rather than on its own. A run that discovers mid-work
+   that its scope needs one of those paths says so through its outcome file; the harness files
+   the author-only half as its own ticket under this label, links it as a blocker, and parks
+   the original in `Blocked` (§12). It must not commit the change to find out: the push is
+   rejected and the run dies with the hand-back still in it. This is an escape hatch and
+   should stay a rare one — see §12 for why.
 3. **The author**, directly, whenever they already know.
 
 Removing the label is how the ticket goes back to the pipeline, and that is deliberate — the
@@ -1051,6 +1054,22 @@ the comment and a label say which:
   not checked out in — the pipeline's own, most often, when what needs fixing is a gate, a
   runner or a prompt. A fact about the run rather than a judgment, and the one flavor reachable
   without anything going wrong at all.
+
+  **This one splits the ticket rather than labelling it.** The harness files the author-only
+  half as its own ticket in Triage, labelled `author-only`, and links it as a blocker of the
+  ticket that found it; the original parks in `Blocked` unlabelled. Labelling the original was
+  the first shape, and it retires a ticket the pipeline can otherwise still do: the skip
+  applies in every state (§8), so after the author made the one-line workflow change they
+  would have to remember to take the label off before anything could move it. The blocking
+  relation says the same thing with machinery the queue already has — an open blocker stops
+  the dispatch and the pickup assertion both (§9) — and it closes on its own when the author
+  closes their half.
+
+  **It should almost never fire.** Project code has no reason to know about the workflows that
+  deliver it, so whether a ticket is author-only is normally knowable when it is written —
+  filed at the boundary from the proposal's `subject`, or by the author directly (§8). A dev
+  run discovering it mid-flight means the ticket was scoped wrong, and the filed blocker is
+  the record of that as much as it is the work.
 
 **A run that changes nothing states which of these it is, in a file.** The model has the model
 credential and nothing else — no tracker key, no repository token — so it cannot move a ticket,
