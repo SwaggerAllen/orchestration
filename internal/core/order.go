@@ -50,9 +50,18 @@ type OrderedTicket struct {
 	// than one so a reader can see why something is held back by
 	// scheduling rather than by the graph.
 	Milestone string
-	// Note explains a placement the blocker graph alone does not, which
-	// today means exactly one thing: the ticket is outside the current
-	// milestone.
+	// Uncommitted marks a ticket carrying no milestone at all.
+	//
+	// A separate field rather than an empty Milestone, because that
+	// string is also empty for every ticket in a single-milestone scope,
+	// where printing "no milestone" on every line would be false. The
+	// report knows which case it is in; the renderer should not have to
+	// infer it.
+	Uncommitted bool
+	// Note explains a placement the blocker graph alone does not: the
+	// ticket is outside the current milestone, or it carries none at
+	// all. The two are exclusive — being outside one requires having
+	// one.
 	Note string
 	// MutexHeldBy names an in-flight ticket sharing a mutex label with
 	// this one. Not a blocker and not printed as one — design may run on
@@ -104,6 +113,23 @@ const (
 // not, which is the difference between "ready now" and "in this
 // milestone".
 //
+// The wide view takes a bare ticket from Todo onward, and that
+// narrowing is the point of showing them at all. Todo is somebody
+// saying the work is ready with only the scheduling lagging, and
+// anything past it is already moving — both are facts a "what next"
+// report has to carry. A bare ticket still in Backlog is an idea, and
+// one in a triage-category state is a proposal nobody has accepted;
+// listing those beside startable work is how this report turns into the
+// whole tracker.
+//
+// Every bare ticket it does take says so, in a note. The state that
+// admits it — Todo — is also the state a ticket lands in when the
+// author accepts a proposal and the milestone assignment lags, so
+// "startable and uncommitted" and "committed and I forgot to say so"
+// look identical here. The report cannot tell them apart and does not
+// try; it names the fact and lets the author recognise their own
+// oversight.
+//
 // It arrives that way honestly: the boundary files proposals into
 // Triage, accepting one means moving it out and assigning a milestone,
 // and assigning a milestone is a commitment the author owns (DESIGN
@@ -122,6 +148,9 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 			continue
 		}
 		if milestone != "" && t.Milestone != milestone {
+			continue
+		}
+		if t.Milestone == "" && t.State != protocol.Todo && !isStarted(t) {
 			continue
 		}
 		considered = append(considered, t)
@@ -222,8 +251,14 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 		if milestone == "" {
 			d.Milestone = t.Milestone
 		}
-		if gated[t.ID] {
+		d.Uncommitted = t.Milestone == ""
+		switch {
+		case gated[t.ID]:
 			d.Note = "outside the current milestone (" + s.CurrentMilestone + ") — milestones are worked in sequence, so nothing here starts until that one drains, whatever its blockers say"
+		case t.Milestone == "":
+			// Mutually exclusive with the gate above, which only fires
+			// on a ticket that has a milestone to be outside of.
+			d.Note = "nothing sequences it, so it is startable as it stands — but if the milestone is missing by oversight rather than by choice, this is where that shows"
 		}
 		o.Layers[i].Tickets = append(o.Layers[i].Tickets, d)
 	}

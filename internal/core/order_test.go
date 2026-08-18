@@ -317,3 +317,76 @@ func TestOrderWithNoCurrentMilestoneGatesNothing(t *testing.T) {
 		}
 	}
 }
+
+// The narrowing on the rule above: a bare ticket earns its place in the
+// wide view by being in Todo. Todo is somebody saying the work is ready
+// and only the scheduling has lagged, which is the case worth surfacing.
+// Backlog is an idea, and a triage-category state is a proposal nobody
+// has accepted — listing those beside genuinely startable work turns a
+// report meant to answer "what next" into the whole tracker.
+func TestOrderTakesBareTicketsFromTodoOnward(t *testing.T) {
+	ready := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "" })
+	idea := tk("B", protocol.Backlog, func(t *Ticket) { t.Milestone = "" })
+	// Already moving, and still uncommitted. Dropping it would take work
+	// that is happening right now out of the In-flight layer, which is
+	// the one layer nobody can reconstruct from the tracker at a glance.
+	moving := tk("D", protocol.InProgress, func(t *Ticket) { t.Milestone = "" })
+	// The same states inside a milestone are unaffected: this rule is
+	// about tickets nobody has committed, not about Backlog.
+	committed := tk("C", protocol.Backlog, func(t *Ticket) { t.Milestone = "M1" })
+	s := snap(ready, idea, moving, committed)
+	s.CurrentMilestone = "M1"
+
+	o := ComputeOrder(s, "")
+	if got := layerOf(o, "A"); got != LayerReady {
+		t.Errorf("a bare Todo ticket is in %q, want %q", got, LayerReady)
+	}
+	if got := layerOf(o, "D"); got != LayerStarted {
+		t.Errorf("a bare in-flight ticket is in %q, want %q", got, LayerStarted)
+	}
+	if got := layerOf(o, "B"); got != "" {
+		t.Errorf("a bare Backlog ticket appeared in %q — it is an idea, not work to start", got)
+	}
+	if layerOf(o, "C") == "" {
+		t.Error("a Backlog ticket committed to the current milestone went missing")
+	}
+}
+
+// Todo is also where a ticket lands when the author accepts a proposal
+// and the milestone assignment lags, so "startable and uncommitted" and
+// "committed and I forgot to say so" are indistinguishable here. The
+// report does not try to tell them apart; it says the milestone is
+// missing and lets the author recognise their own oversight.
+func TestOrderFlagsUncommittedTickets(t *testing.T) {
+	bare := tk("A", protocol.Todo, func(t *Ticket) { t.Milestone = "" })
+	inM1 := tk("B", protocol.Todo, func(t *Ticket) { t.Milestone = "M1" })
+	s := snap(bare, inM1)
+	s.CurrentMilestone = "M1"
+
+	got := map[string]OrderedTicket{}
+	for _, l := range ComputeOrder(s, "").Layers {
+		for _, ot := range l.Tickets {
+			got[ot.Key] = ot
+		}
+	}
+	if !got["A"].Uncommitted {
+		t.Error("a ticket with no milestone is not flagged, so an unassigned one reads as scheduled")
+	}
+	if !strings.Contains(got["A"].Note, "oversight") {
+		t.Errorf("the note does not prompt the author to check: %q", got["A"].Note)
+	}
+	if got["B"].Uncommitted {
+		t.Error("a ticket in a milestone is flagged as uncommitted")
+	}
+
+	// Narrow scope drops bare tickets entirely, so nothing there is
+	// uncommitted — and the flag must not fire on the whole roster just
+	// because Milestone is left blank in that view.
+	for _, l := range ComputeOrder(s, "M1").Layers {
+		for _, ot := range l.Tickets {
+			if ot.Uncommitted {
+				t.Errorf("%s flagged uncommitted inside its own milestone's scope", ot.Key)
+			}
+		}
+	}
+}
