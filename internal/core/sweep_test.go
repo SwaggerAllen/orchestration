@@ -753,7 +753,7 @@ func TestAHeldMutexStopsTheDispatchRatherThanThePickup(t *testing.T) {
 		t.Errorf("dispatched into a pickup that refuses: %v", *d)
 	}
 	// And the two agree, which is the reason they share a function.
-	if err := VerifyPickup(s, queued.ID, AgentDev); err == nil {
+	if err := VerifyPickup(s, queued.ID, AgentDev, "r9"); err == nil {
 		t.Error("the dispatcher declined but the pickup assertion would have allowed it")
 	}
 }
@@ -896,7 +896,7 @@ func TestPickupRefusesWhenAnAgentOfThatKindIsAlreadyRunning(t *testing.T) {
 	})
 	second := tk("T2", protocol.InProgress, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
 
-	err := VerifyPickup(snap(running, second), "T2", AgentBoundary)
+	err := VerifyPickup(snap(running, second), "T2", AgentBoundary, "r2")
 	if err == nil {
 		t.Fatal("a second boundary agent was allowed to claim")
 	}
@@ -912,9 +912,60 @@ func TestPickupAllowsATicketToClaimAgainstItsOwnRun(t *testing.T) {
 	resuming := tk("T1", protocol.InProgress, func(t *Ticket) {
 		t.Labels = []string{LabelBoundary}
 		t.Run = &Run{ID: "r1", Kind: AgentBoundary, Live: true}
+		t.LiveRuns = []Run{{ID: "r1", Kind: AgentBoundary, Live: true}}
 	})
-	if err := VerifyPickup(snap(resuming), "T1", AgentBoundary); err != nil {
+	if err := VerifyPickup(snap(resuming), "T1", AgentBoundary, "r1"); err != nil {
 		t.Errorf("a resume was refused as a duplicate: %v", err)
+	}
+}
+
+// The case the check above could not see. Two runs on ONE ticket each
+// skipped "the ticket's own run" as their own, so neither refused —
+// ORC-45 was dispatched twice 82 seconds apart and both scans ran to
+// completion, filing a duplicated set of tickets for about twenty-two
+// minutes of duplicate model spend.
+//
+// Comparing run ids rather than tickets separates the two cases the
+// single collapsed Run cannot: a resume carries the id it was
+// dispatched under, a second agent does not.
+func TestPickupRefusesASecondRunOnTheSameTicket(t *testing.T) {
+	contested := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		// Run collapses to the newest live one — which, for the second
+		// agent, is itself. That is why this cannot be read off Run.
+		t.Run = &Run{ID: "31959809052", Kind: AgentBoundary, Live: true}
+		t.LiveRuns = []Run{
+			{ID: "31959809052", Kind: AgentBoundary, Live: true},
+			{ID: "31959743407", Kind: AgentBoundary, Live: true},
+		}
+	})
+	err := VerifyPickup(snap(contested), "T1", AgentBoundary, "31959809052")
+	if err == nil {
+		t.Fatal("the second run on one ticket was allowed to claim")
+	}
+	if !strings.Contains(err.Error(), "31959743407") {
+		t.Errorf("the refusal does not name the run already live: %v", err)
+	}
+
+	// A run of another kind on the same ticket is a different question,
+	// and not this one's to answer.
+	contested.LiveRuns[1].Kind = AgentDesign
+	if err := VerifyPickup(snap(contested), "T1", AgentBoundary, "31959809052"); err != nil {
+		t.Errorf("refused over a run of a different kind: %v", err)
+	}
+}
+
+// A harness that cannot tell the claim its own run id gets the old
+// behaviour rather than a refusal it can never satisfy: every run would
+// look like somebody else's, and no boundary would ever claim.
+func TestPickupWithoutARunIDDoesNotRefuseItself(t *testing.T) {
+	contested := tk("T1", protocol.InProgress, func(t *Ticket) {
+		t.Labels = []string{LabelBoundary}
+		t.Run = &Run{ID: "r1", Kind: AgentBoundary, Live: true}
+		t.LiveRuns = []Run{{ID: "r1", Kind: AgentBoundary, Live: true}}
+	})
+	if err := VerifyPickup(snap(contested), "T1", AgentBoundary, ""); err != nil {
+		t.Errorf("a claim with no run id was refused: %v", err)
 	}
 }
 
@@ -1070,7 +1121,7 @@ func TestAuthorOnlyPickupIsRefused(t *testing.T) {
 		{AgentReconcile, protocol.Reconciling},
 	} {
 		mine := tk("A1", k.state, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
-		err := VerifyPickup(snap(mine), mine.ID, k.kind)
+		err := VerifyPickup(snap(mine), mine.ID, k.kind, "r1")
 		if err == nil {
 			t.Errorf("%s claimed an author-only ticket", k.kind)
 			continue

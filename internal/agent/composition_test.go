@@ -128,3 +128,59 @@ func TestCompositionSkipsScheduledAndResolvedDebt(t *testing.T) {
 		t.Errorf("scheduled and resolved debt must not be re-proposed, got keys %q", m.Fields["keys"])
 	}
 }
+
+// The composition is posted after the file step precisely so it can name
+// what that step just created — and it could not see any of it. Filed
+// proposals land in a triage-category state, which Build skips, so a
+// composition running seconds later read a backlog with nothing in it.
+//
+// Catapult's ORC-45, second pass, printed the two lines together:
+//
+//	[boundary-step] step=file    Filed 8 proposals (0 deduped)
+//	[composition] gating=0 keys="" non_gating=0
+//	              Nothing to schedule — no unscheduled tech-debt tickets.
+//
+// Invisible before Triage was enabled on the team, because the filer
+// falls back to Backlog when no triage state exists and Backlog is a
+// state Build maps.
+func TestCompositionSeesProposalsStillSittingInTriage(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	triage, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{
+		Name: "Triage", Category: protocol.CategoryTriage, Color: "#000000",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Filed by this boundary and not yet accepted — where every proposal
+	// sits at the moment the composition runs.
+	fresh := seedDebt(t, tr, cfg, "gating and unaccepted", true, 3)
+	if err := tr.UpdateIssueState(ctx, fresh.ID, triage.ID); err != nil {
+		t.Fatal(err)
+	}
+	accepted := seedDebt(t, tr, cfg, "accepted earlier", false, 2)
+
+	boundary := seedBoundary(t, tr, cfg)
+	plan := &BoundaryPlan{ClaimResult: ClaimResult{TicketID: boundary.ID}, Milestone: "M1"}
+	if err := ProposeComposition(ctx, p, plan, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	m, body := compositionComment(t, tr, cfg, boundary.ID)
+	keys := strings.Fields(m.Fields["keys"])
+	for _, want := range []string{fresh.Key, accepted.Key} {
+		var found bool
+		for _, k := range keys {
+			if k == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("composition omits %s; keys = %v\n%s", want, keys, body)
+		}
+	}
+	if m.Fields["gating"] != "1" {
+		t.Errorf("gating = %q, want 1 — the unaccepted proposal is a gating candidate", m.Fields["gating"])
+	}
+}

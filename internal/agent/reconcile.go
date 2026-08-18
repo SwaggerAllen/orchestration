@@ -35,7 +35,7 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 	if t == nil {
 		return nil, fmt.Errorf("reconcile claim: no ticket %q in the project scope", ticketKey)
 	}
-	if err := core.VerifyPickup(snap, t.ID, core.AgentReconcile); err != nil {
+	if err := core.VerifyPickup(snap, t.ID, core.AgentReconcile, dispatchID); err != nil {
 		return nil, err
 	}
 	pr := p.PRForTicket(ctx, t.Key)

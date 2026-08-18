@@ -191,6 +191,19 @@ no state meaning "a PR is open, awaiting a person."
 
 **Invariant: no ticket moves forward carrying a `re-evaluate` label** (§7).
 
+**A state the config does not name is read by its category when the category settles it.** The
+tracker has states the protocol never mapped — Linear ships built-in `Duplicate` and `Canceled`
+alongside whatever `pipeline setup` created — and they are two taps away in the UI. A resolved
+category answers the only question the pipeline has about such a ticket: it is finished and not
+in the queue. `canceled` reads as `Canceled`, `completed` as `Done`, `triage` is skipped (§10).
+
+Anything else still fails the snapshot loudly, and that half of the rule is not softening:
+guessing at an unmapped `started` or `unstarted` state would put a ticket in the queue nobody
+put there. **What was wrong was the blast radius, not the strictness.** One issue in an
+unreadable state failed the *whole project's* snapshot — marking `ORC-47` as `Duplicate` on
+Catapult took every sweep down for about two hours and thirty runs, on a tracker action that
+looks like housekeeping.
+
 ---
 
 ## 4. Artifacts and issues
@@ -471,6 +484,19 @@ expected-state assertion is the whole mechanism; nothing more is needed at one d
 sign-off actor — not just the state. Tracker enforcement is detect-and-revert (§9), so an agent
 can briefly see a state the control plane is about to undo; refusing to act on anything that
 fails the invariants is what makes that window harmless.
+
+**Singularity is asked twice, and about two different things.** "Is an agent of this kind live
+on another ticket" is the dispatcher's question and the pickup assertion's. "Is another run of
+this kind live on *this* ticket" is only the pickup assertion's, and it is the one that was
+missing: the first check skips the ticket's own run, deliberately, so a claim re-entering after
+a resume is not read as a second agent — and with both runs on one ticket, each skipped the
+other as itself. `ORC-45` was dispatched twice 82 seconds apart and both runs scanned the tree,
+filed proposals and aborted the ticket, at about twenty-two minutes of duplicate model spend.
+
+The two are told apart by **run id, not by ticket**: a resumed claim carries the id its run was
+dispatched under, and a second agent does not. The snapshot therefore keeps every live run per
+ticket alongside the single collapsed one that every other rule reads — the collapse is what hid
+this, since whichever run it picked, the other recognised it as itself.
 
 ---
 
@@ -982,6 +1008,19 @@ than a reconstruction. It stops at a proposal because **assigning a milestone is
 the invariant above turns unstarted current-milestone work into `Todo`, so an agent writing
 milestones would be an agent committing scope nobody accepted. Milestone assignment is the
 author's, always.
+
+**Candidates include proposals still sitting in Triage,** which is the whole reason the
+composition is posted after the file step rather than before it — the tickets it names are the
+ones that step just created. Snapshots skip triage-category states, deliberately, because a
+proposal nobody has accepted is not dispatchable work; the snapshot therefore carries them in a
+separate list that only this pass reads. Without it the composition could not see a single thing
+the boundary had filed: Catapult's `ORC-45` printed "Nothing to schedule — no unscheduled
+tech-debt tickets" directly beneath "Filed 8 proposals". It went unnoticed while proposals landed
+in `Backlog` — the filer's fallback when a team has no Triage state — and surfaced the moment
+that team gained one.
+
+An unaccepted proposal is a candidate, not a commitment, which is the same thing every entry in
+this list is. The author accepts or declines it and assigns the milestone in one pass either way.
 
 ---
 

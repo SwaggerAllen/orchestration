@@ -83,7 +83,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 	if t == nil {
 		return nil, fmt.Errorf("boundary claim: no ticket %q in the project scope", ticketKey)
 	}
-	if err := core.VerifyPickup(snap, t.ID, core.AgentBoundary); err != nil {
+	if err := core.VerifyPickup(snap, t.ID, core.AgentBoundary, dispatchID); err != nil {
 		return nil, err
 	}
 
@@ -147,7 +147,7 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 		plan.Roster = append(plan.Roster, st)
 	}
 
-	plan.Backlog = DebtBacklog(snap.Tickets)
+	plan.Backlog = DebtBacklog(snap)
 
 	// The scan proposes tickets, so it is subject to the confirmed
 	// non-asks the same way design is (DESIGN §4) — a debt scan that
