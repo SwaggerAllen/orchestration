@@ -466,11 +466,16 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	// It filed a harness finding rather than trusting either, correctly.
 	//
 	// The flags themselves stay: they are the resume signal (DESIGN §10).
-	// All false is a first pass; archive=true is a boundary picking
+	// All false is a fresh pass; archive=true is a boundary picking
 	// itself back up, which changes what the model should expect to find
 	// already done around it.
-	add(fmt.Sprintf("\nCompleted by an earlier run of this boundary: archive=%t scan=%t file=%t — all false means this is the first pass.\n",
-		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile]))
+	//
+	// "This pass" and not "this ticket": a completed pass closes its
+	// window, so a boundary ticket the author sends back for a second
+	// look reports all false and scans again. The steps of the pass
+	// before it are history, not work already done.
+	add(fmt.Sprintf("\nCompleted by an earlier run of THIS pass: archive=%t scan=%t file=%t — all false means nothing has run yet. A previous, completed pass over this milestone does not show here; the retro note under `%s/` is where you see what it archived.\n",
+		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile], retro.Dir))
 	add(fmt.Sprintf("\nThe archive pass has run either way — an earlier run's, or this one's before you started — so the retro notes are in your checkout under `%s/`, this milestone's among them.\n", retro.Dir))
 	if len(plan.Roster) > 0 {
 		add("\n## Milestones, in the tracker's order\n\n")

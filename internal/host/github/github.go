@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,6 +67,26 @@ func New(repository, token string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
+// apiError carries the status code alongside the message, so a caller
+// that has a use for a specific one can ask. Only 404 has such a use so
+// far — "the file is not there" is an answer rather than a failure —
+// and the rendered text is unchanged, because it is read far more often
+// than it is inspected.
+type apiError struct {
+	method, path string
+	status       int
+	msg, hint    string
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("github: %s %s: HTTP %d%s%s", e.method, e.path, e.status, e.msg, e.hint)
+}
+
+func isNotFound(err error) bool {
+	var e *apiError
+	return errors.As(err, &e) && e.status == http.StatusNotFound
+}
+
 func (c *Client) rest(ctx context.Context, method, path string, body, out any) error {
 	var rdr *bytes.Reader
 	if body != nil {
@@ -92,8 +113,10 @@ func (c *Client) rest(ctx context.Context, method, path string, body, out any) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("github: %s %s: HTTP %d%s%s", method, path, resp.StatusCode,
-			apiMessage(resp), hint(resp.StatusCode, method, path))
+		return &apiError{
+			method: method, path: path, status: resp.StatusCode,
+			msg: apiMessage(resp), hint: hint(resp.StatusCode, method, path),
+		}
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -540,8 +563,6 @@ func (c *Client) IsAncestor(ctx context.Context, ancestor, descendant string) (b
 	return data.Status == "ahead" || data.Status == "identical", nil
 }
 
-// PutFileIfAbsent commits one file to the dispatch ref via the contents
-// API, unless it already exists there.
 // RecordDeployment creates a deployment for a commit and immediately
 // marks it successful. The dummy's stand-in for a hosting platform
 // (PLAN M4): what the pipeline's post-deploy check actually exercises
@@ -573,25 +594,62 @@ func (c *Client) RecordDeployment(ctx context.Context, sha, environment string) 
 	return nil
 }
 
-func (c *Client) PutFileIfAbsent(ctx context.Context, path, content, message string) (bool, error) {
+// ReadFile fetches a file from the dispatch ref via the contents API.
+// A 404 is "not there", not a failure: the boundary's first pass over a
+// milestone reads a retro note nobody has written yet.
+func (c *Client) ReadFile(ctx context.Context, path string) (string, bool, error) {
+	body, sha, err := c.readFile(ctx, path)
+	_ = sha
+	if err != nil {
+		return "", false, err
+	}
+	if body == nil {
+		return "", false, nil
+	}
+	return string(body), true, nil
+}
+
+// readFile returns the content and the blob sha, both nil/empty when the
+// file is absent. The sha is what turns a create into a replace, so the
+// two always come from the same read — a stale sha is a 409, and one
+// fetched separately can go stale between the calls.
+func (c *Client) readFile(ctx context.Context, path string) ([]byte, string, error) {
 	getPath := fmt.Sprintf("/repos/%s/%s/contents/%s?ref=%s", c.owner, c.repo, path, c.ref)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+getPath, nil)
-	if err != nil {
-		return false, err
+	var meta struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+		SHA      string `json:"sha"`
 	}
-	req.Header.Set("Authorization", "Bearer "+c.token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := c.http.Do(req)
+	err := c.rest(ctx, http.MethodGet, getPath, nil, &meta)
 	if err != nil {
-		return false, err
+		if isNotFound(err) {
+			return nil, "", nil
+		}
+		return nil, "", err
 	}
-	resp.Body.Close()
-	switch resp.StatusCode {
-	case http.StatusOK:
-		return false, nil // already there: re-run safety, not an error
-	case http.StatusNotFound:
-	default:
-		return false, fmt.Errorf("github: checking %s: HTTP %d", path, resp.StatusCode)
+	if meta.Encoding != "base64" {
+		return nil, "", fmt.Errorf("github: %s came back %q-encoded, not base64", path, meta.Encoding)
+	}
+	// The contents API wraps base64 at 60 columns; the standard decoder
+	// rejects the newlines.
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(meta.Content, "\n", ""))
+	if err != nil {
+		return nil, "", fmt.Errorf("github: decoding %s: %w", path, err)
+	}
+	return raw, meta.SHA, nil
+}
+
+// PutFile commits one file to the dispatch ref, creating it or replacing
+// what is there.
+func (c *Client) PutFile(ctx context.Context, path, content, message string) error {
+	existing, sha, err := c.readFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	if existing != nil && string(existing) == content {
+		// Nothing to say. A commit per re-run would fill the log of a
+		// resumed boundary with empty retro-note commits.
+		return nil
 	}
 	putPath := fmt.Sprintf("/repos/%s/%s/contents/%s", c.owner, c.repo, path)
 	body := map[string]any{
@@ -599,10 +657,10 @@ func (c *Client) PutFileIfAbsent(ctx context.Context, path, content, message str
 		"content": base64.StdEncoding.EncodeToString([]byte(content)),
 		"branch":  c.ref,
 	}
-	if err := c.rest(ctx, http.MethodPut, putPath, body, nil); err != nil {
-		return false, err
+	if sha != "" {
+		body["sha"] = sha
 	}
-	return true, nil
+	return c.rest(ctx, http.MethodPut, putPath, body, nil)
 }
 
 // MarkPRReady flips the draft flag off. REST cannot do this; it is a

@@ -227,6 +227,15 @@ type TriageProposal struct {
 // contain a filed proposal: the check was not weak, it was inert, and
 // two identical keys would have produced two tickets just as readily as
 // two different ones did.
+//
+// It does not filter by state either, and that is the second half of the
+// same lesson. Filtering to triage-category states made the dedupe set
+// "proposals nobody has looked at yet": the moment the author accepted
+// one and moved it into the queue it dropped out, and the next scan that
+// found the same thing filed it again. Harmless while a milestone had
+// exactly one boundary pass, and not once a second pass became ordinary.
+// A proposal's marker is the record that it was filed, wherever the
+// ticket has since travelled.
 func (p *Plane) ListTriageProposals(ctx context.Context) ([]TriageProposal, error) {
 	if err := p.resolveStates(ctx); err != nil {
 		return nil, err
@@ -237,15 +246,17 @@ func (p *Plane) ListTriageProposals(ctx context.Context) ([]TriageProposal, erro
 	}
 	var out []TriageProposal
 	for _, i := range issues {
-		if !p.triageStates[i.StateID] {
-			continue
-		}
 		tp := TriageProposal{Key: i.Key, Title: i.Title}
 		for _, line := range strings.Split(i.Description, "\n") {
 			m, ok, err := marker.Parse(line)
 			if err == nil && ok && m.Kind == marker.TriageProposal {
 				tp.Dedupe = m.Fields["dedupe"]
 			}
+		}
+		if tp.Dedupe == "" {
+			// Not a filed proposal — now that every issue is considered,
+			// the marker is what identifies one.
+			continue
 		}
 		out = append(out, tp)
 	}

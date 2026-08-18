@@ -141,10 +141,20 @@ type Host interface {
 	// recorded for an agent merge and every ticket sat in Merged until
 	// the deploy timeout moved it to Blocked.
 	RecordDeployment(ctx context.Context, sha, environment string) error
-	// PutFileIfAbsent commits one file to the default branch unless it
-	// already exists, reporting whether it was created. The boundary's
-	// retro note uses it: re-run safety demands the existence check
-	// (DESIGN §10), and the boundary never opens a PR — machinery, not
-	// work.
-	PutFileIfAbsent(ctx context.Context, path, content, message string) (bool, error)
+	// ReadFile returns a file's content on the default branch and
+	// whether it exists at all. Missing is not an error: the boundary's
+	// first pass on a milestone reads a note that is not there yet.
+	ReadFile(ctx context.Context, path string) (string, bool, error)
+	// PutFile commits one file to the default branch, creating it or
+	// replacing what is there. The boundary's retro note uses it — the
+	// boundary never opens a PR, being machinery rather than work.
+	//
+	// This used to be PutFileIfAbsent, refusing to touch an existing
+	// note for re-run safety (DESIGN §10). That made the note whatever
+	// the first pass over a milestone knew, permanently: a second pass
+	// archived its tickets and their merge shas with nothing recording
+	// them, which is the one failure the note exists to prevent.
+	// Re-run safety now comes from merging by issue key instead, which
+	// is idempotent for a resumed pass and additive for a new one.
+	PutFile(ctx context.Context, path, content, message string) error
 }

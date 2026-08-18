@@ -95,3 +95,28 @@ func Parse(content string) []Entry {
 	}
 	return out
 }
+
+// Merge folds new entries into what a note already holds, keyed on the
+// issue key. Later wins on conflict, because a pass that has shas for a
+// ticket knows more than one that had none — the note is written before
+// the tickets are archived, so a resumed pass can be the first to see a
+// `merged` marker land.
+//
+// This is what makes a note safe to rewrite. It used to be written once
+// and never touched (PutFileIfAbsent), which held for a single pass over
+// a milestone and quietly failed for a second one: the second pass
+// archived its tickets, found the note already there, wrote nothing, and
+// took their keys and shas with it.
+func Merge(existing, added []Entry) []Entry {
+	at := map[string]int{}
+	out := make([]Entry, 0, len(existing)+len(added))
+	for _, e := range append(append([]Entry{}, existing...), added...) {
+		if i, ok := at[e.Key]; ok {
+			out[i] = e
+			continue
+		}
+		at[e.Key] = len(out)
+		out = append(out, e)
+	}
+	return out
+}

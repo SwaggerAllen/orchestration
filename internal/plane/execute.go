@@ -22,7 +22,9 @@ const boundaryDescription = `This ticket is pipeline machinery. Automation creat
   In progress     → YOU move it here when your pass is done. This is the signal.
                     The boundary agent then runs archive / debt scan / grooming,
                     posting a comment per step. If it fails, move it back here and
-                    it resumes from the first step with no comment.
+                    it resumes from the first step with no comment. Once it has
+                    finished a pass, moving it back here starts a NEW one — the
+                    scan runs again over whatever has landed since.
   Boundary review → the agent put it back. Proposals are in Triage; accept or
                     decline, confirm the ranking, then close this ticket and pull
                     the next milestone into Todo. The comment above proposes the

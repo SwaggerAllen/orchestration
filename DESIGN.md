@@ -879,6 +879,27 @@ mechanism: no extra states, no special-casing of which state it re-entered from,
 comment thread doubles as a readable record of where it got to — which is what you want when it
 stalls overnight.
 
+**A completed pass ends the window, and a fourth comment says so.** The boundary ticket outlives
+its pass: the author closes the review, works the proposals through the pipeline, and moves it
+back to `In progress` for another look at what has landed since. That is a second pass, not a
+resume, and the two are indistinguishable to a reader that just unions every step comment on the
+ticket. So the hand-back posts a `close` comment — not a step to resume into, the terminator that
+says everything above it belongs to a pass that finished. A claim that sees one starts from
+nothing.
+
+Catapult's boundary is where this was found. `ORC-45` ran a full pass, filed five tickets, and
+was sent back two days later for a second look at the harness findings the runs since had
+recorded. The claim read the old `scan` and `file` comments, the workflow skipped the model step
+on `scan_done`, the file step skipped itself, and the run reached `Boundary review` in three
+seconds having read nothing and filed nothing — overwriting the previous pass's composition
+proposal with an empty one on the way past. Fast and green, which is the worst way for a pass to
+do nothing.
+
+The window still has one edge: a run that dies between posting `close` and moving the ticket
+leaves a pass that reads as finished, so the next entry redoes it. That costs one debt scan and
+files nothing new — the dedupe keys hold — and it is the trade for having the terminator be the
+last thing written rather than something a crash could skip.
+
 Deliberately not states. `Archiving`, `Scanning` and `Grooming` would all answer *who has the
 ball* identically — the boundary agent — and so fail the state admission test. The problem was
 never visibility of the step; it was re-entry.
@@ -890,8 +911,9 @@ never visibility of the step; it was re-entry.
 | Archive | Naturally idempotent; already-archived is a no-op. |
 | Debt scan | Read-mostly and convergent. |
 | Grooming re-rank | Convergent — the same inputs produce the same order. |
-| Retro note | Writes a file. **Must check whether this milestone's note already exists.** Existing wins, so a note is written once with whatever the archive step knew then — a note from before the merge shas were recorded stays without them, and the rehearsal reset reads it as a milestone that landed nothing. |
-| Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. |
+| Retro note | Writes a file. **Merged by issue key, not written once.** Existing-wins was the first rule and it made the note whatever the first pass knew, permanently: a second pass archived its tickets and their merge shas with nothing recording them, which is the one thing the note exists to prevent. Merging is idempotent for a resumed pass and additive for a new one, and a later entry wins on conflict because a pass that has shas for a ticket knows more than one that had none. |
+| Close comment | Posted last, after the hand-back's composition proposal. It is what makes the steps above belong to a pass rather than to a ticket. |
+| Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. The set it dedupes against is every issue in the project carrying a proposal marker — not just the ones still in Triage. Filtering to Triage meant a proposal left the set the moment the author accepted it, so the next pass that found the same thing filed it again. |
 
 ### Exclusions
 

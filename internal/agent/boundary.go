@@ -23,6 +23,11 @@ const (
 	StepArchive = "archive" // retro note + archive pass
 	StepScan    = "scan"    // model: debt scan + grooming proposals
 	StepFile    = "file"    // proposals filed, ranking applied
+	// StepClose ends the pass. It is not a step to resume into — it is
+	// the terminator that says the steps above belong to a pass that
+	// finished, so a later entry to In progress starts a new one rather
+	// than resuming a completed pass into nothing.
+	StepClose = "close"
 )
 
 // BoundaryPlan is a boundary claim: the ticket plus which steps already
@@ -91,12 +96,35 @@ func ClaimBoundary(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, d
 		Done:            map[string]bool{},
 		HarnessFindings: CollectHarnessFindings(snap.Tickets),
 	}
+	// Only the steps of the pass in progress count. A boundary ticket
+	// outlives its pass: the author closes the review, works the
+	// proposals through the pipeline, and moves it back to In progress
+	// for another look — which is a new pass, not a resume, and the
+	// difference is invisible to a reader that just unions every step
+	// marker on the ticket.
+	//
+	// It was invisible to this one. Catapult's ORC-45 ran a full pass on
+	// 16 Aug, filed five tickets, and came back on 18 Aug for a second
+	// look at the harness findings the runs since had recorded. The
+	// claim read the old scan and file markers, the action skipped the
+	// model step on `scan_done`, the file step skipped itself, and the
+	// run reached Boundary review in three seconds having read nothing
+	// and filed nothing — and overwrote the previous pass's composition
+	// with an empty one on the way past.
+	//
+	// The close marker is what draws the line, and comments arrive
+	// oldest first, so seeing one means everything above it is history.
 	for _, c := range t.Comments {
-		plan.Comments = append(plan.Comments, c.Body)
 		m, ok, err := marker.Parse(c.Body)
 		if err == nil && ok && m.Kind == marker.BoundaryStep {
+			if m.Fields["step"] == StepClose {
+				plan.Comments = nil
+				plan.Done = map[string]bool{}
+				continue
+			}
 			plan.Done[m.Fields["step"]] = true
 		}
+		plan.Comments = append(plan.Comments, c.Body)
 	}
 	// A resumed run collects fewer findings than the first pass did, or
 	// none: the tickets carrying them may already be archived by this
@@ -151,6 +179,14 @@ func stepDone(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, step, pro
 // first — archiving silently breaks duplicate detection without it — then
 // the milestone's Done issues are archived. Skips itself when its marker
 // exists; every operation inside is idempotent anyway.
+//
+// The note is merged into rather than written once. A second pass over
+// the same milestone archives the tickets that landed since the first,
+// and a note that refused to be rewritten recorded none of them — their
+// keys invisible to the next duplicate check, their merge shas gone from
+// the rehearsal reset's revert list. Merging by issue key is idempotent
+// for a resumed pass and additive for a new one, which is the property
+// the write-once rule was reaching for.
 func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *BoundaryPlan, now time.Time) error {
 	if plan.Done[StepArchive] {
 		return nil
@@ -179,9 +215,12 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 	}
 
 	path := retro.Dir + "/" + slug(plan.Milestone) + ".md"
-	content := retro.Render(plan.Milestone, entries)
-	created, err := h.PutFileIfAbsent(ctx, path, content, "retro: "+plan.Milestone)
+	prior, existed, err := h.ReadFile(ctx, path)
 	if err != nil {
+		return fmt.Errorf("boundary archive: reading the retro note: %w", err)
+	}
+	merged := retro.Merge(retro.Parse(prior), entries)
+	if err := h.PutFile(ctx, path, retro.Render(plan.Milestone, merged), "retro: "+plan.Milestone); err != nil {
 		return fmt.Errorf("boundary archive: retro note: %w", err)
 	}
 	for _, id := range toArchive {
@@ -190,8 +229,8 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 		}
 	}
 	prose := fmt.Sprintf("Archived %d Done issues. Retro note: %s", len(toArchive), path)
-	if !created {
-		prose += " (already existed — resumed run)"
+	if existed {
+		prose += fmt.Sprintf(" (merged into an existing note; %d entries now)", len(merged))
 	}
 	// The findings ride out on this step's marker, because this step is
 	// what destroys them. They live in comments on the tickets just
@@ -501,9 +540,19 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 
 	// The composition proposal is the last thing the author reads before
 	// they take over, so it is posted after filing — it can only be
-	// computed once this boundary's findings are tickets.
+	// computed once this boundary's findings are tickets. Outside the
+	// step guard on purpose: a resume that re-enters with filing already
+	// done is a run whose composition may never have landed.
 	if err := ProposeComposition(ctx, p, plan, now); err != nil {
 		return fmt.Errorf("boundary file: composition: %w", err)
+	}
+	// Everything this pass owed is on the ticket, so close the pass
+	// before handing it over. Posted last and not before, because it is
+	// the thing that stops the next entry from resuming: a run that dies
+	// anywhere above this line has to be resumable, and one that gets
+	// past it has nothing left to resume into.
+	if err := stepDone(ctx, p, plan, StepClose, "Boundary pass complete. Moving this back here starts a new pass — archive, debt scan and grooming run again over whatever has landed since."); err != nil {
+		return err
 	}
 	return p.TransitionTicket(ctx, plan.TicketID, protocol.BoundaryReview, core.RoleBoundary)
 }
