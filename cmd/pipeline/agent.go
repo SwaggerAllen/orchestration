@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -612,6 +613,7 @@ func cmdAgentFinish(args []string) error {
 	// and reading "nobody said" as "nothing landed" would park a ticket
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
+	changedPath := fs.String("changed-files", "", "file with one changed path per line (dev); what a reported mutex label is checked against")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -677,7 +679,16 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome); err != nil {
+	// Absent is not fatal here, unlike the audit's own copy of this
+	// flag. A missing list only costs a reported label its check, which
+	// applyDiscoveredLabels says on the ticket — while failing would
+	// land a finished run in Blocked over a file the harness was
+	// supposed to write.
+	changed, err := readPathList(*changedPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome, changed); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {

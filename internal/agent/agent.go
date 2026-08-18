@@ -11,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -276,7 +278,7 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 // for "nobody measured". Between them they separate the three reasons a
 // run legitimately changes nothing (DESIGN §12) from the case where it
 // changed nothing and said nothing about why.
-func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, handback string, commits int, o *DevOutcome) error {
+func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, handback string, commits int, o *DevOutcome, changed []string) error {
 	if strings.TrimSpace(handback) == "" {
 		return fmt.Errorf("finish %s: hand-back is empty — what landed, the commit, anything deliberately not done and why", res.TicketKey)
 	}
@@ -321,6 +323,12 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	// two labels they have to learn the difference between for nothing.
 	if res.PRNumber == 0 && commits == 0 {
 		return Abort(ctx, p, res, "scope-satisfied", unexplainedMessage)
+	}
+	// Before the PR and the transition: the label is what the CI audit
+	// on the other side of that transition reads, so attaching it after
+	// would be attaching it too late.
+	if err := applyDiscoveredLabels(ctx, p, res, o, changed); err != nil {
+		return err
 	}
 	if res.PRNumber == 0 {
 		pr, err := h.CreatePR(ctx, res.Branch,
@@ -432,6 +440,31 @@ type DevOutcome struct {
 	// something, and one that arrives without it is a ticket nobody can
 	// act on.
 	Summary string `json:"summary"`
+	// Labels are mutex labels the run discovered its diff needs and the
+	// ticket does not carry — bare names, "foundation", not
+	// "system:foundation" (DESIGN §7).
+	//
+	// This is the re-evaluation flow's first half, arriving as data. §7
+	// says a thread that discovers scope nobody predicted "adds the
+	// newly-discovered mutex label to its own ticket", and the dev
+	// thread could not: the model holds the model credential and
+	// nothing else, and its prompt forbids touching labels for exactly
+	// that reason. So it had no way to report a fact it was in the best
+	// position to know, and the closest outcome available was a
+	// push-back — which reads to a human as "the design is wrong"
+	// rather than "this diff also touches foundation's files".
+	//
+	// Measured on Catapult's ORC-5: a complete, green, reviewed diff had
+	// to register its new component in config/config.exs, a path
+	// systems/foundation.md owns on purpose. The run was correct, its
+	// work was finished, and the only channel it had sent the ticket to
+	// a human to have a label added by hand.
+	//
+	// Declaring is not acquiring. The harness verifies each name against
+	// the file maps and the diff before attaching it, so this reports
+	// what the maps already say rather than granting the run scope it
+	// asked itself for.
+	Labels []string `json:"labels,omitempty"`
 }
 
 // devOutcomes maps each outcome to the abort reason that lands it.
@@ -468,6 +501,24 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 	}
 	if o.Outcome != "done" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("dev outcome: %q without its argument is a ticket nobody can act on — say what you found", o.Outcome)
+	}
+	if len(o.Labels) > 0 && o.Outcome != "done" {
+		// A discovered label is a fact about a diff, and these outcomes
+		// have no diff. Refused rather than ignored: a run that thought
+		// it was reporting one should learn it was not.
+		return nil, fmt.Errorf("dev outcome: %q changed nothing, so there is no diff for %v to be needed by — a mutex label is reported by a run that finished", o.Outcome, o.Labels)
+	}
+	for i, l := range o.Labels {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			return nil, fmt.Errorf("dev outcome: labels[%d] is empty", i)
+		}
+		// Bare names. The prefix is the harness's to add, and a model
+		// that writes "system:foundation" here is describing the same
+		// thing — accepted rather than refused over punctuation.
+		l = strings.TrimPrefix(l, protocol.SystemLabelPrefix)
+		l = strings.TrimPrefix(l, protocol.ScreenLabelPrefix)
+		o.Labels[i] = l
 	}
 	return &o, nil
 }
@@ -598,4 +649,165 @@ func deriveBranch(key, title string) string {
 		return strings.ToLower(key)
 	}
 	return strings.ToLower(key) + "-" + slug
+}
+
+// applyDiscoveredLabels is the harness half of DESIGN §7's re-evaluation
+// flow: the run reported mutex labels its diff needs, and this attaches
+// them.
+//
+// It exists because the flow had no implementation on the dev side. §7
+// says a thread that discovers unpredicted scope adds the label to its
+// own ticket; the dev thread cannot write labels and must not, so the
+// sentence described an action nobody could perform. The run's only
+// channel was a push-back, which parks finished work and asks a human
+// to do by hand what the file maps already decided.
+//
+// Declaring is not acquiring, and the difference is this function. Each
+// name has to resolve to a real doc, and something in the diff has to be
+// mapped by that doc, before the label is attached. A run asking for a
+// lock nothing in its own diff needs is refused it.
+//
+// Soft throughout. Every refusal is recorded on the ticket and the
+// finish continues, because the alternative is landing complete work in
+// Blocked/failed over a label — the failure mode this whole path exists
+// to remove. What a wrong or missing label costs is a red audit and a
+// bounce, which is where the ticket already was.
+func applyDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResult, o *DevOutcome, changed []string) error {
+	if len(o.Labels) == 0 {
+		return nil
+	}
+	held := map[string]bool{}
+	for _, l := range res.Labels {
+		held[l] = true
+	}
+	var added, notes []string
+	for _, name := range o.Labels {
+		label, why := resolveDiscoveredLabel(p.Config.Root, name, changed)
+		switch {
+		case why != "":
+			notes = append(notes, why)
+		case held[label]:
+			notes = append(notes, fmt.Sprintf("`%s` was already on the ticket — nothing to do.", label))
+		default:
+			if err := p.EnsureMutexLabel(ctx, res.TicketID, label); err != nil {
+				notes = append(notes, fmt.Sprintf("`%s` could not be attached (%v) — the audit will fail on it until somebody adds it.", label, err))
+				continue
+			}
+			held[label] = true
+			added = append(added, label)
+		}
+	}
+	if len(added) > 0 {
+		if err := flagCollisions(ctx, p, res, added); err != nil {
+			notes = append(notes, fmt.Sprintf("collision check failed (%v) — check by hand whether another in-flight ticket holds %s.", err, strings.Join(added, ", ")))
+		}
+	}
+	return recordDiscoveredLabels(ctx, p, res, added, notes)
+}
+
+// resolveDiscoveredLabel turns a declared bare name into a full mutex
+// label, or explains why it will not. The prose is what lands on the
+// ticket, so it is written for the person who reads it there.
+func resolveDiscoveredLabel(root, name string, changed []string) (label, why string) {
+	for _, d := range []struct{ dir, prefix string }{
+		{"systems", protocol.SystemLabelPrefix},
+		{"screens", protocol.ScreenLabelPrefix},
+	} {
+		docs, err := filemap.LoadDir(filepath.Join(root, d.dir))
+		if err != nil {
+			return "", fmt.Sprintf("`%s` could not be checked: reading %s/ failed (%v).", name, d.dir, err)
+		}
+		for _, doc := range docs {
+			if doc.Name != name {
+				continue
+			}
+			if len(changed) == 0 {
+				// Unverifiable rather than assumed good. The harness
+				// passes the diff; a run reaching here without one is a
+				// wiring gap, and silently trusting the request would
+				// turn this check into one that checks nothing.
+				return "", fmt.Sprintf("`%s%s` was requested but no changed-file list reached the finish step, so nothing could confirm the diff needs it. Not attached.", d.prefix, name)
+			}
+			for _, path := range changed {
+				for _, g := range doc.Globs {
+					if filemap.Match(g, path) {
+						return d.prefix + name, ""
+					}
+				}
+			}
+			return "", fmt.Sprintf("`%s%s` was requested, but nothing in this diff is mapped by %s/%s.md — a mutex label locks a system for everyone else, so it is not taken on a run that does not touch it.", d.prefix, name, d.dir, name)
+		}
+		if near := nearestDoc(name, docs); near != "" {
+			return "", fmt.Sprintf("`%s` names %s/%s.md, which does not exist — did you mean `%s` (%s/%s.md)?", name, d.dir, name, near, d.dir, near)
+		}
+	}
+	return "", fmt.Sprintf("`%s` matches no doc under systems/ or screens/, so there is no file map behind it and no label to take.", name)
+}
+
+// flagCollisions is §7's second half: a ticket acquiring a label another
+// in-flight ticket holds is a collision, and the one *earlier* by the
+// precedence rule absorbs it. Nothing implemented this before — §7
+// described it and every reference to the label only read or cleared it.
+//
+// The re-evaluate goes on the loser of the precedence comparison, which
+// is usually the other ticket: a run finishing its diff is far along by
+// construction. When the other ticket is further along, this ticket
+// takes it instead, and the §7 table's row for its state decides what
+// happens next.
+func flagCollisions(ctx context.Context, p *plane.Plane, res *ClaimResult, added []string) error {
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		return err
+	}
+	var mine *core.Ticket
+	for _, t := range snap.Tickets {
+		if t.ID == res.TicketID {
+			mine = t
+		}
+	}
+	if mine == nil {
+		return fmt.Errorf("this ticket is not in the project scope")
+	}
+	flagged := map[string]bool{}
+	for _, label := range added {
+		for _, other := range snap.Tickets {
+			if other.ID == mine.ID || !other.HoldsMutex() || !other.HasLabel(label) {
+				continue
+			}
+			loser := other
+			if core.Precedes(other, mine) {
+				loser = mine
+			}
+			if flagged[loser.ID] {
+				continue
+			}
+			flagged[loser.ID] = true
+			if err := p.AddTicketLabel(ctx, loser.ID, core.LabelReEvaluate); err != nil {
+				return err
+			}
+			prose := fmt.Sprintf("`%s` acquired `%s` mid-flight and this ticket shares it (DESIGN §6, §7). The further-along ticket holds the ground; this one re-evaluates.", res.TicketKey, label)
+			if err := p.CommentTicket(ctx, loser.ID, prose); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// recordDiscoveredLabels writes the audit trail. A label appearing on a
+// ticket with nothing saying who put it there or why is the state change
+// nobody can explain later that DESIGN §9 is about.
+func recordDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResult, added, notes []string) error {
+	if len(added) == 0 && len(notes) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("**Mutex labels this run reported (DESIGN §7).** The diff needed them and the ticket did not carry them; the file maps, not the run's own say-so, are what decided.\n")
+	if len(added) > 0 {
+		fmt.Fprintf(&b, "\nAttached: %s\n", "`"+strings.Join(added, "`, `")+"`")
+	}
+	for _, n := range notes {
+		fmt.Fprintf(&b, "\n- %s\n", n)
+	}
+	return p.CommentTicket(ctx, res.TicketID, b.String())
 }

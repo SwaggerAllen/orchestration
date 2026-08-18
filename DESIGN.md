@@ -527,9 +527,29 @@ beats starting them.
 
 ### Re-evaluation
 
-When a thread discovers scope nobody predicted, it **finishes the step it's on**, adds the
-newly-discovered mutex label — `screen:<name>` or `system:<name>` — to its own ticket, and
-adds `re-evaluate` to every ticket it now collides with.
+When a thread discovers scope nobody predicted, it **finishes the step it's on** and **reports**
+the newly-discovered mutex label — `screen:<name>` or `system:<name>`. The harness attaches it
+to the ticket and adds `re-evaluate` to every ticket it now collides with.
+
+**Reported, not written, and the distinction is why this used to be a sentence with no
+implementation.** An agent holds the model credential and nothing else; every role prompt
+forbids it from touching labels, for the same reason it cannot move a ticket (§9). So the
+thread that is best placed to notice could not act, and the closest outcome available to it was
+a push-back — which parks finished work and asks a human to add a label by hand. Measured on
+Catapult's `ORC-5`: a complete, green, reviewed diff had to register its new component in
+`config/config.exs`, a path `systems/foundation.md` owns deliberately, and the run's only
+channel was to stop.
+
+**The harness verifies before it attaches**, so declaring is not acquiring: the name has to
+resolve to a real doc, and something in the run's own diff has to be mapped by that doc. A
+label locks a system for every other ticket, and one taken by a run that does not touch it is a
+queue held for nothing. A name that fails either check is refused, recorded on the ticket, and
+does not stop the run finishing — the audit is the backstop, and landing complete work in
+`Blocked` over a label is the failure this path exists to remove.
+
+**A label reports a fact the file maps already decided; it is never permission to widen the
+diff.** The path was touched because the work required it and some doc owns that path. An agent
+that wants a label in order to touch more files is describing a push-back (§2.7).
 
 By the precedence rule, the ticket further along **holds the ground** and the earlier one
 **absorbs**. So `re-evaluate` on a further-along ticket is a *check* — does what I'm doing still

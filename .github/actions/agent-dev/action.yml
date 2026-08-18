@@ -148,6 +148,12 @@ runs:
         git fetch -q origin main
         COMMITS="$(git rev-list --count origin/main..HEAD)"
         echo "commits=$COMMITS" >> "$GITHUB_OUTPUT"
+
+        # The same range the CI audit judges, written where finish can
+        # read it. A mutex label the run reports is checked against this
+        # list before it is attached (DESIGN §7): a lock is taken because
+        # the diff is mapped by that doc, never because the run asked.
+        git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/changed.txt"
         if [ "$COMMITS" -eq 0 ]; then
           echo "the run produced nothing main does not already have; not pushing an empty branch"
           exit 0
@@ -217,6 +223,7 @@ runs:
           --handback "$RUNNER_TEMP/pipeline/handback.md" \
           --commits "${{ steps.push.outputs.commits || -1 }}" \
           --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
+          --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
           --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: abort on failure

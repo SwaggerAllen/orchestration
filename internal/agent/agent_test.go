@@ -163,10 +163,10 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Finish(ctx, p, h, res, "", 3, nil); err == nil {
+	if err := Finish(ctx, p, h, res, "", 3, nil, nil); err == nil {
 		t.Error("empty hand-back must be refused")
 	}
-	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope.", 3, nil); err != nil {
+	if err := Finish(ctx, p, h, res, "Landed the cap screen states. Commit abc123. Left the tooltip out: not in scope.", 3, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Checks {
@@ -192,7 +192,7 @@ func TestFinishCreatesPROrUndraftsAndMovesToChecks(t *testing.T) {
 	if res2.PRNumber != draft.Number {
 		t.Fatalf("claim did not find the draft PR: %+v", res2)
 	}
-	if err := Finish(ctx, p, h, res2, "hand-back", -1, nil); err != nil {
+	if err := Finish(ctx, p, h, res2, "hand-back", -1, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, pr := range h.PRs {
@@ -472,7 +472,7 @@ func TestFinishWithNoCommitsAndNoReasonParksTheTicket(t *testing.T) {
 	}
 
 	handback := "Nothing landed, deliberately: every clause of the scope is already on main."
-	if err := Finish(ctx, p, h, res, handback, 0, nil); err != nil {
+	if err := Finish(ctx, p, h, res, handback, 0, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +514,7 @@ func TestFinishRefusesToGuessWhetherAnythingLanded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Finish(ctx, p, h, res, "hand-back", -1, nil)
+	err = Finish(ctx, p, h, res, "hand-back", -1, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "--commits") {
 		t.Fatalf("want a refusal naming the flag that fixes it, got %v", err)
 	}
@@ -547,7 +547,7 @@ func TestParkWorksOnAProjectMissingTheLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Finish(ctx, p, h, res, "Nothing landed; the scope is already on main.", 0, nil); err != nil {
+	if err := Finish(ctx, p, h, res, "Nothing landed; the scope is already on main.", 0, nil, nil); err != nil {
 		t.Fatalf("a project without the label could not park a ticket: %v", err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
@@ -594,7 +594,7 @@ func TestNamedDevOutcomesRouteSeparately(t *testing.T) {
 				t.Fatal(err)
 			}
 			o := &DevOutcome{Outcome: c.outcome, Summary: "The argument for " + c.outcome + "."}
-			if err := Finish(ctx, p, h, res, "hand-back", 0, o); err != nil {
+			if err := Finish(ctx, p, h, res, "hand-back", 0, o, nil); err != nil {
 				t.Fatal(err)
 			}
 			if got := issueState(t, tr, cfg, i.ID); got != c.state {
@@ -660,7 +660,7 @@ func TestNamedOutcomeWithCommitsSaysSoRatherThanFailing(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DevOutcome{Outcome: "scope-satisfied", Summary: "Already on main."}
-	if err := Finish(ctx, p, h, res, "hand-back", 2, o); err != nil {
+	if err := Finish(ctx, p, h, res, "hand-back", 2, o, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
@@ -696,7 +696,7 @@ func TestAuthorOnlyRunSplitsOffItsBlocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DevOutcome{Outcome: "author-only", Summary: "`.github/workflows/ci.yml` needs the gate armed."}
-	if err := Finish(ctx, p, h, res, "hand-back", 0, o); err != nil {
+	if err := Finish(ctx, p, h, res, "hand-back", 0, o, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -768,5 +768,151 @@ func TestAuthorOnlyRunSplitsOffItsBlocker(t *testing.T) {
 	}
 	if len(after) != len(issues) {
 		t.Errorf("a second filing duplicated the blocker: %d issues, was %d", len(after), len(issues))
+	}
+}
+
+// DESIGN §7's first half, which had no implementation on the dev side.
+// The thread best placed to notice that a diff needs another system's
+// label could not write one, so its only channel was a push-back that
+// parks finished work and asks a human to do by hand what the file maps
+// already decided. Catapult's ORC-5: a complete, green, reviewed diff
+// that had to register its component in config/config.exs.
+func TestFinishAttachesAMutexLabelTheRunReported(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "foundation", "config/**")
+	i := seed(t, tr, cfg, "The loader", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := &DevOutcome{Outcome: "done", Labels: []string{"foundation"}}
+	changed := []string{"lib/dsl/loader.ex", "config/config.exs"}
+	if err := Finish(ctx, p, h, res, "hand-back", 2, o, changed); err != nil {
+		t.Fatal(err)
+	}
+
+	issue := findIssue(t, tr, cfg, i.ID)
+	if !hasLabel(issue.Labels, "system:foundation") {
+		t.Errorf("labels = %v, want the reported one attached", issue.Labels)
+	}
+	// The work still lands: the whole point is not sending it back.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Checks {
+		t.Errorf("state = %q, want %q — a reported label must not park the run", got, protocol.Checks)
+	}
+	var recorded bool
+	for _, c := range issue.Comments {
+		if strings.Contains(c.Body, "system:foundation") && strings.Contains(c.Body, "§7") {
+			recorded = true
+		}
+	}
+	if !recorded {
+		t.Error("nothing on the ticket says who attached the label or why")
+	}
+}
+
+// Declaring is not acquiring. A mutex label locks a system for every
+// other ticket, so the harness checks the name against the file maps and
+// against the run's own diff — a run cannot grant itself a lock by
+// asking for one.
+func TestFinishRefusesALabelTheDiffDoesNotNeed(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "foundation", "config/**")
+	writeDoc(t, cfg, "systems", "core_dsl", "lib/dsl/**")
+
+	for _, c := range []struct {
+		name    string
+		labels  []string
+		changed []string
+		wants   string
+	}{
+		{"untouched", []string{"foundation"}, []string{"lib/dsl/loader.ex"}, "nothing in this diff"},
+		// The ORC-5 spelling, arriving by the other door.
+		{"separator slip", []string{"core-dsl"}, []string{"lib/dsl/loader.ex"}, "did you mean"},
+		{"no map at all", []string{"invented"}, []string{"config/config.exs"}, "matches no doc"},
+		{"unverifiable", []string{"foundation"}, nil, "no changed-file list"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			i := seed(t, tr, cfg, "T "+c.name, "d", protocol.ReadyForDev)
+			res, err := Claim(ctx, p, i.Key, "r-"+c.name, "u", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &DevOutcome{Outcome: "done", Labels: c.labels}
+			if err := Finish(ctx, p, h, res, "hand-back", 2, o, c.changed); err != nil {
+				t.Fatalf("a refused label took the whole run down: %v", err)
+			}
+			issue := findIssue(t, tr, cfg, i.ID)
+			for _, l := range issue.Labels {
+				if strings.HasPrefix(l, "system:") {
+					t.Errorf("attached %q on an unverified request", l)
+				}
+			}
+			// Refused, and the run still finished — that is the trade.
+			if got := issueState(t, tr, cfg, i.ID); got != protocol.Checks {
+				t.Errorf("state = %q, want %q", got, protocol.Checks)
+			}
+			var said bool
+			for _, cm := range issue.Comments {
+				if strings.Contains(cm.Body, c.wants) {
+					said = true
+				}
+			}
+			if !said {
+				t.Errorf("the ticket does not say why it was refused (want %q)", c.wants)
+			}
+		})
+	}
+}
+
+// §7's second half, which nothing implemented either: acquiring a label
+// another in-flight ticket holds is a collision, and the ticket earlier
+// by the precedence rule absorbs it. A run finishing its diff is far
+// along by construction, so the flag normally lands on the other one.
+func TestFinishFlagsTheTicketItCollidesWith(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "foundation", "config/**")
+
+	// Earlier by precedence: Ready for dev against a run in progress.
+	other := seed(t, tr, cfg, "Other work", "d", protocol.ReadyForDev)
+	if err := p.EnsureMutexLabel(ctx, other.ID, "system:foundation"); err != nil {
+		t.Fatal(err)
+	}
+	i := seed(t, tr, cfg, "The loader", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	o := &DevOutcome{Outcome: "done", Labels: []string{"foundation"}}
+	if err := Finish(ctx, p, h, res, "hand-back", 2, o, []string{"config/config.exs"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := findIssue(t, tr, cfg, other.ID); !hasLabel(got.Labels, core.LabelReEvaluate) {
+		t.Errorf("the colliding ticket was not flagged: %v", got.Labels)
+	}
+	if got := findIssue(t, tr, cfg, i.ID); hasLabel(got.Labels, core.LabelReEvaluate) {
+		t.Error("the further-along ticket absorbed instead of holding the ground")
+	}
+}
+
+// A run that changed nothing has no diff for a label to be needed by,
+// and a request there is a misunderstanding worth naming rather than
+// dropping.
+func TestDevOutcomeRefusesLabelsWithoutADiff(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "outcome.json")
+	if err := os.WriteFile(path, []byte(`{"outcome":"pushback","summary":"why","labels":["foundation"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDevOutcome(path); err == nil {
+		t.Error("a parked run was allowed to report a mutex label")
 	}
 }
