@@ -79,6 +79,17 @@ runs:
         PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        # stderr is captured as well as shown, because the step after
+        # this one puts it on the ticket. A claim that dies takes the
+        # only other channel with it: abort needs claim.json to know
+        # what it is aborting, so the loudest failures used to leave
+        # nothing at all behind (DESIGN §12).
+        # mkdir first: the redirect below opens the file before the
+        # claim runs, and the claim is what would otherwise create the
+        # directory — so without this the step dies on the redirect,
+        # before the command it is trying to capture.
+        mkdir -p "$RUNNER_TEMP/pipeline"
+        set +e
         pipeline agent claim \
           --kind boundary \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
@@ -89,7 +100,11 @@ runs:
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/boundary.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/proposals.json" \
-          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          2> "$RUNNER_TEMP/pipeline/claim-error.txt"
+        rc=$?
+        cat "$RUNNER_TEMP/pipeline/claim-error.txt" >&2
+        exit $rc
 
     - name: archive pass + retro note
       shell: bash
@@ -154,6 +169,24 @@ runs:
           ARGS+=(--proposals "$RUNNER_TEMP/pipeline/proposals.json")
         fi
         pipeline agent boundary-file "${ARGS[@]}"
+
+    - name: say so when the claim itself failed
+      if: failure() && steps.claim.outcome == 'failure'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+      run: |
+        # Deliberately no state move: a pickup assertion that refuses is
+        # the guard working and the ticket is fine where it is, while a
+        # snapshot that could not be built is the harness broken, and
+        # this step cannot tell them apart. The stale-claim rule owns
+        # the transition either way.
+        pipeline agent claim-failed \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --ticket "${{ inputs.ticket }}" \
+          --kind boundary \
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --error-file "$RUNNER_TEMP/pipeline/claim-error.txt"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'

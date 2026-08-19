@@ -1181,6 +1181,20 @@ question, and two labels somebody triages identically are two labels they have t
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
 
+**A run that dies before it claims says so, and moves nothing.** Every other failure route posts
+through the abort path, and abort needs the claim file to know what it is aborting — so a run
+that never got one skipped it, and the loudest failures, the ones where the harness broke before
+the agent started, were the only ones that left nothing on the ticket at all. Catapult's `ORC-7`
+sat in `Designing` for 23 minutes showing a healthy state and a dispatched run, after its claim
+died on a 403 reading an unrelated ticket's CI verdict.
+
+The comment records the run and what it printed. It deliberately does **not** move the ticket,
+because the two kinds of claim failure are indistinguishable from there: a pickup assertion that
+refuses is the guard working and the ticket is fine where it is (§6, §9), while a snapshot that
+could not be built is the harness broken. Both exit non-zero. The state stays with the rules
+that own it — the stale-claim timeout, and the author after that. What was missing was never the
+transition; it was that nothing said anything.
+
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation
 can't do — a comment resolving an ambiguity, a code change, a redeploy — and a ticket returned

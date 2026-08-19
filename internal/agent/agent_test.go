@@ -916,3 +916,64 @@ func TestDevOutcomeRefusesLabelsWithoutADiff(t *testing.T) {
 		t.Error("a parked run was allowed to report a mutex label")
 	}
 }
+
+// A run that dies before it claims used to leave nothing at all. Every
+// other failure route posts through abort, and abort needs claim.json
+// to know what it is aborting — so the loudest failures, the harness
+// broken before the agent started, were the silent ones.
+//
+// Catapult's ORC-7: a design claim died 35 seconds in on a 403 reading
+// an unrelated ticket's CI, and the ticket sat in Designing for 23
+// minutes looking healthy, until the stale-claim rule moved it with a
+// comment that could only say a run had stopped being live.
+func TestReportClaimFailureLeavesTheReasonOnTheTicket(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "The loader", "d", protocol.Designing)
+
+	boom := "pipeline: github: GET /repos/o/r/commits/abc/check-runs: HTTP 403: Resource not accessible"
+	if err := ReportClaimFailure(ctx, p, i.Key, "design", "https://gh/run/1", boom); err != nil {
+		t.Fatal(err)
+	}
+
+	issue := findIssue(t, tr, cfg, i.ID)
+	// The state is not this function's to touch: a refused pickup is the
+	// guard working, and it cannot tell that from a broken harness.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
+		t.Errorf("state = %q, want the ticket left where it was", got)
+	}
+	if len(issue.Comments) != 1 {
+		t.Fatalf("comments = %d, want the failure recorded once", len(issue.Comments))
+	}
+	body := issue.Comments[0].Body
+	for _, want := range []string{"check-runs: HTTP 403", "https://gh/run/1", string(marker.ClaimFailed)} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the comment does not carry %q:\n%s", want, body)
+		}
+	}
+}
+
+// The reporter reads the tracker directly and never builds a snapshot,
+// because the likeliest reason a claim failed is that the snapshot could
+// not be built. A reporter needing the subsystem it reports on goes
+// quiet in exactly the case it exists for — so the plane it is handed
+// here carries no host at all, as the command wires it.
+func TestReportClaimFailureNeedsNoHost(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, _ := world(t)
+	hostless := plane.New(tr, cfg)
+	i := seed(t, tr, cfg, "The loader", "d", protocol.ReadyForDev)
+
+	if err := ReportClaimFailure(ctx, hostless, i.Key, "dev", "https://gh/run/2", ""); err != nil {
+		t.Fatalf("the reporter needs a host, so it cannot report a host failure: %v", err)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	if len(issue.Comments) != 1 {
+		t.Fatalf("comments = %d, want one", len(issue.Comments))
+	}
+	// No captured output is still worth a comment, and it must say so
+	// rather than posting an empty code fence.
+	if !strings.Contains(issue.Comments[0].Body, "failed before it could say why") {
+		t.Errorf("an empty reason is not explained:\n%s", issue.Comments[0].Body)
+	}
+}

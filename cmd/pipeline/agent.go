@@ -33,6 +33,8 @@ func cmdAgent(args []string) error {
 		return cmdAgentFinish(args[1:])
 	case "abort":
 		return cmdAgentAbort(args[1:])
+	case "claim-failed":
+		return cmdAgentClaimFailed(args[1:])
 	case "boundary-archive":
 		return cmdBoundaryArchive(args[1:])
 	case "boundary-file":
@@ -931,4 +933,53 @@ func harnessFindingsForBoundary(fs []agent.HarnessFinding) string {
 		fmt.Fprintf(&b, "\n### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
 	}
 	return b.String()
+}
+
+// cmdAgentClaimFailed records a run that died before it claimed.
+//
+// Its own subcommand rather than a flag on abort, because abort's whole
+// contract is claim.json — what state the run held, what role to record
+// the move under — and a run that never claimed has none of it. This
+// takes only what the workflow already knows.
+func cmdAgentClaimFailed(args []string) error {
+	fs := flag.NewFlagSet("claim-failed", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	ticket := fs.String("ticket", "", "ticket key the failed run was dispatched for")
+	kind := fs.String("kind", "", "agent kind: design, dev, reconcile, boundary")
+	runURL := fs.String("run-url", "", "the workflow run that failed")
+	errPath := fs.String("error-file", "", "file holding the claim's stderr")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *ticket == "" || *kind == "" {
+		return fmt.Errorf("agent claim-failed: --ticket and --kind are required")
+	}
+	var reason string
+	if *errPath != "" {
+		raw, err := os.ReadFile(*errPath)
+		// Absent is not fatal: the comment is worth posting with "no
+		// output was captured" in it, and refusing here would put this
+		// command in the same class as the failure it reports.
+		if err == nil {
+			reason = string(raw)
+		}
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	apiKey := os.Getenv("LINEAR_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("agent claim-failed: LINEAR_API_KEY is not set")
+	}
+	// Tracker only — no host, no state store. agentDeps would wire both,
+	// and the host is the likeliest thing to have just failed: a
+	// reporter that needs the subsystem it is reporting on is a reporter
+	// that goes quiet exactly when it is needed.
+	p := plane.New(linear.New(apiKey), cfg)
+	if err := agent.ReportClaimFailure(context.Background(), p, *ticket, *kind, *runURL, reason); err != nil {
+		return err
+	}
+	fmt.Printf("claim-failed %s: recorded on the ticket\n", *ticket)
+	return nil
 }

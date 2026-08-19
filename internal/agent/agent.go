@@ -811,3 +811,65 @@ func recordDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResul
 	}
 	return p.CommentTicket(ctx, res.TicketID, b.String())
 }
+
+// ReportClaimFailure puts a failed claim on the ticket.
+//
+// It deliberately does not move the ticket, and the reason is that this
+// function cannot tell the two kinds of claim failure apart. A pickup
+// assertion that refuses is the guard working — the ticket is fine
+// where it is and a human needs no telling — while a snapshot that
+// could not be built is the harness broken. Both exit non-zero. Moving
+// on the first would park tickets the protocol deliberately left alone,
+// so the state stays with the rules that own it: the stale-claim
+// timeout for a run that died mid-flight, and the author after that
+// (DESIGN §12).
+//
+// What was missing was never the transition. It was that nothing said
+// anything: ORC-7's design claim died on a 403 reading another ticket's
+// CI, and the ticket sat in Designing for 23 minutes showing a healthy
+// state and a dispatched run, until the stale-claim rule moved it with
+// a comment that could only say a run had stopped being live.
+//
+// Reads the tracker directly rather than through a snapshot, which is
+// the whole point: the most likely reason a claim failed is that the
+// snapshot could not be built, and a reporter that needs one would fail
+// in exactly the case it exists for.
+func ReportClaimFailure(ctx context.Context, p *plane.Plane, ticketKey, kind, runURL, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "The run failed before it could say why; the workflow log is the only record."
+	}
+	issues, err := p.Tracker.ListIssues(ctx, p.Config.Tracker.TeamID, p.Config.Tracker.ProjectID)
+	if err != nil {
+		return fmt.Errorf("claim-failed %s: reading the project: %w", ticketKey, err)
+	}
+	id := ""
+	for _, i := range issues {
+		if i.Key == ticketKey {
+			id = i.ID
+		}
+	}
+	if id == "" {
+		return fmt.Errorf("claim-failed: no ticket %q in the project scope", ticketKey)
+	}
+	m := marker.Marker{Kind: marker.ClaimFailed, Fields: map[string]string{
+		"kind": kind,
+		"run":  runURL,
+	}}
+	prose := fmt.Sprintf("The %s run dispatched for this ticket failed before it claimed it, so nothing here moved and no agent worked on it.\n\n```\n%s\n```\n\nThe ticket is where it was. If the run died on a broken harness this is the record of it; if the pickup assertion refused the claim, that refusal is the pipeline working and the message above says which (DESIGN §6, §9).",
+		kind, tail(reason, claimErrorLines))
+	return p.CommentTicket(ctx, id, m.Comment(prose))
+}
+
+// claimErrorLines bounds what a failed claim pastes onto a ticket. The
+// message is one line in every case seen so far; the bound is for the
+// case that is not, because a wall of stack is a comment nobody reads.
+const claimErrorLines = 20
+
+func tail(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return "(earlier output trimmed)\n" + strings.Join(lines[len(lines)-n:], "\n")
+}
