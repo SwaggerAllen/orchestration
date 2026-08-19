@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -1144,5 +1145,60 @@ func TestAuthorOnlyInADevStateDoesNotFreezeTheQueue(t *testing.T) {
 		if d := find(Sweep(snap(mine, queued)), ActDispatch, "T2"); d == nil {
 			t.Errorf("an author-only ticket in %s held the dev agent", st)
 		}
+	}
+}
+
+// Every refusal carries the sentinel, and nothing else does. The
+// distinction is what lets a workflow park a ticket on a harness
+// failure without parking one the protocol deliberately left alone —
+// so a refusal that forgot to carry it would be filed as a broken
+// pipeline, and a genuine failure that acquired it would be filed as
+// the pipeline working and told nobody.
+func TestEveryPickupRefusalIsMarkedAsOne(t *testing.T) {
+	cases := []struct {
+		name string
+		snap *Snapshot
+		id   string
+		kind AgentKind
+	}{
+		{"kill switch", func() *Snapshot {
+			s := snap(tk("T1", protocol.ReadyForDev))
+			s.KillSwitch = true
+			return s
+		}(), "T1", AgentDev},
+		{"author-only", snap(tk("T1", protocol.ReadyForDev, func(t *Ticket) {
+			t.Labels = []string{LabelAuthorOnly}
+		})), "T1", AgentDev},
+		{"wrong state", snap(tk("T1", protocol.Todo)), "T1", AgentDev},
+		{"re-evaluate", snap(tk("T1", protocol.ReadyForDev, func(t *Ticket) {
+			t.Labels = []string{LabelReEvaluate}
+		})), "T1", AgentDev},
+		{"mutex held", snap(
+			tk("T1", protocol.Checks, func(t *Ticket) { t.Labels = []string{"system:core"} }),
+			tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"system:core"} }),
+		), "T2", AgentDev},
+		{"unknown ticket", snap(tk("T1", protocol.ReadyForDev)), "nope", AgentDev},
+		{"unknown kind", snap(tk("T1", protocol.ReadyForDev)), "T1", AgentKind("wat")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := VerifyPickup(c.snap, c.id, c.kind, "r1")
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !Refused(err) {
+				t.Errorf("refusal is not marked as one, so a workflow would park the ticket: %v", err)
+			}
+			// The sentinel must not swallow the reason a human reads.
+			if len(err.Error()) < 20 {
+				t.Errorf("refusal lost its message: %q", err)
+			}
+		})
+	}
+
+	// And the negative: a snapshot the harness could not build is not a
+	// refusal, however it reaches the caller.
+	if Refused(errors.New("github: HTTP 403: Resource not accessible")) {
+		t.Error("a harness failure reads as a refusal, so nobody would be told about it")
 	}
 }

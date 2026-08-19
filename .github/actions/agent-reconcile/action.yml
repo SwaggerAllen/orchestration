@@ -103,6 +103,11 @@ runs:
           --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
           2> "$RUNNER_TEMP/pipeline/claim-error.txt"
         rc=$?
+        # Written to a file rather than a step output: an output on a
+        # failed step is not somewhere to bet a state transition on, and
+        # the next step reads this to tell a refused pickup (the
+        # pipeline working) from a harness failure (the author's).
+        echo "$rc" > "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
         cat "$RUNNER_TEMP/pipeline/claim-error.txt" >&2
         exit $rc
 
@@ -154,17 +159,18 @@ runs:
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
       run: |
-        # Deliberately no state move: a pickup assertion that refuses is
-        # the guard working and the ticket is fine where it is, while a
-        # snapshot that could not be built is the harness broken, and
-        # this step cannot tell them apart. The stale-claim rule owns
-        # the transition either way.
+        # Routes on the claim's exit status: a refused pickup is the
+        # pipeline working and only earns a comment, while a harness
+        # failure parks the ticket in Blocked — the same place the
+        # stale-claim rule would reach twenty minutes later, with the
+        # reason attached instead of "a run stopped being live".
         pipeline agent claim-failed \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --ticket "${{ inputs.ticket }}" \
           --kind reconcile \
           --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-          --error-file "$RUNNER_TEMP/pipeline/claim-error.txt"
+          --error-file "$RUNNER_TEMP/pipeline/claim-error.txt" \
+          --exit-code-file "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'

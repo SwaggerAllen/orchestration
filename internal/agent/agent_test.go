@@ -932,15 +932,16 @@ func TestReportClaimFailureLeavesTheReasonOnTheTicket(t *testing.T) {
 	i := seed(t, tr, cfg, "The loader", "d", protocol.Designing)
 
 	boom := "pipeline: github: GET /repos/o/r/commits/abc/check-runs: HTTP 403: Resource not accessible"
-	if err := ReportClaimFailure(ctx, p, i.Key, "design", "https://gh/run/1", boom); err != nil {
+	if err := ReportClaimFailure(ctx, p, i.Key, "design", "https://gh/run/1", boom, false); err != nil {
 		t.Fatal(err)
 	}
 
 	issue := findIssue(t, tr, cfg, i.ID)
-	// The state is not this function's to touch: a refused pickup is the
-	// guard working, and it cannot tell that from a broken harness.
-	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
-		t.Errorf("state = %q, want the ticket left where it was", got)
+	// The harness failed, so the ticket parks — the same place the
+	// stale-claim rule would have reached twenty minutes later, with
+	// the reason attached rather than "a run stopped being live".
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want %q", got, protocol.Blocked)
 	}
 	if len(issue.Comments) != 1 {
 		t.Fatalf("comments = %d, want the failure recorded once", len(issue.Comments))
@@ -964,7 +965,7 @@ func TestReportClaimFailureNeedsNoHost(t *testing.T) {
 	hostless := plane.New(tr, cfg)
 	i := seed(t, tr, cfg, "The loader", "d", protocol.ReadyForDev)
 
-	if err := ReportClaimFailure(ctx, hostless, i.Key, "dev", "https://gh/run/2", ""); err != nil {
+	if err := ReportClaimFailure(ctx, hostless, i.Key, "dev", "https://gh/run/2", "", false); err != nil {
 		t.Fatalf("the reporter needs a host, so it cannot report a host failure: %v", err)
 	}
 	issue := findIssue(t, tr, cfg, i.ID)
@@ -975,5 +976,36 @@ func TestReportClaimFailureNeedsNoHost(t *testing.T) {
 	// rather than posting an empty code fence.
 	if !strings.Contains(issue.Comments[0].Body, "failed before it could say why") {
 		t.Errorf("an empty reason is not explained:\n%s", issue.Comments[0].Body)
+	}
+}
+
+// A refused pickup is the pipeline working. The mutex is held, or an
+// agent of that kind is already running, or a blocker is open — the
+// ticket is exactly where it should be, and parking it would take work
+// the protocol deliberately left alone out of the queue.
+//
+// This is the half that makes the park above safe. Without the
+// distinction the reporter could only comment, because half its callers
+// were the guard doing its job.
+func TestReportClaimFailureLeavesARefusedPickupWhereItIs(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Queued work", "d", protocol.ReadyForDev)
+
+	refusal := "pickup ORC-9: mutex label \"system:foundation\" already in flight on ORC-5 (DESIGN §6)"
+	if err := ReportClaimFailure(ctx, p, i.Key, "dev", "https://gh/run/3", refusal, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
+		t.Errorf("state = %q, want the ticket left in the queue", got)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	body := issue.Comments[0].Body
+	if !strings.Contains(body, "refused=true") {
+		t.Errorf("the marker does not record which kind of failure this was:\n%s", body)
+	}
+	if !strings.Contains(body, "pipeline working") {
+		t.Errorf("a refusal reads as a fault:\n%s", body)
 	}
 }

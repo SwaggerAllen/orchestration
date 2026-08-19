@@ -1181,19 +1181,28 @@ question, and two labels somebody triages identically are two labels they have t
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
 
-**A run that dies before it claims says so, and moves nothing.** Every other failure route posts
-through the abort path, and abort needs the claim file to know what it is aborting — so a run
-that never got one skipped it, and the loudest failures, the ones where the harness broke before
-the agent started, were the only ones that left nothing on the ticket at all. Catapult's `ORC-7`
-sat in `Designing` for 23 minutes showing a healthy state and a dispatched run, after its claim
-died on a 403 reading an unrelated ticket's CI verdict.
+**A run that dies before it claims says so, and a broken harness parks the ticket.** Every other
+failure route posts through the abort path, and abort needs the claim file to know what it is
+aborting — so a run that never got one skipped it, and the loudest failures, the ones where the
+harness broke before the agent started, were the only ones that left nothing on the ticket at
+all. Catapult's `ORC-7` sat in `Designing` for 23 minutes showing a healthy state and a
+dispatched run, after its claim died on a 403 reading an unrelated ticket's CI verdict.
 
-The comment records the run and what it printed. It deliberately does **not** move the ticket,
-because the two kinds of claim failure are indistinguishable from there: a pickup assertion that
-refuses is the guard working and the ticket is fine where it is (§6, §9), while a snapshot that
-could not be built is the harness broken. Both exit non-zero. The state stays with the rules
-that own it — the stale-claim timeout, and the author after that. What was missing was never the
-transition; it was that nothing said anything.
+**Two failures wear the same shape, and they want opposite handling.** A pickup assertion that
+refuses is the pipeline working — a held mutex, an agent of that kind already running, an open
+blocker — and the ticket is exactly where it should be; parking it would pull work the protocol
+deliberately left alone out of the queue. A snapshot that could not be built is the harness
+unable to evaluate the question at all, which is a failure like any other and the author's to
+see. Both are a claim command exiting non-zero.
+
+So refusal is **a type, not a phrasing**: every branch of the pickup assertion carries a
+sentinel, the claim exits `2` for it and `1` for everything else, and the workflow routes on the
+status rather than on prose that a reword would silently change. A refusal earns a comment and
+nothing more. Anything else earns a comment and `Blocked` — the same place the stale-claim rule
+would have reached twenty minutes later, now immediately and carrying the reason instead of "a
+run stopped being live". An unreadable status is treated as a failure, because a refusal parked
+by mistake is one click to undo and a failure filed as a refusal is a broken pipeline nobody is
+told about.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation

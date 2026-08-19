@@ -812,29 +812,29 @@ func recordDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResul
 	return p.CommentTicket(ctx, res.TicketID, b.String())
 }
 
-// ReportClaimFailure puts a failed claim on the ticket.
+// ReportClaimFailure puts a failed claim on the ticket, and parks it
+// when the harness is what failed.
 //
-// It deliberately does not move the ticket, and the reason is that this
-// function cannot tell the two kinds of claim failure apart. A pickup
-// assertion that refuses is the guard working — the ticket is fine
-// where it is and a human needs no telling — while a snapshot that
-// could not be built is the harness broken. Both exit non-zero. Moving
-// on the first would park tickets the protocol deliberately left alone,
-// so the state stays with the rules that own it: the stale-claim
-// timeout for a run that died mid-flight, and the author after that
-// (DESIGN §12).
+// Two failures wear the same shape — a claim command exiting non-zero —
+// and they want opposite handling. `refused` is the pickup assertion
+// declining: a held mutex, a busy agent, an open blocker. The pipeline
+// is working, the ticket is where it should be, and moving it would
+// park work the protocol deliberately left alone. Anything else is the
+// harness unable to evaluate the question at all, which is a §12
+// failure like any other and the author's to see.
 //
-// What was missing was never the transition. It was that nothing said
-// anything: ORC-7's design claim died on a 403 reading another ticket's
-// CI, and the ticket sat in Designing for 23 minutes showing a healthy
-// state and a dispatched run, until the stale-claim rule moved it with
-// a comment that could only say a run had stopped being live.
+// Splitting them is what makes the park safe. Without the distinction
+// this function could only comment, because half its callers were the
+// guard doing its job — so ORC-7's claim died building a snapshot and
+// the ticket sat in Designing for 23 minutes, showing a healthy state
+// and a dispatched run, until the stale-claim rule moved it to the same
+// Blocked this now reaches immediately and with the reason attached.
 //
 // Reads the tracker directly rather than through a snapshot, which is
 // the whole point: the most likely reason a claim failed is that the
 // snapshot could not be built, and a reporter that needs one would fail
 // in exactly the case it exists for.
-func ReportClaimFailure(ctx context.Context, p *plane.Plane, ticketKey, kind, runURL, reason string) error {
+func ReportClaimFailure(ctx context.Context, p *plane.Plane, ticketKey, kind, runURL, reason string, refused bool) error {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		reason = "The run failed before it could say why; the workflow log is the only record."
@@ -853,12 +853,29 @@ func ReportClaimFailure(ctx context.Context, p *plane.Plane, ticketKey, kind, ru
 		return fmt.Errorf("claim-failed: no ticket %q in the project scope", ticketKey)
 	}
 	m := marker.Marker{Kind: marker.ClaimFailed, Fields: map[string]string{
-		"kind": kind,
-		"run":  runURL,
+		"kind":    kind,
+		"run":     runURL,
+		"refused": fmt.Sprintf("%t", refused),
 	}}
-	prose := fmt.Sprintf("The %s run dispatched for this ticket failed before it claimed it, so nothing here moved and no agent worked on it.\n\n```\n%s\n```\n\nThe ticket is where it was. If the run died on a broken harness this is the record of it; if the pickup assertion refused the claim, that refusal is the pipeline working and the message above says which (DESIGN §6, §9).",
-		kind, tail(reason, claimErrorLines))
-	return p.CommentTicket(ctx, id, m.Comment(prose))
+	var prose string
+	if refused {
+		prose = fmt.Sprintf("The %s run dispatched for this ticket was refused by the pickup assertion, so no agent worked on it and nothing here moved.\n\n```\n%s\n```\n\n**This is the pipeline working, not a fault.** The ticket is where it should be; whatever the refusal names — a held mutex, an agent already running, an open blocker — clears on its own and the sweep dispatches again (DESIGN §6, §9).",
+			kind, tail(reason, claimErrorLines))
+		return p.CommentTicket(ctx, id, m.Comment(prose))
+	}
+	prose = fmt.Sprintf("The %s run dispatched for this ticket could not start: it failed before claiming, so no agent worked on it.\n\n```\n%s\n```\n\nThis is the harness failing rather than the protocol refusing, so the ticket is parked here for you rather than left looking dispatched (DESIGN §12). The run is at %s.",
+		kind, tail(reason, claimErrorLines), runURL)
+	if err := p.CommentTicket(ctx, id, m.Comment(prose)); err != nil {
+		return err
+	}
+	// Blocked is where the stale-claim rule would have put it twenty
+	// minutes later anyway. The same destination, immediately, with the
+	// reason attached instead of "a run stopped being live".
+	//
+	// RoleControlPlane and not the agent's: no agent ran. The move is
+	// the plane's own, which is also what keeps the §9 matrix from
+	// reading it as a hand-move to revert.
+	return p.TransitionTicket(ctx, id, protocol.Blocked, core.RoleControlPlane)
 }
 
 // claimErrorLines bounds what a failed claim pastes onto a ticket. The

@@ -948,6 +948,8 @@ func cmdAgentClaimFailed(args []string) error {
 	kind := fs.String("kind", "", "agent kind: design, dev, reconcile, boundary")
 	runURL := fs.String("run-url", "", "the workflow run that failed")
 	errPath := fs.String("error-file", "", "file holding the claim's stderr")
+	codePath := fs.String("exit-code-file", "", "file holding the claim's exit status; "+
+		fmt.Sprintf("%d means the pickup assertion refused, anything else means the harness failed", exitRefused))
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -977,7 +979,18 @@ func cmdAgentClaimFailed(args []string) error {
 	// reporter that needs the subsystem it is reporting on is a reporter
 	// that goes quiet exactly when it is needed.
 	p := plane.New(linear.New(apiKey), cfg)
-	if err := agent.ReportClaimFailure(context.Background(), p, *ticket, *kind, *runURL, reason); err != nil {
+	// Unreadable defaults to "the harness failed", which parks the
+	// ticket. The two ways to be wrong are not equal: a refusal parked
+	// as a failure is a ticket the author moves back in one click, and a
+	// failure filed as a refusal is a broken pipeline nobody is told
+	// about.
+	refused := false
+	if *codePath != "" {
+		if raw, err := os.ReadFile(*codePath); err == nil {
+			refused = strings.TrimSpace(string(raw)) == fmt.Sprintf("%d", exitRefused)
+		}
+	}
+	if err := agent.ReportClaimFailure(context.Background(), p, *ticket, *kind, *runURL, reason, refused); err != nil {
 		return err
 	}
 	fmt.Printf("claim-failed %s: recorded on the ticket\n", *ticket)
