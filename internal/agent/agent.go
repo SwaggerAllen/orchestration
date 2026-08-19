@@ -218,6 +218,13 @@ func Claim(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchU
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Description: t.Description, Labels: append([]string(nil), t.Labels...),
+		// The refusals that bind this ticket (DESIGN §4). Only design's
+		// prompt carried them before, on the reading that the document
+		// constrains what gets proposed — but "no client-side
+		// validation on the cap form" binds whoever writes the
+		// validation, and that is this pass. Affordable now because it
+		// arrives scoped rather than whole.
+		NonAsks: ClaimNonAsks(p.Config),
 	}
 	claimState := protocol.InProgress
 	res.Mode = "dev"

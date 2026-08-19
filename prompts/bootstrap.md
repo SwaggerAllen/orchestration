@@ -55,10 +55,34 @@ find none. An invented non-ask is worse than an absent one: it silently
 forecloses work nobody actually ruled out, and it will read as the
 author's decision to every pass that follows.
 
-Format is one bullet per entry, the refusal then the reason, newest
-last. A per-system refusal belongs in that system's standing decisions
-instead; this file is for the product-level ones a system doc has no
-claim on.
+Format is one entry per `## ` heading — the refusal as the heading, a
+`scope:` line, then the reason:
+
+```markdown
+## No offline mode
+scope: universal
+
+The sync cost outweighs the demand.
+
+## No client-side validation on the cap form
+scope: screen:cap, system:billing
+
+The server is the only authority; a second copy of the rules drifts.
+```
+
+`scope:` is a list of the screen and system labels the refusal is about,
+or `universal` for one that binds every pass. The harness selects on it:
+a pass is shown the universal entries plus the ones scoped to what it is
+working on, so an entry scoped to nothing is an entry every pass carries
+forever (DESIGN §4). Name every screen and system a refusal touches
+rather than the closest one — an extra name costs a paragraph, a missing
+one hides the refusal from the pass that would have broken it. When in
+doubt, `universal`.
+
+This file is for what the author refused to have built. It is not the
+place for how a system deliberately works — "this cache is write-through
+because ..." is a standing decision in that system's doc, even when it
+is phrased as a negative.
 
 **`CLAUDE.md` — what only this repo can say.** Claude Code loads it
 automatically, for agent runs and for humans working here by hand.

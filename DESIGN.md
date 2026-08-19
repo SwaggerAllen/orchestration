@@ -345,13 +345,51 @@ design agent maintains it like any other design artifact: entries are added and 
 same commit as the artifacts, reviewed in the same Design review sign-off, and never deleted,
 because a refusal that quietly disappears is one the pipeline proposes again next quarter.
 
-The harness inlines it into the prompt of every pass that proposes — design and boundary — for
-the same reason it inlines the scope: a prompt whose most important input is "go read this
-file" is a prompt whose most important input is optional. The section says which of three
-things happened: here it is, the repo records none, or the read failed. The last two look
-identical in an empty section and license very different confidence. Proposing a recorded
-non-ask isn't forbidden, but do it knowing you are arguing against a recorded decision, and
-say so in the issue.
+The harness inlines it rather than telling a pass where to find it, for the same reason it
+inlines the scope: a prompt whose most important input is "go read this file" is a prompt whose
+most important input is optional. The section says which of three things happened: here it is,
+the repo records none, or the read failed. The last two look identical in an empty section and
+license very different confidence. Proposing a recorded non-ask isn't forbidden, but do it
+knowing you are arguing against a recorded decision, and say so in the issue.
+
+**Every pass gets it, and each gets only the entries that bind it.** Both halves of that
+changed together, and neither works alone.
+
+Every pass, because the document was design's and boundary's alone on the reading that it
+constrains what gets *proposed*. But "no client-side validation on the cap form" binds whoever
+writes the validation, and that is the dev pass — which was never told. Reconciliation is the
+last gate before the merge (§11), so it is the last chance to catch a refusal contradicted in
+passing.
+
+Only what binds them, because the document grows by rule. "Never delete" is right and stays —
+a refusal that quietly disappears is one the pipeline proposes again — but it means the file
+only ever gets longer, and most entries are about one screen or one system. Measured on
+Catapult's ORC-84: 83468 bytes, inside a design prompt that was 92825 bytes before it reached
+the ticket, from three files, one of which was 65% of the total. That is what made giving it to
+every pass affordable rather than three times worse.
+
+**So an entry carries a scope: a list of the screen and system labels it is about, or
+`universal`.** A list, rather than moving each entry into the doc that owns it: the docs would
+scope entries for free off the file maps, but then a refusal touching several things is either
+marked global — back in every prompt — or copied into each doc, which is drift with extra
+steps. A list has one representation for that case.
+
+An entry is selected when it is universal, when the ticket carries one of its labels, or when
+one of those labels' names appears in the ticket's own words. That last clause is load-bearing
+rather than a convenience: **a first design pass carries no mutex labels at all**, because the
+design pass is what creates them (§6), so label matching alone would show design nothing but
+the universal set — and design is the pass the document is written for. Matching a name in the
+ticket's words is what the class audit already does (§9), for the same reason: at the moment
+the question is asked, the words are all there is.
+
+**Selection fails open.** An entry with no scope is universal, and a file with no headings at
+all is one universal entry — which is also the migration path, since every project's existing
+flat file keeps behaving exactly as it does now until somebody rewrites it. Over-selecting
+costs a pass one paragraph it did not need; under-selecting hides a refusal from the pass that
+would have broken it, and the author catches it at Design review having been told it was
+checked. And a selected section **says it is a selection**, with the count and the path, because
+a filtered list that does not announce itself reads as the whole document — after which "the
+non-asks don't mention it" is a conclusion the pass had no grounds for.
 
 ---
 

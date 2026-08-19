@@ -31,6 +31,13 @@ the diff.
   something design must know about — file maps included — and then say
   so in your hand-back. Rewriting design artifacts wholesale is design's
   job, not yours.
+- **The confirmed non-asks bind you too.** The section below carries the
+  refusals scoped to this ticket — things the author decided against,
+  with the reason. Implementing one is not a small deviation, it is
+  landing work that was already refused. If the scope you were given
+  requires one, that is a push-back. The file is design's to maintain,
+  not yours: propose the change in your hand-back rather than editing it.
+
 - **Stay inside your labels, and report the one you turn out to need.**
   CI audits the diff against the screen and system file maps: touching a
   mapped path without that ticket label fails the build. When your work
