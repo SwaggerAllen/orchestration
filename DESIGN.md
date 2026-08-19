@@ -1181,6 +1181,19 @@ question, and two labels somebody triages identically are two labels they have t
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
 
+**Project-wide reads are fatal to a snapshot; per-ticket reads degrade it.** The agent-run list
+and the open-PR list describe the whole project, and a snapshot missing either is not a
+snapshot. A CI verdict or a merge state belongs to one ticket, so losing it costs that ticket
+its facts and nothing else: it is reported and skipped, and the core reads the absence as "not
+judged yet" and waits. A stalled ticket instead of a stalled project.
+
+The rule is stated because it was not obeyed, and the failure did not look like what it was.
+One 403 reading `ORC-5`'s checks aborted the snapshot build — and every claim builds a snapshot,
+so it aborted `ORC-7`'s design claim too, a ticket with no relation to it. What is given up is
+real and is the trade: a ticket whose verdict cannot be read now waits quietly rather than
+failing loudly, so the honest report of the failure has to come from somewhere else, which is
+what the claim-failure record below is for.
+
 **A run that dies before it claims says so, and a broken harness parks the ticket.** Every other
 failure route posts through the abort path, and abort needs the claim file to know what it is
 aborting — so a run that never got one skipped it, and the loudest failures, the ones where the

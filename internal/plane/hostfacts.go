@@ -2,6 +2,8 @@ package plane
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
@@ -13,6 +15,15 @@ import (
 // latest agent run correlated by run-name, and the PR's check verdict for
 // tickets sitting in Checks. Host nil means no facts, which the core reads
 // as "awaiting dispatch" / "no verdict" — safe in both directions.
+//
+// **Project-wide reads are fatal; per-ticket reads degrade.** The run
+// list and the open-PR list describe the whole project, and a snapshot
+// missing either is not a snapshot. A verdict or a merge state belongs
+// to one ticket, and losing it costs exactly that ticket its facts —
+// so it is reported and skipped rather than taking every other ticket
+// down with it. That distinction is the whole of the rule; the reason
+// it is written here is that it was not obeyed and the failure looked
+// like something else entirely (see the verdict read below).
 func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) error {
 	if p.Host == nil {
 		return nil
@@ -61,7 +72,22 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 		if t.State == protocol.Checks && !pr.Draft {
 			checks, err := p.Host.ChecksFor(ctx, pr.HeadSHA)
 			if err != nil {
-				return err
+				// This ticket's verdict is unreadable; every other
+				// ticket's facts are not. Aborting here made one host
+				// read fatal to the whole snapshot, and therefore to
+				// every claim in the project — Catapult's ORC-7 died
+				// building a snapshot over a 403 on ORC-5's CI, a ticket
+				// it had no interest in, and sat 23 minutes in a state
+				// that said an agent was working on it.
+				//
+				// Same rule attachDeployFacts already follows, and the
+				// same sentence justifies it: a fact the plane cannot
+				// read must not cost it the facts it can. Degrading
+				// leaves this ticket with no verdict, which the core
+				// reads as "not judged yet" and waits on — a stalled
+				// ticket instead of a stalled project.
+				fmt.Fprintf(os.Stderr, "pipeline: %s: CI verdict unreadable, leaving it unjudged: %v\n", t.Key, err)
+				continue
 			}
 			switch checks.Status {
 			case host.ChecksGreen:
@@ -80,7 +106,13 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 			// found is one the pure core cannot be tested against.
 			ms, err := p.Host.MergeStateFor(ctx, pr.Number)
 			if err != nil {
-				return err
+				// Per-ticket like the verdict above, and degraded the
+				// same way. Unknown mergeability is already a state the
+				// core handles — GitHub answers "not yet" the same way
+				// it answers nothing, so the conflict rule is written
+				// never to act on it.
+				fmt.Fprintf(os.Stderr, "pipeline: %s: merge state unreadable, leaving it unknown: %v\n", t.Key, err)
+				continue
 			}
 			t.CI.Mergeable = core.MergeState(ms)
 			t.CI.PRNumber = pr.Number

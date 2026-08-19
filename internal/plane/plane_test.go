@@ -9,6 +9,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
 	"github.com/SwaggerAllen/orchestration/internal/state"
@@ -469,5 +470,53 @@ func TestBuildReadsUnmappedResolvedStatesByCategory(t *testing.T) {
 		if got[id] != w {
 			t.Errorf("%s read as %q, want %q", id, got[id], w)
 		}
+	}
+}
+
+// One ticket's unreadable CI verdict costs that ticket its verdict, and
+// nothing else. It used to cost the whole snapshot, and therefore every
+// claim in the project: Catapult's ORC-7 design claim died building a
+// snapshot over a 403 reading ORC-5's checks — a ticket it had no
+// interest in — and sat 23 minutes in a state that said an agent was
+// working on it.
+//
+// The rule the fix states: project-wide reads are fatal, per-ticket
+// reads degrade. attachDeployFacts already worked this way; this one
+// did not.
+func TestBuildDegradesOneTicketsUnreadableVerdict(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	h := host.NewMemory()
+	p = p.WithHost(h)
+
+	broken := seedIssue(t, tr, cfg, "In checks, unreadable", protocol.Checks)
+	fine := seedIssue(t, tr, cfg, "In checks, readable", protocol.Checks)
+	queued := seedIssue(t, tr, cfg, "Waiting to be claimed", protocol.ReadyForDev)
+
+	h.PRs = []host.PR{
+		{Number: 1, Branch: broken.Key + "-a", HeadSHA: "sha-broken"},
+		{Number: 2, Branch: fine.Key + "-b", HeadSHA: "sha-fine"},
+	}
+	h.FailChecksFor["sha-broken"] = true
+	h.CheckState["sha-fine"] = host.Checks{Status: host.ChecksGreen, RunURL: "https://gh/2"}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("one ticket's 403 took the whole snapshot down: %v", err)
+	}
+
+	got := map[string]*core.Ticket{}
+	for _, tk := range snap.Tickets {
+		got[tk.ID] = tk
+	}
+	// Unjudged, which the core waits on rather than acting against.
+	if s := got[broken.ID].CI.Status; s != "" {
+		t.Errorf("the unreadable ticket carries a verdict %q — it must carry none", s)
+	}
+	if s := got[fine.ID].CI.Status; s != core.CIGreen {
+		t.Errorf("the readable ticket lost its verdict: %q", s)
+	}
+	if got[queued.ID] == nil {
+		t.Error("a ticket with no PR at all went missing from the snapshot")
 	}
 }
