@@ -395,3 +395,24 @@ func TestDevPromptCarriesTheNonAsksItIsBoundBy(t *testing.T) {
 		t.Error("the dev prompt tells dev to maintain a design-owned document")
 	}
 }
+
+// Three empty states, not two. A project that has recorded nothing yet,
+// a project whose refusals are all scoped elsewhere, and a project with
+// no file license different confidence in a proposal, and only one of
+// them is permission.
+func TestNonAsksSectionDistinguishesAllThreeEmptyStates(t *testing.T) {
+	recordedNone := nonAsksSection(
+		&agent.NonAsks{Path: "non-asks.md", Found: true, Body: "# Confirmed non-asks\n"},
+		"proposing", true, &ticketScope{Labels: []string{"screen:cap"}},
+	)
+	if !strings.Contains(recordedNone, "records no refusals yet") {
+		t.Errorf("a fresh file reads as something else: %s", recordedNone)
+	}
+	if strings.Contains(recordedNone, "Confirmed non-asks\n---") {
+		t.Errorf("the document title was rendered as a refusal: %s", recordedNone)
+	}
+	noFile := nonAsksSection(&agent.NonAsks{Path: "non-asks.md"}, "proposing", true, &ticketScope{})
+	if !strings.Contains(noFile, "The repo has no") {
+		t.Errorf("an absent file reads as something else: %s", noFile)
+	}
+}

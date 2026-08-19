@@ -58,11 +58,19 @@ func (e Entry) IsUniversal() bool { return len(e.Scope) == 0 }
 // the parse, because it is not a refusal and repeating it in every
 // prompt is what this package exists to stop.
 //
-// A file with no headings at all parses as a single universal entry
+// A file with no `## ` headings parses as a single universal entry
 // holding the whole body. That is not a fallback, it is the migration
 // path: every project's file works exactly as it does today until
 // somebody rewrites it, and no project has to be converted before this
 // ships.
+//
+// A file holding nothing but its own `# ` title parses as no entries at
+// all, which is the shape a project starts with — the file is created in
+// the bootstrap commit, before anything has been refused. "The author
+// has recorded none" has to stay distinguishable from "the file was not
+// there" and from "none of them are scoped to you", because those three
+// license different confidence in a proposal and only one of them is
+// permission.
 func Parse(body string) []Entry {
 	lines := strings.Split(body, "\n")
 	var entries []Entry
@@ -95,10 +103,43 @@ func Parse(body string) []Entry {
 	}
 	flush()
 
-	if len(entries) == 0 && strings.TrimSpace(body) != "" {
-		return []Entry{{Body: strings.TrimSpace(body)}}
+	if len(entries) == 0 {
+		if rest := withoutTitle(body); rest != "" {
+			return []Entry{{Body: rest}}
+		}
 	}
 	return entries
+}
+
+// withoutTitle drops the document's own `# ` heading and any blank lines
+// around it, so a file holding nothing but a title parses as no entries
+// rather than as one refusal whose text is "# Confirmed non-asks".
+//
+// That is the shape a project starts with — the file is created in the
+// bootstrap commit before anything has been refused — and it has to read
+// as "the author has recorded none", which is a different fact from "the
+// file was not there" and from "none of them are scoped to you".
+func withoutTitle(body string) string {
+	var kept []string
+	started := false
+	for _, line := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(line)
+		if !started {
+			// Blank lines before the title are skipped too, or a file
+			// beginning with one keeps its title: the first blank would
+			// count as content and the heading after it would look like
+			// prose.
+			if t == "" {
+				continue
+			}
+			started = true
+			if strings.HasPrefix(t, "# ") {
+				continue
+			}
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 // heading matches a `## ` entry heading. Deeper levels are prose inside

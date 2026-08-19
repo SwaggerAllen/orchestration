@@ -546,9 +546,17 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems; read `%s` yourself if this ticket turns out to reach further than its labels say.\n",
 				len(shown), len(all), n.Path)
 		}
-		if len(shown) == 0 {
-			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file.\n")
-		} else {
+		switch {
+		case len(all) == 0:
+			// Three empty states, not two. The file being absent, the
+			// file recording nothing, and nothing being scoped to this
+			// ticket license different confidence about whether a
+			// proposal is safe, and an unqualified empty section reads
+			// as the most permissive of them.
+			b.WriteString("\nThe file exists and records no refusals yet. Nothing has been ruled out; this was checked, not skipped.\n")
+		case len(shown) == 0:
+			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file — read the file itself if this ticket reaches further than its labels say.\n")
+		default:
 			fmt.Fprintf(&b, "\n---\n%s---\n", nonasks.Render(shown))
 		}
 	}
