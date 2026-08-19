@@ -38,6 +38,12 @@ the diff.
   requires one, that is a push-back. The file is design's to maintain,
   not yours: propose the change in your hand-back rather than editing it.
 
+  That section is a selection made from this ticket's labels. When your
+  work reaches a path some other doc maps — the same discovery that
+  makes you report a label in your outcome, below — ask what that scope
+  refuses as well: `pipeline non-asks --for system:foundation`. It reads
+  one local file and talks to nothing.
+
 - **Stay inside your labels, and report the one you turn out to need.**
   CI audits the diff against the screen and system file maps: touching a
   mapped path without that ticket label fails the build. When your work

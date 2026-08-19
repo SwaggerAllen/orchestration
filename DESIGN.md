@@ -398,6 +398,19 @@ the universal set — and design is the pass the document is written for. Matchi
 ticket's words is what the class audit already does (§9), for the same reason: at the moment
 the question is asked, the words are all there is.
 
+**And a pass can ask again.** Selection runs once, when the prompt is assembled, which is
+accurate for dev and reconciliation and is not for the pass this document is written for: a
+first design pass carries no labels, and its real scope is not known until it declares
+`screens` and `systems` in its outcome — one step after the selection needed it. So the harness
+offers `pipeline non-asks --for <scope>`, which the prompt names, and which answers the same
+question through the same selection so the two cannot disagree. It reads one local file and
+needs no credential, so it is safe at any point in a pass.
+
+A command rather than "the file is in your checkout, go and read it". The argument for inlining
+the document at all is that a prompt whose most important input is a pointer is a prompt whose
+most important input is optional, and an escape hatch phrased as an invitation reintroduces
+exactly what the inlining was written against. A specific thing to run is an instruction.
+
 **Selection fails open.** An entry with no scope is universal, and a file with no headings at
 all is one universal entry — which is also the migration path, since every project's existing
 flat file keeps behaving exactly as it does now until somebody rewrites it. Over-selecting

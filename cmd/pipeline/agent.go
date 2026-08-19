@@ -543,7 +543,10 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 		// honest form of the filter is "here is your slice, the rest is
 		// one `cat` away".
 		if len(shown) < len(all) {
-			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems; read `%s` yourself if this ticket turns out to reach further than its labels say.\n",
+			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems.\n\n"+
+				"**This selection was made before you started.** If your work turns out to reach a screen or system this section does not name, ask again before you commit to it:\n\n"+
+				"```sh\npipeline non-asks --for screen:<name>,system:<name>\n```\n\n"+
+				"Bare names work too. It reads `%s` and talks to nothing, so it is safe to run at any point.\n",
 				len(shown), len(all), n.Path)
 		}
 		switch {
@@ -555,7 +558,8 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 			// as the most permissive of them.
 			b.WriteString("\nThe file exists and records no refusals yet. Nothing has been ruled out; this was checked, not skipped.\n")
 		case len(shown) == 0:
-			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file — read the file itself if this ticket reaches further than its labels say.\n")
+			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file: the project records some, and none of them name what this ticket names.\n\n" +
+				"If your work reaches further than that, ask again — `pipeline non-asks --for screen:<name>,system:<name>`, bare names accepted.\n")
 		default:
 			fmt.Fprintf(&b, "\n---\n%s---\n", nonasks.Render(shown))
 		}
