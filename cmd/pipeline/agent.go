@@ -566,8 +566,11 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 	}
 	if maintain {
 		fmt.Fprintf(&b, "\nThis file is yours to maintain, at `%s`, in the same commit as your artifacts. "+
-			"When this pass settles that something is deliberately not wanted — the author pushed back, or you ruled an approach out for a reason the next pass would otherwise re-litigate — add an entry with its reason. "+
-			"Add and amend; never delete an entry, because a refusal that quietly disappears is one the pipeline will propose again. The author sees every line of it in the Design review diff.\n", n.Path)
+			"When this pass settles that something is deliberately not wanted — the author pushed back, or you ruled an approach out for a reason the next pass would otherwise re-litigate — record it with its reason. "+
+			"Add and amend; never delete, because a refusal that quietly disappears is one the pipeline will propose again. The author sees every line of it in the Design review diff.\n\n"+
+			"**Record it here only if it has no owning doc.** A refusal about one system or screen goes in that doc, beside the decision it is the negative half of — this file is inlined into every scoped prompt, while that doc is read on the way to changing that system. "+
+			"What belongs here is what every pass must see, or what spans systems and a per-doc home could only serve by copying. Check the owning doc first: if it already refuses this, that is the record and a second copy is the drift. "+
+			"A `scope:` naming exactly one doc means the entry is in the wrong place.\n", n.Path)
 	}
 	return b.String()
 }

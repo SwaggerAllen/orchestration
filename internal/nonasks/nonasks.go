@@ -13,12 +13,21 @@
 // was 65% of the total. Most of those entries are about one screen or
 // one system and say nothing to a pass working somewhere else.
 //
-// One file with a scope list, rather than moving each entry into the
-// screen or system doc that owns it. The docs would scope entries for
-// free off machinery that already exists — but a refusal touching
-// several things then has to be either marked global, which puts it back
-// in every prompt, or copied into each doc, which is drift with extra
-// steps. A list has exactly one representation for that case.
+// What lands here is narrower than "every refusal", and the placement
+// rule is what keeps it that way (DESIGN §4): a refusal about one system
+// or screen goes in that doc, beside the decision it is the negative
+// half of, where the pass that could violate it is already reading. This
+// file holds the two kinds with no such home — refusals every pass must
+// see, and refusals spanning systems.
+//
+// The scope list exists for that second kind. A per-doc home could serve
+// it only by marking it global, which puts it back in every prompt, or
+// by copying it into each doc, which is drift with extra steps. A list
+// has exactly one representation for it.
+//
+// A consequence worth knowing when reading a project's file: a scope
+// naming exactly one doc is a misplaced entry, not a normal one. In a
+// healthy file most entries are universal and the rest name two or more.
 package nonasks
 
 import (

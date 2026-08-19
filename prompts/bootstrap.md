@@ -79,10 +79,24 @@ rather than the closest one — an extra name costs a paragraph, a missing
 one hides the refusal from the pass that would have broken it. When in
 doubt, `universal`.
 
-This file is for what the author refused to have built. It is not the
-place for how a system deliberately works — "this cache is write-through
-because ..." is a standing decision in that system's doc, even when it
-is phrased as a negative.
+**Most refusals belong in a system or screen doc, not here.** A refusal
+about one system goes in that system's standing decisions, beside the
+decision it is the negative half of — that is where the pass which could
+violate it is already reading. This file is for the two kinds that have
+no such home: refusals every pass must see, and refusals spanning
+systems, which a per-doc home could serve only by copying into each one.
+A `scope:` naming exactly one doc is the sign the entry belongs in that
+doc instead.
+
+Seeding one is where that split is easiest to get wrong, because the
+existing docs are the source for both. As you read them: a refusal you
+find stated inside a system's own doc is already recorded — leave it
+there and do not copy it here. What comes here is what you find refused
+at the product level, or refused in two docs at once.
+
+Nor is this the place for how a system deliberately works — "this cache
+is write-through because ..." is a standing decision in that system's
+doc, even when it is phrased as a negative.
 
 **`CLAUDE.md` — what only this repo can say.** Claude Code loads it
 automatically, for agent runs and for humans working here by hand.
