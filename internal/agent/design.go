@@ -63,7 +63,9 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 		Description:      t.Description,
 	}
 	for _, c := range t.Comments {
-		res.Comments = append(res.Comments, c.Body)
+		if prose, worth := marker.Prose(c.Body); worth {
+			res.Comments = append(res.Comments, prose)
+		}
 	}
 	// Read before proposing (DESIGN §4), and written back to in the same
 	// artifacts commit when a push-back establishes a new refusal.

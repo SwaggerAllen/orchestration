@@ -1061,3 +1061,41 @@ func TestAbortMessageTrimsAVeryLongCapture(t *testing.T) {
 		t.Error("the trim kept the head and dropped the exit")
 	}
 }
+
+// A returned ticket's scope is the text the dev pass implements exactly
+// (DESIGN §2.3), and it was whatever comment happened to be newest.
+// The bounce is newest at the moment a ticket enters Reworking, so the
+// ordinary path worked — anything posted between the bounce and the
+// claim broke it, and the dev agent was handed a machine's note about
+// the pipeline as its instructions.
+func TestClaimReworkSkipsBookkeepingPostedAfterTheBounce(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "Original argument", protocol.ReadyForRework)
+	if err := tr.CommentOnIssue(ctx, i.ID, "[pipeline:v1:reconcile-bounce] missing=copy\n\nThe cap_reached copy did not land."); err != nil {
+		t.Fatal(err)
+	}
+	// Two things the control plane could post in that window: a run that
+	// died before claiming, and the dispatch marker of the run that
+	// replaced it.
+	tr.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	if err := tr.CommentOnIssue(ctx, i.ID, "[pipeline:v1:stale-claim] from=reworking run=1\n\nThe run claiming this ticket is no longer live."); err != nil {
+		t.Fatal(err)
+	}
+	tr.Now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	if err := tr.CommentOnIssue(ctx, i.ID, "[pipeline:v1:dispatch] id=2 kind=dev url=u"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Claim(ctx, p, i.Key, "run_79", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Scope, "cap_reached copy") {
+		t.Errorf("scope = %q, want the bounce that actually said what to do", res.Scope)
+	}
+	// The marker header goes too — it is an address, not an argument.
+	if strings.Contains(res.Scope, "pipeline:v1") {
+		t.Errorf("scope carries the machine header: %q", res.Scope)
+	}
+}

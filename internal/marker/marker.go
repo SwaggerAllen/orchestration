@@ -283,3 +283,70 @@ func parseValue(s string, i int) (string, int, error) {
 	}
 	return s[i : i+end], i + end, nil
 }
+
+// Prose returns the part of a comment written for a human — the marker
+// header removed — and whether the comment is worth putting in front of
+// a model at all.
+//
+// The prompts render a ticket's whole comment list, markers included, and
+// that was two problems in one. Bytes: a ticket that fails repeatedly
+// grows its own prompt, because each failed run appends a dispatch marker
+// and a blocked marker that the next claim inlines, on top of a prompt
+// already large enough to have hit the argv cap. And signal: the control
+// plane's notes to itself — a dispatch id, a merge-base sha, a Pages URL
+// — read as context to a model that has no use for any of them.
+//
+// The rule is deliberately not "drop marker comments". Several carry an
+// argument under the header, and they are the ones that matter most: a
+// push-back's reason, a bounce's rework scope, a decisionless pass's
+// summary. Dropping those would delete exactly the text a returning pass
+// is supposed to implement.
+//
+// A body that is not a marker at all comes back untouched. That is the
+// ordinary case — the author's comments and the agents' hand-backs.
+func Prose(body string) (string, bool) {
+	m, ok, err := Parse(body)
+	if err != nil || !ok {
+		// A malformed marker is kept rather than dropped. Parse is strict
+		// because counts and resumes depend on it; this is a display
+		// decision, and showing a model one odd line beats hiding a
+		// comment somebody wrote.
+		return body, strings.TrimSpace(body) != ""
+	}
+	if bookkeeping(m) {
+		return "", false
+	}
+	_, rest, _ := strings.Cut(body, "\n")
+	rest = strings.TrimSpace(rest)
+	return rest, rest != ""
+}
+
+// bookkeeping reports whether a marker comment is the control plane
+// talking about itself, with nothing under it a pass could act on.
+//
+// Kind alone does not decide it. `blocked` is posted for six different
+// arrivals (DESIGN §12): a push-back, a needs-setup, an author-only
+// split and a scope-satisfied park all carry the argument that put the
+// ticket there, while a plain failed run carries a URL and — since the
+// harness started capturing what a run printed — up to forty lines of a
+// CLI's death rattle. That last one on a prompt is worse than useless:
+// it is the previous run's crash presented to the next run as context.
+// So the flavor field decides, not the kind.
+func bookkeeping(m Marker) bool {
+	switch m.Kind {
+	case Dispatch, Base, Preview, StaleClaim, ClaimFailed, Merged, Revert, BoundaryStep:
+		return true
+	case Blocked:
+		for _, flavor := range []string{"pushback", "setup", "author-only", "scope-satisfied"} {
+			if m.Fields[flavor] != "" {
+				return false
+			}
+		}
+		return true
+	}
+	// Everything else keeps its prose: ci-red and merge-conflict say what
+	// went wrong, reconcile-bounce is the rework scope, decisionless-pass
+	// and harness-finding and composition and live-suite are all somebody
+	// or something making an argument.
+	return false
+}

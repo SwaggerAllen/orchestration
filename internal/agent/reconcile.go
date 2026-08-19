@@ -62,7 +62,9 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 	// Comments carry the deltas (DESIGN §2.3): reconciliation measures
 	// the diff against the argument plus its accepted amendments.
 	for _, c := range t.Comments {
-		res.Comments = append(res.Comments, c.Body)
+		if prose, worth := marker.Prose(c.Body); worth {
+			res.Comments = append(res.Comments, prose)
+		}
 	}
 
 	m := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
