@@ -30,9 +30,9 @@ on:
 # unusual ones. One line per call the sweep makes:
 permissions:
   contents: read # checkout, and compare for the deploy ancestry check
-  actions: write # dispatching agent workflows; write covers listing runs
+  actions: write # dispatching agent workflows; write covers listing runs,
+    # and the CI verdict per PR head that drives the Checks hop
   pull-requests: read # the open-PR list the snapshot is built from
-  checks: read # CI verdicts per PR head, which drive the Checks hop
   deployments: read # deploy state, when the project's provider is "github"
 
 # One dispatcher at a time: the single-dev-agent invariant is only as
