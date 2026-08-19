@@ -778,6 +778,21 @@ one no agent will act on.
   excepted (§10). Merge rights are enforced in GitHub via branch protection (§5), not in the
   tracker — the tracker cannot police the repo.
 
+**And they are not prompt material.** A marker is an address, not an argument, so what reaches a
+model is the prose under the header and nothing else — with the comments that carry no prose
+dropped whole. Kind alone does not decide it: `blocked` is posted for six different arrivals
+(§12), and a push-back, a needs-setup, an author-only split and a scope-satisfied park each
+carry the argument that put the ticket there, while a plain failed run carries a URL and the
+captured tail of a crash. That last one on a prompt is the previous run's death handed to the
+next run as context. So the flavor decides, not the kind.
+
+Two things were wrong before, not one. Bytes: a ticket that fails repeatedly grows its own
+prompt, because every failed run appends a dispatch marker and a blocked marker that the next
+claim inlines. And correctness: a returned ticket's scope is "the newest comment" (§2.3), which
+was read without regard for who wrote it — the bounce is newest at the moment a ticket enters
+`Reworking`, so the ordinary path worked, and anything posted in the window between the bounce
+and the claim replaced the rework scope with a machine's note about the pipeline.
+
 **Pipeline comments are programmatic, not agent-authored.** Every comment the control plane
 relies on later — CI failure comments (§12), dispatch ids (§6), boundary step completions,
 live-suite results (§10) — opens with a fixed machine-readable marker and is written by the

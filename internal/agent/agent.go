@@ -623,13 +623,27 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 	return p.TransitionTicket(ctx, res.TicketID, to, res.Role)
 }
 
-// newestComment returns the body of the most recent comment.
+// newestComment returns the most recent comment a human or an agent
+// wrote, skipping the control plane's notes to itself.
+//
+// This is a returned ticket's scope (DESIGN §2.3) — the text the dev
+// pass is told to implement exactly — and it was "whatever comment is
+// newest", markers included. The bounce comment is newest at the moment
+// a ticket enters Reworking, so the ordinary path worked; anything
+// posted between the bounce and the claim broke it. A CI failure, a
+// revert, a stale-claim notice, a dispatch marker from a run that died
+// — any of them and the dev agent's instructions are a machine's note
+// about the pipeline, implemented as if the author had written it.
 func newestComment(t *core.Ticket) string {
 	var best string
 	var bestAt time.Time
 	for _, c := range t.Comments {
+		prose, worth := marker.Prose(c.Body)
+		if !worth {
+			continue
+		}
 		if c.At.After(bestAt) || best == "" && bestAt.IsZero() {
-			best, bestAt = c.Body, c.At
+			best, bestAt = prose, c.At
 		}
 	}
 	return best
