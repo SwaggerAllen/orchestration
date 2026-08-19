@@ -91,8 +91,8 @@ func TestDesignPromptCarriesTheNonAsksDocument(t *testing.T) {
 // section, and they license very different confidence: one says the
 // author recorded no refusals, the other says nobody knows.
 func TestNonAsksSectionSaysWhichOfTheThreeHappened(t *testing.T) {
-	absent := nonAsksSection(&agent.NonAsks{Path: "non-asks.md"}, "proposing", false)
-	failed := nonAsksSection(&agent.NonAsks{Path: "non-asks.md", Err: "permission denied"}, "proposing", false)
+	absent := nonAsksSection(&agent.NonAsks{Path: "non-asks.md"}, "proposing", false, nil)
+	failed := nonAsksSection(&agent.NonAsks{Path: "non-asks.md", Err: "permission denied"}, "proposing", false, nil)
 
 	if absent == "" || failed == "" {
 		t.Fatal("a section went missing; silence is exactly the ambiguity this removes")
@@ -112,10 +112,10 @@ func TestNonAsksSectionSaysWhichOfTheThreeHappened(t *testing.T) {
 // heading: a project that has opted out shouldn't get a section telling
 // the model about a document nobody asked for.
 func TestNonAsksSectionIsEmptyWhenUnconfigured(t *testing.T) {
-	if got := nonAsksSection(nil, "proposing", false); got != "" {
+	if got := nonAsksSection(nil, "proposing", false, nil); got != "" {
 		t.Errorf("nonAsksSection(nil) = %q, want empty", got)
 	}
-	if got := nonAsksSection(&agent.NonAsks{}, "proposing", false); got != "" {
+	if got := nonAsksSection(&agent.NonAsks{}, "proposing", false, nil); got != "" {
 		t.Errorf("nonAsksSection(untitled) = %q, want empty", got)
 	}
 }
@@ -268,5 +268,130 @@ func TestDesignBoundsSectionSaysWhenItWasNotTold(t *testing.T) {
 	}
 	if !strings.Contains(got, "harness finding") {
 		t.Error("the gap is not routed anywhere it gets fixed")
+	}
+}
+
+const scopedNonAsks = `# Confirmed non-asks
+
+## No dark mode
+scope: universal
+
+Two palettes, one designer.
+
+## No client-side validation on the cap form
+scope: screen:cap
+
+The server is the only authority.
+
+## No pagination in the roster
+scope: screen:roster
+
+Thirty rows is the ceiling.
+`
+
+// A pass reads the refusals that bind it, not all of them. The document
+// grows by rule — never delete an entry — so on a real project it
+// reached 83468 bytes and every pass carried all of it.
+func TestNonAsksSectionSelectsByTheTicketsScope(t *testing.T) {
+	got := nonAsksSection(
+		&agent.NonAsks{Path: "non-asks.md", Found: true, Body: scopedNonAsks},
+		"proposing", true,
+		&ticketScope{Labels: []string{"screen:roster"}},
+	)
+	if !strings.Contains(got, "Thirty rows") || !strings.Contains(got, "Two palettes") {
+		t.Errorf("dropped the scoped or the universal entry: %s", got)
+	}
+	if strings.Contains(got, "only authority") {
+		t.Errorf("carried a refusal about another screen: %s", got)
+	}
+}
+
+// A filtered list that does not say it is filtered reads as the whole
+// document, and "the non-asks do not mention it" becomes a conclusion
+// the pass had no grounds for. The file is in the checkout, so the
+// honest form is "here is your slice, the rest is one cat away".
+func TestNonAsksSectionSaysWhatItLeftOut(t *testing.T) {
+	got := nonAsksSection(
+		&agent.NonAsks{Path: "docs/non-goals.md", Found: true, Body: scopedNonAsks},
+		"proposing", true,
+		&ticketScope{Labels: []string{"screen:roster"}},
+	)
+	if !strings.Contains(got, "2 of 3 entries") {
+		t.Errorf("the section does not say it is a selection: %s", got)
+	}
+	if !strings.Contains(got, "docs/non-goals.md") {
+		t.Errorf("the section does not say where the rest is: %s", got)
+	}
+}
+
+// A first design pass carries no mutex labels — the design pass is what
+// creates them — so selection has to fall back to the ticket's words or
+// design, the pass this document is written for, sees only the
+// universal set.
+func TestNonAsksSectionSelectsOnTheTicketsWordsWhenItHasNoLabels(t *testing.T) {
+	got := nonAsksSection(
+		&agent.NonAsks{Path: "non-asks.md", Found: true, Body: scopedNonAsks},
+		"proposing", true,
+		&ticketScope{Text: "Cap screen: show cap_reached when the limit is hit"},
+	)
+	if !strings.Contains(got, "only authority") {
+		t.Errorf("a ticket about the cap screen was not shown the cap refusal: %s", got)
+	}
+}
+
+// The boundary files proposals across the project and has no single
+// ticket's scope, so it reads the whole document.
+func TestNonAsksSectionUnfilteredForTheBoundary(t *testing.T) {
+	got := nonAsksSection(
+		&agent.NonAsks{Path: "non-asks.md", Found: true, Body: scopedNonAsks},
+		"filing proposals", false, nil,
+	)
+	for _, want := range []string{"Two palettes", "only authority", "Thirty rows"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the boundary lost %q: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "entries**, selected") {
+		t.Error("the boundary was told its whole-document read was a selection")
+	}
+}
+
+// Selecting nothing and having no file are different facts, the same
+// way the three read outcomes are.
+func TestNonAsksSectionDistinguishesAnEmptySelectionFromAnEmptyFile(t *testing.T) {
+	// A document whose every entry is scoped elsewhere — with a
+	// universal entry present there is no such thing as an empty
+	// selection, which is the point of universal.
+	scopedOnly := "## No pagination in the roster\nscope: screen:roster\n\nThirty rows is the ceiling.\n"
+	none := nonAsksSection(
+		&agent.NonAsks{Path: "non-asks.md", Found: true, Body: scopedOnly},
+		"implementing", false,
+		&ticketScope{Labels: []string{"system:unrelated"}},
+	)
+	if !strings.Contains(none, "That is a selection, not an empty file") {
+		t.Errorf("an empty selection reads as a project with no refusals: %s", none)
+	}
+}
+
+// The dev pass never saw this document at all. "No client-side
+// validation on the cap form" binds whoever writes the validation, and
+// that is dev.
+func TestDevPromptCarriesTheNonAsksItIsBoundBy(t *testing.T) {
+	got := assemblePrompt("ROLE", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "dev", Branch: "b", Scope: "s",
+		Labels:  []string{"screen:cap"},
+		NonAsks: &agent.NonAsks{Path: "non-asks.md", Found: true, Body: scopedNonAsks},
+	}, "/tmp/handback.md", "/tmp/outcome.json")
+
+	if !strings.Contains(got, "only authority") {
+		t.Errorf("the dev prompt does not carry the refusal binding its screen: %s", got)
+	}
+	if strings.Contains(got, "Thirty rows") {
+		t.Errorf("the dev prompt carries an unrelated screen's refusal: %s", got)
+	}
+	// Read-only: design maintains the file, in the same commit as its
+	// artifacts.
+	if strings.Contains(got, "yours to maintain") {
+		t.Error("the dev prompt tells dev to maintain a design-owned document")
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
+	"github.com/SwaggerAllen/orchestration/internal/nonasks"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
@@ -328,6 +329,7 @@ func assemblePrompt(template string, res *agent.ClaimResult, handbackPath, outco
 		add("\n## Original argument (context only — do not re-implement)\n\n" + res.Description + "\n")
 	}
 	add(labelsSection(res.Labels))
+	add(nonAsksSection(res.NonAsks, "implementing", false, scopeOf(res)))
 	add("\n## Base check\n\n")
 	if res.BaseSHA != "" {
 		add(fmt.Sprintf("The design was drawn against `%s`. Diff it against origin/main; if main moved and both changes touch the same behavior, DO NOT reconcile by guessing — abort with a push-back (DESIGN §2.4).\n", res.BaseSHA))
@@ -381,6 +383,7 @@ func assembleReconcilePrompt(template string, res *agent.ClaimResult, verdictPat
 			add("\n---\n" + c + "\n")
 		}
 	}
+	add(nonAsksSection(res.NonAsks, "judging", false, scopeOf(res)))
 	flagged := false
 	for _, l := range res.Labels {
 		if l == core.LabelReEvaluate {
@@ -424,7 +427,7 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 			add("\n---\n" + c + "\n")
 		}
 	}
-	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design"))
+	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design", scopeOf(res)))
 	add(designBoundsSection(res.DesignOwnedPaths))
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
 	if outcomePath != "" {
@@ -467,6 +470,38 @@ func designBoundsSection(owned []string) string {
 		"- "+strings.Join(owned, "\n- "))
 }
 
+// ticketScope is what a pass is working on, for selecting the non-asks
+// it needs to read. A nil *ticketScope means the whole document: the
+// boundary pass files proposals across the project and has no single
+// ticket's scope to filter by.
+type ticketScope struct {
+	// Labels are the ticket's mutex labels.
+	Labels []string
+	// Text is the ticket's own words — title, argument, comments —
+	// which is what selects for a first design pass, since that pass
+	// carries no labels yet (DESIGN §6: the design pass is what creates
+	// them).
+	Text string
+}
+
+// scopeOf builds the selection from a claim.
+//
+// Title, argument and comments all count as the ticket's words, because
+// the accepted deltas live in the comments (DESIGN §2.3) and a refusal
+// about a screen the ticket only reached in its third comment is still a
+// refusal about this ticket.
+func scopeOf(res *agent.ClaimResult) *ticketScope {
+	var b strings.Builder
+	b.WriteString(res.Title)
+	b.WriteString("\n")
+	b.WriteString(res.Description)
+	for _, c := range res.Comments {
+		b.WriteString("\n")
+		b.WriteString(c)
+	}
+	return &ticketScope{Labels: res.Labels, Text: b.String()}
+}
+
 // nonAsksSection renders the confirmed non-asks document (DESIGN §4).
 //
 // The document is a file in the project repo, beside the screen and
@@ -480,7 +515,7 @@ func designBoundsSection(owned []string) string {
 // empty section, because "the author recorded no non-asks" and "I could
 // not read what the author recorded" license very different confidence
 // in a proposal that cuts against the grain.
-func nonAsksSection(n *agent.NonAsks, verb string, maintain bool) string {
+func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketScope) string {
 	if n == nil || n.Path == "" {
 		return ""
 	}
@@ -494,8 +529,28 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool) string {
 	case !n.Found:
 		fmt.Fprintf(&b, "The repo has no `%s`. Nothing is recorded as deliberately not wanted; this was checked, not skipped.\n", n.Path)
 	default:
-		fmt.Fprintf(&b, "From `%s` — each entry is something the author decided against, with the reason. Do not propose these back. If the ticket in front of you requires one of them, that is a push-back, not a design.\n\n---\n%s\n---\n",
-			n.Path, strings.TrimSpace(n.Body))
+		all := nonasks.Parse(n.Body)
+		shown := all
+		if scope != nil {
+			shown = nonasks.Select(all, scope.Labels, scope.Text)
+		}
+		fmt.Fprintf(&b, "From `%s` — each entry is something the author decided against, with the reason. Do not propose these back. If the ticket in front of you requires one of them, that is a push-back, not a design.\n",
+			n.Path)
+		// What was left out, and where to find it. A filtered list that
+		// does not say it is filtered reads as the whole document, and
+		// then "the non-asks do not mention it" becomes a conclusion the
+		// pass had no grounds for. The file is in the checkout, so the
+		// honest form of the filter is "here is your slice, the rest is
+		// one `cat` away".
+		if len(shown) < len(all) {
+			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems; read `%s` yourself if this ticket turns out to reach further than its labels say.\n",
+				len(shown), len(all), n.Path)
+		}
+		if len(shown) == 0 {
+			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file.\n")
+		} else {
+			fmt.Fprintf(&b, "\n---\n%s---\n", nonasks.Render(shown))
+		}
 	}
 	if maintain {
 		fmt.Fprintf(&b, "\nThis file is yours to maintain, at `%s`, in the same commit as your artifacts. "+
@@ -549,7 +604,7 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	if !plan.Done[agent.StepScan] {
 		add(debtBacklogSection(plan.Backlog))
 		add(harnessFindingsForBoundary(plan.HarnessFindings))
-		add(nonAsksSection(plan.NonAsks, "filing proposals", false))
+		add(nonAsksSection(plan.NonAsks, "filing proposals", false, nil))
 	}
 	if outcomePath != "" {
 		add(fmt.Sprintf("\nWrite your proposals JSON to `%s` (schema above), then stop — the harness files them with dedupe keys and applies the ranking.\n", outcomePath))

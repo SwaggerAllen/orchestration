@@ -57,10 +57,15 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
 		Mode:             mode,
 		DesignOwnedPaths: append([]string(nil), p.Config.DesignOwnedPaths...),
-		Role:             core.RoleDesign,
-		State:            t.State,
-		Scope:            t.Description,
-		Description:      t.Description,
+		// Carried for the non-asks selection (DESIGN §4). Usually empty
+		// here and that is expected — the design pass is what creates
+		// the mutex labels (§6) — which is exactly why the selection
+		// also reads the ticket's own words.
+		Labels:      append([]string(nil), t.Labels...),
+		Role:        core.RoleDesign,
+		State:       t.State,
+		Scope:       t.Description,
+		Description: t.Description,
 	}
 	for _, c := range t.Comments {
 		if prose, worth := marker.Prose(c.Body); worth {

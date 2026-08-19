@@ -58,6 +58,10 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 		// state it is flagged in (DESIGN §7) — it cannot answer a
 		// question nobody handed it.
 		Labels: append([]string(nil), t.Labels...),
+		// Reconciliation is the last gate before the merge (DESIGN §11),
+		// so it is the last chance to catch a diff that landed
+		// something the author had already refused.
+		NonAsks: ClaimNonAsks(p.Config),
 	}
 	// Comments carry the deltas (DESIGN §2.3): reconciliation measures
 	// the diff against the argument plus its accepted amendments.

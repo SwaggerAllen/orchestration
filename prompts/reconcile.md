@@ -27,6 +27,13 @@ on the PR branch):
 - **A surface changed with no storybook variation at all gets called out
   even on a pass** — a tab named only in prose, a route nothing renders.
   You are the only place that gets noticed.
+- **Nothing the author already refused landed in the diff.** The
+  confirmed non-asks scoped to this ticket are inlined below. You are
+  the last gate before the merge, so a refusal contradicted in passing
+  reaches production if you do not catch it. A diff that argues against
+  a recorded refusal is a `cannot-tell` for the author to settle, not a
+  fail you decide alone — the author is allowed to change their mind
+  and the document is where they say so.
 
 ## What you do not do
 

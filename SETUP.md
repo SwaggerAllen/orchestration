@@ -691,7 +691,10 @@ step 5 already covered them.
    attended, to split the existing architecture doc into
    `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), a
    root `non-asks.md` seeded with whatever the existing docs already
-   refuse, and a root `CLAUDE.md` holding that repo's own specifics —
+   refuse — each entry under a `## ` heading with a `scope:` line naming
+   the screen and system labels it is about, or `universal` (DESIGN §4);
+   a file written without them still works, as one universal entry every
+   pass carries — and a root `CLAUDE.md` holding that repo's own specifics —
    toolchain, gates, domain. The protocol half needs no copying: agent runs are
    given `prompts/repo-context.md` from the pipeline checkout at claim
    time, so editing it here reaches every project on its next run.
