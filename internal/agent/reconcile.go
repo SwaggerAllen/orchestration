@@ -52,11 +52,14 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 		Description: t.Description,
 		Branch:      pr.Branch,
 		PRNumber:    pr.Number,
-		// Carried because one of them changes what this run is asked.
-		// A re-evaluate flag means another thread moved the ground under
-		// this ticket, and reconciliation is the thread that owns the
-		// state it is flagged in (DESIGN §7) — it cannot answer a
-		// question nobody handed it.
+		// Carried for two things. A re-evaluate flag among them means
+		// another thread moved the ground under this ticket, and
+		// reconciliation is the thread that owns the state it is
+		// flagged in (DESIGN §7) — it cannot answer a question nobody
+		// handed it. They also select the non-asks this pass reads
+		// (§4); reconciliation runs late enough that the mutex labels
+		// exist, so unlike design's claim this one selects on more than
+		// the ticket's words.
 		Labels: append([]string(nil), t.Labels...),
 		// Reconciliation is the last gate before the merge (DESIGN §11),
 		// so it is the last chance to catch a diff that landed
