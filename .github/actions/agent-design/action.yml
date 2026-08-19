@@ -260,6 +260,14 @@ runs:
         # slugging is its own rule — truncation and hashing included —
         # so deriving it would be guessing at someone else's algorithm
         # and posting the guess to the author as a link.
+
+        # stderr captured as well as shown, for the reason the claim's
+        # is: this step's failure reaches the ticket as "run failed:
+        # <url>" and nothing else, so a Go error that says exactly what
+        # went wrong ends its life in a collapsed step nobody opens.
+        # `abort on failure` reads this file back.
+        mkdir -p "$RUNNER_TEMP/pipeline"
+        set +e
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
@@ -267,7 +275,11 @@ runs:
           --preview-url "${{ steps.published.outputs.deployment-url }}" \
           --base-sha "${{ steps.base.outputs.sha }}" \
           --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
-          --findings "$RUNNER_TEMP/pipeline/findings.json"
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          2> "$RUNNER_TEMP/pipeline/run-error.txt"
+        rc=$?
+        cat "$RUNNER_TEMP/pipeline/run-error.txt" >&2
+        exit $rc
 
     - name: say so when the claim itself failed
       if: failure() && steps.claim.outcome == 'failure'
@@ -301,4 +313,5 @@ runs:
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
           --message "Design agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

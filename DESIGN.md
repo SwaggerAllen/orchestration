@@ -1303,6 +1303,26 @@ harness broke before the agent started, were the only ones that left nothing on 
 all. Catapult's `ORC-7` sat in `Designing` for 23 minutes showing a healthy state and a
 dispatched run, after its claim died on a 403 reading an unrelated ticket's CI verdict.
 
+**A failure that reaches the ticket brings what the run printed, not just where to find it.**
+The abort comment was the run URL and nothing else, so a run whose model pass exited `249` —
+the CLI's code, not the pipeline's, and not one this project can decode — arrived as a bare
+number with nothing to act on. The output that could have explained it was written to a
+collapsed step and discarded. So both bracketing steps keep their output as well as showing it:
+the model run captures each attempt's stdout and stderr, and the finish step captures its own,
+into one well-known file the abort path reads back and pastes onto the ticket, bounded and
+fenced. Fenced because it is output from a process nobody vetted landing on a ticket later
+passes read as input — the same trust boundary as a CI failure (§9).
+
+Evidence is cleared when the run recovers. The model pass fails over from the subscription
+credential to the API key, and a first attempt's death left behind is a cause of death attached
+to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
+
+**What the exit code is not.** The harness decodes `129`–`159` as a process killed by signal
+`n-128`, which is the shell's own convention and therefore a fact. Every other code belongs to
+the program that exited, and the pipeline does not guess at another tool's table — inventing a
+meaning for `249` is how an opaque number becomes a misleading one. The captured output is the
+answer to "what does this mean"; the number is only where to start.
+
 **Two failures wear the same shape, and they want opposite handling.** A pickup assertion that
 refuses is the pipeline working — a held mutex, an agent of that kind already running, an open
 blocker — and the ticket is exactly where it should be; parking it would pull work the protocol

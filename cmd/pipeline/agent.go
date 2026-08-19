@@ -779,11 +779,20 @@ func cmdAgentAbort(args []string) error {
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
+	errPath := fs.String("error-file", "", "file holding a failed model run's captured output; its tail is appended to the comment")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *claimPath == "" {
 		return fmt.Errorf("agent abort: --claim is required (a run that never claimed has nothing to abort)")
+	}
+	// Absent is the ordinary case, not a failure: the file exists only
+	// when the model run is what died, so an abort reporting anything
+	// else appends nothing rather than a cause it made up.
+	if *errPath != "" {
+		if raw, err := os.ReadFile(*errPath); err == nil {
+			*message = agent.WithRunOutput(*message, string(raw))
+		}
 	}
 	p, _, err := agentDeps(*cfgPath)
 	if err != nil {

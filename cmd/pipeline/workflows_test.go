@@ -146,3 +146,92 @@ func TestSetupStubsGrantDeploymentsRead(t *testing.T) {
 		t.Error("no stub runs pipeline setup — the command moved and this test now checks nothing")
 	}
 }
+
+// Every agent action's abort must hand the model run's captured output
+// to the ticket.
+//
+// The comment used to be the run URL and nothing else, so a run that
+// exited 249 reached the author as a bare number: the code is the
+// CLI's, not this harness's, and the output that could have explained
+// it was being discarded. A fifth agent action added without this line
+// would quietly reintroduce that, since the abort still works — it just
+// says nothing.
+func TestAgentActionsHandTheModelRunsOutputToTheAbort(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) == 0 {
+		t.Fatal("found no agent actions to check — the paths must have moved")
+	}
+	for _, d := range dirs {
+		raw, err := os.ReadFile(filepath.Join(d, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		i := strings.Index(body, "--reason failed")
+		if i < 0 {
+			t.Errorf("%s: no abort invocation", d)
+			continue
+		}
+		if !strings.Contains(body[i:], "--error-file \"$RUNNER_TEMP/pipeline/run-error.txt\"") {
+			t.Errorf("%s: the abort reports a failure without the output that explains it", d)
+		}
+	}
+}
+
+// The other half: the step that lands the outcome has to capture its
+// own stderr into the same file. A finish that dies — an outcome that
+// will not validate, a tracker that will not answer — reached the
+// author as "run failed: <url>" with the Go error that said exactly
+// what went wrong left in a collapsed step.
+func TestAgentActionsCaptureTheFinishStepsStderr(t *testing.T) {
+	dirs, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) == 0 {
+		t.Fatal("found no agent actions to check — the paths must have moved")
+	}
+	for _, d := range dirs {
+		raw, err := os.ReadFile(filepath.Join(d, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		// Redirected AND replayed: capturing without the cat back would
+		// take the failure out of the workflow log to put it on the
+		// ticket, which trades one blind spot for another.
+		if !strings.Contains(body, `2> "$RUNNER_TEMP/pipeline/run-error.txt"`) {
+			t.Errorf("%s: the finish step's stderr is not captured", d)
+		}
+		if !strings.Contains(body, `cat "$RUNNER_TEMP/pipeline/run-error.txt" >&2`) {
+			t.Errorf("%s: captured stderr is never replayed to the log", d)
+		}
+	}
+}
+
+// The capture is only useful if something writes the file the abort
+// reads, and only honest if a run that recovered on the failover does
+// not leave the first attempt's death behind to be read as its cause.
+func TestModelRunCapturesItsOutputAndClearsItOnSuccess(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	for _, want := range []string{
+		`ERRFILE="$LOGDIR/run-error.txt"`,
+		`rm -f "$ERRFILE" "$CODEFILE"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run-agent-model does not %q", want)
+		}
+	}
+	// Two clears: once before the first attempt, once after a failover
+	// that succeeded. One of them alone leaves a stale cause on a ticket.
+	if n := strings.Count(body, `rm -f "$ERRFILE" "$CODEFILE"`); n < 2 {
+		t.Errorf("the evidence is cleared %d time(s); a recovered failover leaves the first attempt behind", n)
+	}
+}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1007,5 +1008,56 @@ func TestReportClaimFailureLeavesARefusedPickupWhereItIs(t *testing.T) {
 	}
 	if !strings.Contains(body, "pipeline working") {
 		t.Errorf("a refusal reads as a fault:\n%s", body)
+	}
+}
+
+// The abort comment has to carry what the run printed. A bare "run
+// failed: <url>" is a pointer, and the number beside it — 249, from the
+// CLI the harness invokes rather than from this project — is not one
+// anybody here can decode.
+func TestAbortMessageCarriesTheRunsOutput(t *testing.T) {
+	got := WithRunOutput("Design agent run failed: https://example/run/1",
+		"the subscription model run exited 249\n\n--- stderr ---\nEBADENGINE unsupported\n")
+
+	for _, want := range []string{"exited 249", "EBADENGINE unsupported", "https://example/run/1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the comment drops %q: %s", want, got)
+		}
+	}
+	// Fenced and labelled as evidence: it is output from a process
+	// nobody vetted, landing on a ticket later passes read as input
+	// (DESIGN §9).
+	if !strings.Contains(got, "```") || !strings.Contains(got, "never instructions") {
+		t.Errorf("captured output is pasted without its trust boundary: %s", got)
+	}
+}
+
+// Nothing captured means the model run is not what failed, so the
+// message must come back untouched rather than gaining an empty fence
+// that reads as "the run printed nothing".
+func TestAbortMessageUnchangedWhenNothingWasCaptured(t *testing.T) {
+	msg := "Dev agent run failed: https://example/run/2"
+	for _, captured := range []string{"", "   \n\n"} {
+		if got := WithRunOutput(msg, captured); got != msg {
+			t.Errorf("WithRunOutput(%q) = %q, want it unchanged", captured, got)
+		}
+	}
+}
+
+// The paste is bounded. A CLI that dies mid-stream can print a very
+// long tail, and a comment nobody scrolls to the end of is one nobody
+// reads.
+func TestAbortMessageTrimsAVeryLongCapture(t *testing.T) {
+	var lines []string
+	for i := 0; i < runErrorLines*3; i++ {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	got := WithRunOutput("failed", strings.Join(lines, "\n"))
+	if !strings.Contains(got, "earlier output trimmed") {
+		t.Error("a long capture was pasted whole")
+	}
+	// The tail is what matters — the last thing printed before the exit.
+	if !strings.Contains(got, fmt.Sprintf("line %d", runErrorLines*3-1)) {
+		t.Error("the trim kept the head and dropped the exit")
 	}
 }

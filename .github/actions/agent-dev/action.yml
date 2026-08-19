@@ -284,6 +284,13 @@ runs:
         # and finish refuses it when there is no PR yet rather than
         # reading it as "nothing landed" — the failure of guessing wrong
         # there is a ticket parked over work that was fine.
+        # stderr captured as well as shown, for the reason the claim's
+        # is: this step's failure reaches the ticket as "run failed:
+        # <url>" and nothing else, so a Go error that says exactly what
+        # went wrong ends its life in a collapsed step nobody opens.
+        # `abort on failure` reads this file back.
+        mkdir -p "$RUNNER_TEMP/pipeline"
+        set +e
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
@@ -291,7 +298,11 @@ runs:
           --commits "${{ steps.push.outputs.commits || -1 }}" \
           --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
           --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
-          --findings "$RUNNER_TEMP/pipeline/findings.json"
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          2> "$RUNNER_TEMP/pipeline/run-error.txt"
+        rc=$?
+        cat "$RUNNER_TEMP/pipeline/run-error.txt" >&2
+        exit $rc
 
     - name: say so when the claim itself failed
       if: failure() && steps.claim.outcome == 'failure'
@@ -325,4 +336,5 @@ runs:
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
           --message "Dev agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
