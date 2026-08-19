@@ -163,6 +163,12 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 	// action's abort step parks the ticket in Blocked with the finding
 	// already on it (DESIGN §5, §12).
 	//
+	// CI holds the same rule on the PR, and this is not a duplicate of
+	// it. On a first pass there is no PR when the design finishes, so
+	// CI has not run and cannot — this is the gate that stops the author
+	// being asked to review a strayed diff as design. CI is the backstop
+	// on every later push.
+	//
 	// After the push rather than before, deliberately. The strays are on
 	// the branch by the time this runs and stay there — which is the
 	// point: the author needs to read the diff to strip it, and a run

@@ -418,6 +418,8 @@ forms, and the weaker form bound the role it mattered most for. Catapult's ORC-8
 costs — a design pass that committed six implementation modules and several thousand lines of
 bundled content alongside its docs, with nothing in its prompt drawing the line and nothing
 downstream noticing. The design in that pass was right; an unbounded role simply keeps going.
+Enforced at both ends now (§9): the harness holds it when the design pass finishes, and CI holds
+it on the PR.
 
 **Widening the boundary is a proposal, not an edit.** A design pass that believes work outside
 `designOwnedPaths` is genuinely design's says so in its summary and stops. It must not reach
@@ -799,6 +801,15 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   the same promotion from convention to enforcement as the class audit: a mutex nobody took is
   a collision nobody could prevent. File maps make it per-name; "some design path, some screen
   label" would let the wrong label satisfy the check.
+- **a design commit outside the project's `designOwnedPaths` fails the build** — the design
+  ownership audit, the mutex audit's mirror image: that one asks whether a path the diff
+  touched is claimed by a doc whose label the ticket lacks, this one whether a path the design
+  agent wrote is one design owns at all. It needs its own file list rather than the diff,
+  because attribution is the question — a PR carries design's commits and dev's on one branch,
+  and dev may amend design-owned files on discovery (§5), so "what the diff touched" cannot say
+  whose those paths were. `git log --author` splits them: the two agents commit under
+  `pipeline-design-agent` and `pipeline-dev-agent`. Given no such list, the audit says it
+  skipped the check rather than reporting a clean run it did not make.
 - no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
   and an ambiguous mutex is two tickets in the same files with a green build
 - `screens/*.md` and `systems/*.md` contain no state sections and no code inventory — the doc
@@ -809,20 +820,20 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   its job, while a heading with a list under it is the split the rule was written against. A
   check that failed good docs would be switched off, taking the rule with it.
 
-**Design finish (blocking, in the harness):**
-- a design pass that committed outside the project's `designOwnedPaths` does not open a draft
-  PR and does not reach `Design review` — the finish fails and the ticket parks in `Blocked`
-  (§12) with the stray paths named on it. The audit runs on this pass's commits only, diffed
-  from where the pass started, so a re-pass is not billed for the artifacts and dev commits the
-  branch already carried.
-- the check lands here rather than in CI, where its mirror image (the mutex audit above) lives,
-  for an ownership reason rather than a design one: a project's `ci.yml` is author-only by §5,
-  so wiring it into `pipeline audit` is a change the author makes in every project repo. The
-  harness half is the pipeline's to ship on its own. Moving or duplicating it into CI later is
-  a separate, author-owned change.
-- the strays stay on the branch. Blocking the *advance* rather than the commit is deliberate:
-  the author has to read the diff to strip it, and a run that swallowed its own output would
-  leave a `Blocked` ticket with nothing to look at.
+**Design finish (blocking, in the harness — the same rule, one gate earlier):**
+- a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not
+  reach `Design review`. The finish fails, the stray paths land on the ticket as a comment, and
+  the run's abort step parks it in `Blocked` (§12).
+- both gates exist because they catch different moments, not out of belt and braces. On a first
+  pass there is no PR when the design finishes, so CI has not run and cannot: the harness gate
+  is what stops the author being asked to review a strayed diff as design. CI is the backstop
+  that holds on every later push, whatever produced it.
+- the harness gate audits this pass's commits only, diffed from where the pass started, so a
+  re-pass is not billed for the artifacts and dev commits the branch already carried. CI audits
+  every design commit on the branch, which is the right scope for a merge gate.
+- the strays stay on the branch either way. Blocking the *advance* rather than the commit is
+  deliberate: the author has to read the diff to strip it, and a run that swallowed its own
+  output would leave a `Blocked` ticket with nothing to look at.
 
 **Reconciliation (blocking, and the last gate before production):**
 - the PR diff says what the issue asked for
