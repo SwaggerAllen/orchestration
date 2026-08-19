@@ -1387,3 +1387,26 @@ func TestReEvaluateOnChecksHoldsPromotionAndTravelsOnABounce(t *testing.T) {
 		t.Errorf("design does not re-read a flagged rework ticket: %v", d)
 	}
 }
+
+// The Checks hold is the only guard, so the property worth pinning is
+// that a flagged ticket never reaches the state that merges. DESIGN §7
+// used to claim Reconciling blocks the merge as well; it does not — the
+// reconcile agent reads no labels — so if this hold regresses, a
+// collision merges with nothing in the way.
+func TestAFlaggedTicketNeverReachesReconciling(t *testing.T) {
+	flagged := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{LabelReEvaluate}
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+	})
+	for _, a := range Sweep(snap(flagged)) {
+		if a.TicketID != flagged.ID {
+			continue
+		}
+		if a.Kind == ActTransition && a.To == protocol.Reconciling {
+			t.Error("a flagged ticket was promoted to the state that merges")
+		}
+		if a.Kind == ActDispatch && a.Agent == AgentReconcile {
+			t.Error("reconcile was dispatched against a flagged ticket")
+		}
+	}
+}

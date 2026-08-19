@@ -602,8 +602,8 @@ surprise at merge.
 | `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
-| `Checks` | **Holds promotion.** A green verdict does not advance the ticket while the flag is set, so nothing merges under an unresolved collision. No agent evaluates it here — `Checks` has none. | author, or design once a red or conflicted verdict has sent the ticket to `Ready for rework` |
-| `Reconciling` | Evaluated in place as an additional reconcile item. **Blocks the merge.** | reconcile |
+| `Checks` | **Holds the promotion into `Reconciling`.** A green verdict does not advance the ticket while the flag is set. No agent evaluates it here — `Checks` has none. | author, or design once a red or conflicted verdict has sent the ticket to `Ready for rework` |
+| `Reconciling` | **Nothing, and this one is a gap rather than a decision.** The reconcile agent is never told the flag is set — it reads no labels — so a flagged ticket merges. Reachable only when the flag arrives after the ticket left `Checks`. | — |
 | `Merged` | Deferred — the change is merged and past recall. Becomes a finding → Triage. | — |
 | `Done` / `Canceled` | No action. If the collision matters it is a new finding → Triage. | — |
 
@@ -619,11 +619,23 @@ ways out of it. A red or conflicted verdict moves the ticket to `Ready for rewor
 flag, where it becomes an ordinary queue re-read and design resolves it. A green one waits for
 the author.
 
-That asymmetry is the honest shape rather than a gap to fill. `Checks` is the last point before
-a merge, so holding is the conservative answer and an automatic clear would be the pipeline
-deciding a collision no longer matters at exactly the moment that judgment is most expensive to
-get wrong. The cost is a green ticket that waits on a human, which the boundary gate then
-surfaces: no milestone completes while a `re-evaluate` label is outstanding (§10).
+What the hold actually stops is the **promotion into `Reconciling`**, not a merge — `Checks`
+never merges anything. That distinction matters more than it looks, because the row below used
+to claim `Reconciling` blocks the merge and it does not: the reconcile agent reads no labels and
+is never told the flag is set. So the `Checks` hold is not one guard among two. **It is the only
+thing standing between a flagged ticket and a merge**, which is why it holds rather than
+clearing itself: an automatic clear would be the pipeline deciding a collision no longer matters
+at the moment that judgment is most expensive to get wrong, with nothing downstream to catch it.
+
+The cost is a green ticket that waits on a human, which the boundary gate surfaces: no milestone
+completes while a `re-evaluate` label is outstanding (§10).
+
+**The `Reconciling` gap is narrow but real.** A ticket flagged in `Checks` never reaches
+`Reconciling` — the hold is what prevents it — so the only way in is a flag applied *after* the
+promotion, which is exactly what a thread acquiring a mutex label mid-flight can do. That ticket
+merges with the collision unresolved. Closing it wants the flag in the reconcile claim and a
+verdict that can decline on it; until that exists this row says so rather than describing an
+intention.
 
 **All `re-evaluate` labels must be clear before a milestone can complete** (§10).
 
