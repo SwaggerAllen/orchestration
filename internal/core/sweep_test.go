@@ -189,13 +189,24 @@ func TestCIGreenPromotesAndDispatchesReconcile(t *testing.T) {
 	}
 }
 
-func TestCIGreenHeldByReEvaluate(t *testing.T) {
+// re-evaluate no longer holds promotion out of Checks. The hold was a
+// dead end: Checks has no agent, so nothing in that state evaluated the
+// flag, and a green ticket waited on a human. Reconciliation owns the
+// next state, is about to read the diff against the argument anyway,
+// and is what merges — so the flag travels with the ticket and the
+// verdict answers it (DESIGN §7).
+func TestCIGreenPromotesEvenWhenFlagged(t *testing.T) {
 	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
 		t.CI = CIInfo{Status: CIGreen}
 		t.Labels = []string{LabelReEvaluate}
 	}))
-	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
-		t.Errorf("re-evaluate must hold promotion, got %v", *a)
+	acts := Sweep(s)
+	a := find(acts, ActTransition, "T1")
+	if a == nil || a.To != protocol.Reconciling {
+		t.Fatalf("a flagged green ticket did not promote: %v", a)
+	}
+	if d := find(acts, ActDispatch, "T1"); d == nil || d.Agent != AgentReconcile {
+		t.Errorf("no reconcile dispatch to answer the flag: %v", d)
 	}
 }
 
@@ -1261,5 +1272,97 @@ func TestTheDesignQueueIsNotInFlight(t *testing.T) {
 	o := ComputeOrder(snap(queued), "")
 	if got := layerOf(o, "T1"); got != LayerReady {
 		t.Errorf("a queued ticket is in %q, want %q", got, LayerReady)
+	}
+}
+
+// An agent state is written by a claim, so a hand-move into one is a §9
+// violation and gets reverted. That only works when the pipeline has a
+// record to judge the arrival against — and "no record means not judged"
+// is deliberate, so a ticket created and dragged straight into Designing
+// before the pipeline ever wrote to it was judged by nothing, dispatched
+// by nothing (no agent state is a dispatch source) and timed out by
+// nothing (the stale-claim rule needs a dead run). It sat.
+func TestAnUnclaimedTicketInAnAgentStateGoesToItsQueue(t *testing.T) {
+	for _, c := range []struct{ from, want protocol.State }{
+		{protocol.Designing, protocol.ReadyForDesign},
+		{protocol.InProgress, protocol.ReadyForDev},
+		{protocol.Reworking, protocol.ReadyForRework},
+	} {
+		t.Run(string(c.from), func(t *testing.T) {
+			stranded := tk("T1", c.from)
+			s := snap(stranded)
+			delete(s.Recorded, "T1") // never written by the pipeline
+
+			a := find(Sweep(s), ActTransition, "T1")
+			if a == nil {
+				t.Fatalf("a stranded ticket in %s was left where it was", c.from)
+			}
+			if a.To != c.want {
+				t.Errorf("moved to %q, want the queue that feeds that agent (%q)", a.To, c.want)
+			}
+		})
+	}
+}
+
+// The two conditions are what keep this from overlapping the rules that
+// already work, so each is checked from the other side.
+func TestTheQueueRescueYieldsToTheRulesThatOwnTheTicket(t *testing.T) {
+	// A record means revertFor owns it, and sending the ticket back where
+	// it came from is the more precise answer than queueing it.
+	judged := tk("T1", protocol.Designing, arrived(protocol.Todo, RoleAuthor))
+	a := find(Sweep(snap(judged)), ActTransition, "T1")
+	if a == nil || a.To != protocol.Todo {
+		t.Errorf("a judged hand-move went to %v, want a revert to its origin", a)
+	}
+
+	// A live run means an agent is working; a dead one is the
+	// stale-claim rule's. Neither is this rule's business.
+	for _, live := range []bool{true, false} {
+		running := tk("T2", protocol.Designing, func(t *Ticket) {
+			t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: live}
+			if !live {
+				t.Run.EndedAt = t0.Add(-time.Hour)
+			}
+		})
+		s := snap(running)
+		delete(s.Recorded, "T2")
+		if a := find(Sweep(s), ActTransition, "T2"); a != nil && a.To == protocol.ReadyForDesign {
+			t.Errorf("live=%v: queued a ticket a run had claimed", live)
+		}
+	}
+
+	// The boundary ticket's In progress is the author's own signal that
+	// their pass is done (DESIGN §10), and it has no queue at all.
+	boundary := tk("T3", protocol.InProgress, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	s := snap(boundary)
+	delete(s.Recorded, "T3")
+	if a := find(Sweep(s), ActTransition, "T3"); a != nil && a.To == protocol.ReadyForDev {
+		t.Error("queued the boundary ticket, whose In progress is the signal to run")
+	}
+
+	// Author-only work is the author's from Todo to Done (DESIGN §8).
+	own := tk("T4", protocol.InProgress, func(t *Ticket) { t.Labels = []string{LabelAuthorOnly} })
+	s = snap(own)
+	delete(s.Recorded, "T4")
+	if a := find(Sweep(s), ActTransition, "T4"); a != nil {
+		t.Errorf("moved an author-only ticket: %+v", *a)
+	}
+}
+
+// The flag has to survive the promotion, or reconciliation is handed a
+// question nobody told it about. Nothing in the sweep strips it on the
+// way through Checks.
+func TestTheFlagTravelsIntoReconciling(t *testing.T) {
+	flagged := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+		t.Labels = []string{LabelReEvaluate}
+	})
+	for _, a := range Sweep(snap(flagged)) {
+		if a.TicketID == flagged.ID && a.Kind == ActRemoveLabel && a.Label == LabelReEvaluate {
+			t.Error("the sweep cleared the flag on promotion; reconcile would never see it")
+		}
+	}
+	if !flagged.HasLabel(LabelReEvaluate) {
+		t.Error("the flag did not survive the pass")
 	}
 }

@@ -66,6 +66,8 @@ func run(args []string) error {
 		return cmdPreflight(args[1:])
 	case "audit":
 		return cmdAudit(args[1:])
+	case "non-asks":
+		return cmdNonAsks(args[1:])
 	case "ids":
 		return cmdIDs(args[1:])
 	case "sim":
@@ -106,6 +108,11 @@ commands:
            (requires LINEAR_API_KEY; GITHUB_TOKEN adds the host checks)
   audit    mutex audit for CI: changed paths vs the screen and system
            file maps and the ticket's labels (DESIGN 9)
+  non-asks what the author has already refused about a scope this run
+           has just discovered (DESIGN 4). The prompt's slice is
+           selected before the pass starts, against labels a first
+           design pass does not have yet; this asks again once it does.
+           Reads one local file, talks to nothing
   ids      print the Linear ids a config needs: viewer, teams, projects
            (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)

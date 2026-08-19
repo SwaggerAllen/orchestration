@@ -206,6 +206,21 @@ no state meaning "a PR is open, awaiting a person."
 
 **Invariant: no ticket moves forward carrying a `re-evaluate` label** (§7).
 
+**A ticket in an agent's own state that no agent ever claimed is queued rather than left there.**
+Agent states are written by a claim, so a hand-move into one is a §9 violation and is reverted
+to where it came from — but only when the pipeline has a record of the ticket to judge the
+arrival against, and *no record means not judged* is deliberate (§9). A ticket created and
+dragged straight into `Designing` before the pipeline had ever written to it was therefore
+judged by nothing, dispatched by nothing — no agent state is a dispatch source — and timed out
+by nothing, since the stale-claim rule needs a run to have died. It sat.
+
+So a ticket in `Designing`, `In progress` or `Reworking` with **no run at all and no record**
+moves to the queue that feeds that agent. Both conditions are what keep the rule from
+overlapping the ones that already work: a record means the revert owns it and sending it back to
+its origin is the more precise answer, and a run means an agent is either working or dead and
+neither is this. `Checks` and `Reconciling` are excluded — neither is claimed from a queue, so
+there is nowhere to return a ticket to that a PR would back.
+
 **A state the config does not name is read by its category when the category settles it.** The
 tracker has states the protocol never mapped — Linear ships built-in `Duplicate` and `Canceled`
 alongside whatever `pipeline setup` created — and they are two taps away in the UI. A resolved
@@ -383,6 +398,19 @@ the universal set — and design is the pass the document is written for. Matchi
 ticket's words is what the class audit already does (§9), for the same reason: at the moment
 the question is asked, the words are all there is.
 
+**And a pass can ask again.** Selection runs once, when the prompt is assembled, which is
+accurate for dev and reconciliation and is not for the pass this document is written for: a
+first design pass carries no labels, and its real scope is not known until it declares
+`screens` and `systems` in its outcome — one step after the selection needed it. So the harness
+offers `pipeline non-asks --for <scope>`, which the prompt names, and which answers the same
+question through the same selection so the two cannot disagree. It reads one local file and
+needs no credential, so it is safe at any point in a pass.
+
+A command rather than "the file is in your checkout, go and read it". The argument for inlining
+the document at all is that a prompt whose most important input is a pointer is a prompt whose
+most important input is optional, and an escape hatch phrased as an invitation reintroduces
+exactly what the inlining was written against. A specific thing to run is an instruction.
+
 **Selection fails open.** An entry with no scope is universal, and a file with no headings at
 all is one universal entry — which is also the migration path, since every project's existing
 flat file keeps behaving exactly as it does now until somebody rewrites it. Over-selecting
@@ -431,6 +459,24 @@ whenever they already know.
 to the same branch; reconciliation reviews it; a bounce is more commits on the same branch
 rather than a second PR against an already-merged change. Dev may amend design-owned files when
 implementation discovers something, which keeps storybook current instead of letting it lag.
+
+**The ownership table is two-way.** Dev's side is the amendment right above. Design's side is
+the same sentence read backwards: a design pass commits *only* within the project's
+`designOwnedPaths`, and everything else — the code that implements what it decided included —
+is dev's. Both halves are needed, and only one of them existed for a while: dev's prompt named
+the config key, while design's named a hardcoded list of file extensions that assumed every
+project's design output is a component template and a story file. One rule stated twice, in two
+forms, and the weaker form bound the role it mattered most for. Catapult's ORC-84 is what that
+costs — a design pass that committed six implementation modules and several thousand lines of
+bundled content alongside its docs, with nothing in its prompt drawing the line and nothing
+downstream noticing. The design in that pass was right; an unbounded role simply keeps going.
+Enforced at both ends now (§9): the harness holds it when the design pass finishes, and CI holds
+it on the PR.
+
+**Widening the boundary is a proposal, not an edit.** A design pass that believes work outside
+`designOwnedPaths` is genuinely design's says so in its summary and stops. It must not reach
+for the config: `pipeline.config.json` is author-only by the rows above, so the repair that
+looks obvious from inside the run is the one that takes the run down with it.
 
 **The branch name carries the issue key** (Linear's suggested branch name format works as-is),
 and the PR URL is recorded on the issue when the draft opens. Linear's auto-linking makes this
@@ -626,14 +672,44 @@ surprise at merge.
 | `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
-| `Checks` | Evaluated in place. No state move. Clear with a comment, or return to `Reworking`. | dev |
-| `Reconciling` | Evaluated in place as an additional reconcile item. **Blocks the merge.** | reconcile |
+| `Checks` | Nothing. The flag travels with the ticket into `Reconciling`, which is the thread that answers it. | — |
+| `Reconciling` | **Answered as a second question, alongside the verdict.** `holds` clears the flag and the ticket proceeds on its outcome; `bites` sends it to `Ready for rework` whatever the outcome said, with the report as the scope. | reconcile |
 | `Merged` | Deferred — the change is merged and past recall. Becomes a finding → Triage. | — |
 | `Done` / `Canceled` | No action. If the collision matters it is a new finding → Triage. | — |
 
 **A `re-evaluate` label is cleared only by the thread owning the flagged ticket's current
 state** — never by the thread that noticed. Otherwise the noticing thread clears its own flag
 and nothing is re-evaluated.
+
+**`Checks` is the one state with no thread of its own, and the answer is to carry the question
+rather than to stop.** `Checks` has no agent — nothing is dispatched to a ticket sitting there —
+so a flag arriving in that state had nobody to evaluate it. Holding promotion was tried and is a
+dead end for the same reason: it stops the ticket at a gate nobody is standing at, and a green
+one waits on a human indefinitely. Which is what re-evaluation is not supposed to need.
+
+So the flag travels. **Reconciliation is the thread that answers it**, and it is the right one
+twice over: it owns the state the ticket lands in, and it is the last thread before the merge,
+so nothing has been given up by letting the ticket through. It is also already reading the diff
+against the argument, which is most of the work — asking it one more question is cheap.
+
+**The collision is a separate axis from the verdict, not a fourth outcome.** The outcome asks
+whether the diff says what the argument asked for; the collision asks whether what changed
+around it since means it no longer does. Those are independent: a clean `pass` whose ground has
+moved must not merge, and a diff that drifted for unrelated reasons is still a `fail`. One field
+carrying both would make the run choose which answer to throw away.
+
+`holds` clears the flag and the ticket proceeds on its outcome. `bites` sends it to `Ready for
+rework` whatever the outcome said, with the report as the scope — and that scope has to say
+plainly that the diff was not wrong when it was written, or the rework agent re-litigates a
+design nothing questioned (the same care §2.4's conflict bounce takes). Either way the flag is
+cleared, because the question has been answered and a flag left behind would send the ticket to
+a design re-read that judges the same collision twice.
+
+**An unanswered collision bounces rather than merging.** The two ways to be wrong are not equal:
+a bounce costs a rework pass on work that was fine, and a merge under a collision nobody judged
+is the thing the flag exists to prevent, past recall the moment it lands. Both bounces carry the
+reconcile-bounce marker, so the second-bounce escalation counts them together (§12) — two
+failures to land one scope is a sequencing problem for the author whichever half noticed it.
 
 **All `re-evaluate` labels must be clear before a milestone can complete** (§10).
 
@@ -777,6 +853,15 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   the same promotion from convention to enforcement as the class audit: a mutex nobody took is
   a collision nobody could prevent. File maps make it per-name; "some design path, some screen
   label" would let the wrong label satisfy the check.
+- **a design commit outside the project's `designOwnedPaths` fails the build** — the design
+  ownership audit, the mutex audit's mirror image: that one asks whether a path the diff
+  touched is claimed by a doc whose label the ticket lacks, this one whether a path the design
+  agent wrote is one design owns at all. It needs its own file list rather than the diff,
+  because attribution is the question — a PR carries design's commits and dev's on one branch,
+  and dev may amend design-owned files on discovery (§5), so "what the diff touched" cannot say
+  whose those paths were. `git log --author` splits them: the two agents commit under
+  `pipeline-design-agent` and `pipeline-dev-agent`. Given no such list, the audit says it
+  skipped the check rather than reporting a clean run it did not make.
 - no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
   and an ambiguous mutex is two tickets in the same files with a green build
 - `screens/*.md` and `systems/*.md` contain no state sections and no code inventory — the doc
@@ -786,6 +871,21 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   linted, and that is the point — a standing decision naming `farewell/1` is the decision doing
   its job, while a heading with a list under it is the split the rule was written against. A
   check that failed good docs would be switched off, taking the rule with it.
+
+**Design finish (blocking, in the harness — the same rule, one gate earlier):**
+- a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not
+  reach `Design review`. The finish fails, the stray paths land on the ticket as a comment, and
+  the run's abort step parks it in `Blocked` (§12).
+- both gates exist because they catch different moments, not out of belt and braces. On a first
+  pass there is no PR when the design finishes, so CI has not run and cannot: the harness gate
+  is what stops the author being asked to review a strayed diff as design. CI is the backstop
+  that holds on every later push, whatever produced it.
+- the harness gate audits this pass's commits only, diffed from where the pass started, so a
+  re-pass is not billed for the artifacts and dev commits the branch already carried. CI audits
+  every design commit on the branch, which is the right scope for a merge gate.
+- the strays stay on the branch either way. Blocking the *advance* rather than the commit is
+  deliberate: the author has to read the diff to strip it, and a run that swallowed its own
+  output would leave a `Blocked` ticket with nothing to look at.
 
 **Reconciliation (blocking, and the last gate before production):**
 - the PR diff says what the issue asked for
@@ -1269,6 +1369,26 @@ aborting — so a run that never got one skipped it, and the loudest failures, t
 harness broke before the agent started, were the only ones that left nothing on the ticket at
 all. Catapult's `ORC-7` sat in `Designing` for 23 minutes showing a healthy state and a
 dispatched run, after its claim died on a 403 reading an unrelated ticket's CI verdict.
+
+**A failure that reaches the ticket brings what the run printed, not just where to find it.**
+The abort comment was the run URL and nothing else, so a run whose model pass exited `249` —
+the CLI's code, not the pipeline's, and not one this project can decode — arrived as a bare
+number with nothing to act on. The output that could have explained it was written to a
+collapsed step and discarded. So both bracketing steps keep their output as well as showing it:
+the model run captures each attempt's stdout and stderr, and the finish step captures its own,
+into one well-known file the abort path reads back and pastes onto the ticket, bounded and
+fenced. Fenced because it is output from a process nobody vetted landing on a ticket later
+passes read as input — the same trust boundary as a CI failure (§9).
+
+Evidence is cleared when the run recovers. The model pass fails over from the subscription
+credential to the API key, and a first attempt's death left behind is a cause of death attached
+to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
+
+**What the exit code is not.** The harness decodes `129`–`159` as a process killed by signal
+`n-128`, which is the shell's own convention and therefore a fact. Every other code belongs to
+the program that exited, and the pipeline does not guess at another tool's table — inventing a
+meaning for `249` is how an opaque number becomes a misleading one. The captured output is the
+answer to "what does this mean"; the number is only where to start.
 
 **Two failures wear the same shape, and they want opposite handling.** A pickup assertion that
 refuses is the pipeline working — a held mutex, an agent of that kind already running, an open

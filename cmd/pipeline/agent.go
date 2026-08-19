@@ -13,6 +13,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
@@ -383,8 +384,27 @@ func assembleReconcilePrompt(template string, res *agent.ClaimResult, verdictPat
 		}
 	}
 	add(nonAsksSection(res.NonAsks, "judging", false, scopeOf(res)))
+	flagged := false
+	for _, l := range res.Labels {
+		if l == core.LabelReEvaluate {
+			flagged = true
+		}
+	}
+	if flagged {
+		add("\n## This ticket carries re-evaluate — answer it as well\n\n" +
+			"Another thread discovered scope nobody predicted and flagged every ticket it collides with (DESIGN 7). You are the thread that owns this ticket's state, so you are the one that answers it, and you are the last one before the merge.\n\n" +
+			"The question is NOT whether the diff was right when it was written. It is whether what changed around it since means it no longer says what the argument asked for. Read the comments above for what moved.\n\n" +
+			"By the precedence rule the ticket further along holds the ground, and this one is as far along as they get — so `holds` is the ordinary answer and `bites` is the exception you have to argue for.\n")
+	}
 	if verdictPath != "" {
-		add(fmt.Sprintf("\n## Verdict\n\nWrite JSON to `%s`: {\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\"}.\nA fail's report is the rework scope — name exactly what is missing. A cannot-tell's report is what a human must look at. Ambiguity must never resolve itself as pass.\n", verdictPath))
+		schema := "{\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\"}"
+		if flagged {
+			schema = "{\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\", \"collision\": \"holds\"|\"bites\"}"
+		}
+		add(fmt.Sprintf("\n## Verdict\n\nWrite JSON to `%s`: %s.\nA fail's report is the rework scope — name exactly what is missing. A cannot-tell's report is what a human must look at. Ambiguity must never resolve itself as pass.\n", verdictPath, schema))
+		if flagged {
+			add("`collision` is required here and is a separate answer from `outcome` — a clean pass whose ground has moved still must not merge. On `bites` the report is the rework scope, so say what moved and what it costs. Omitting it bounces the ticket rather than merging on a collision nobody judged.\n")
+		}
 	}
 	return string(b)
 }
@@ -408,11 +428,46 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 		}
 	}
 	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design", scopeOf(res)))
+	add(designBoundsSection(res.DesignOwnedPaths))
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
 	if outcomePath != "" {
 		add(fmt.Sprintf("- Write your outcome JSON to `%s` before you finish (see Outcomes above).\n", outcomePath))
 	}
 	return string(b)
+}
+
+// designBoundsSection states the paths this pass may commit inside
+// (DESIGN §5's ownership table, config `designOwnedPaths`).
+//
+// Inlined for the reason the labels are: the boundary lives in
+// `pipeline.config.json`, which the agent has no reason to open and no
+// instruction to trust, so a bound stated only there is a bound the run
+// never reads. It used to be stated in `design.md` instead, as a
+// hardcoded list of extensions — `.heex`, `.story.exs` and the docs —
+// which is this project's answer to a question every project answers
+// differently, and which nothing checked.
+//
+// Measured on Catapult's ORC-84: a design pass committed six Elixir
+// modules and ~4,000 lines of bundled content alongside its docs, 762
+// insertions of implementation, with nothing in the prompt drawing the
+// line. The design in that pass was right — an unbounded role simply
+// keeps going.
+//
+// The proposal rule is stated here rather than left to be inferred
+// because the obvious repair for a blocked pass is to widen the config,
+// and `pipeline.config.json` is author-only (DESIGN §5): the push is
+// rejected and takes the run down with it.
+//
+// The empty case is stated rather than skipped, like the labels': "this
+// project declares no design-owned paths" and "the harness did not tell
+// me" license very different confidence about whether a path is in
+// bounds.
+func designBoundsSection(owned []string) string {
+	if len(owned) == 0 {
+		return "\n## What you may commit\n\nThe harness passed no design-owned paths for this project, so the boundary is unknown rather than wide. Commit the narrative and system docs and nothing else, and record the gap as a harness finding.\n"
+	}
+	return fmt.Sprintf("\n## What you may commit (DESIGN §5)\n\n%s\n\nThat list is the whole of it — this pass's commits are audited against it at finish, and a file outside it parks the ticket in Blocked. Everything else is dev's, including the code that implements what you decided: write the decision, not the implementation. Iterate however you like; scratch is never committed.\n\nIf the work genuinely belongs to design and the list does not cover it, that is a **proposal in your summary, not an edit**. `pipeline.config.json` is author-only — a commit touching it is rejected and takes the run down with it.\n",
+		"- "+strings.Join(owned, "\n- "))
 }
 
 // ticketScope is what a pass is working on, for selecting the non-asks
@@ -488,7 +543,10 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 		// honest form of the filter is "here is your slice, the rest is
 		// one `cat` away".
 		if len(shown) < len(all) {
-			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems; read `%s` yourself if this ticket turns out to reach further than its labels say.\n",
+			fmt.Fprintf(&b, "\n**%d of %d entries**, selected by this ticket's scope. The rest are recorded against other screens and systems.\n\n"+
+				"**This selection was made before you started.** If your work turns out to reach a screen or system this section does not name, ask again before you commit to it:\n\n"+
+				"```sh\npipeline non-asks --for screen:<name>,system:<name>\n```\n\n"+
+				"Bare names work too. It reads `%s` and talks to nothing, so it is safe to run at any point.\n",
 				len(shown), len(all), n.Path)
 		}
 		switch {
@@ -500,7 +558,8 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 			// as the most permissive of them.
 			b.WriteString("\nThe file exists and records no refusals yet. Nothing has been ruled out; this was checked, not skipped.\n")
 		case len(shown) == 0:
-			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file — read the file itself if this ticket reaches further than its labels say.\n")
+			b.WriteString("\nNone of the recorded refusals are scoped to this ticket. That is a selection, not an empty file: the project records some, and none of them name what this ticket names.\n\n" +
+				"If your work reaches further than that, ask again — `pipeline non-asks --for screen:<name>,system:<name>`, bare names accepted.\n")
 		default:
 			fmt.Fprintf(&b, "\n---\n%s---\n", nonasks.Render(shown))
 		}
@@ -678,7 +737,7 @@ func cmdAgentFinish(args []string) error {
 	// and reading "nobody said" as "nothing landed" would park a ticket
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
-	changedPath := fs.String("changed-files", "", "file with one changed path per line (dev); what a reported mutex label is checked against")
+	changedPath := fs.String("changed-files", "", "file with one changed path per line; what a reported mutex label (dev) and the design ownership boundary (design) are checked against")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -696,6 +755,19 @@ func cmdAgentFinish(args []string) error {
 	// The claim recorded where the run holds the ticket. Without it the
 	// move is recorded with no origin, and a half-edge is unjudgeable.
 	p.KnownState(res.TicketID, res.State)
+
+	// What this pass wrote, read once for both roles that judge it: dev
+	// checks a reported mutex label against it, design checks its
+	// ownership boundary against it.
+	//
+	// Absent is not fatal here, unlike the audit's own copy of this
+	// flag. A missing list only costs those two checks — which each say
+	// so where it matters — while failing would land a finished run in
+	// Blocked over a file the harness was supposed to write.
+	changed, err := readPathList(*changedPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	if res.Mode == "reconcile" {
 		if *verdict == "" {
@@ -723,7 +795,7 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed); err != nil {
 			return err
 		}
 		if err := postFindings(p, res.TicketID, *findings); err != nil {
@@ -742,15 +814,6 @@ func cmdAgentFinish(args []string) error {
 	}
 	devOutcome, err := agent.LoadDevOutcome(*outcome)
 	if err != nil {
-		return err
-	}
-	// Absent is not fatal here, unlike the audit's own copy of this
-	// flag. A missing list only costs a reported label its check, which
-	// applyDiscoveredLabels says on the ticket — while failing would
-	// land a finished run in Blocked over a file the harness was
-	// supposed to write.
-	changed, err := readPathList(*changedPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome, changed); err != nil {
@@ -783,11 +846,20 @@ func cmdAgentAbort(args []string) error {
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
+	errPath := fs.String("error-file", "", "file holding a failed model run's captured output; its tail is appended to the comment")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *claimPath == "" {
 		return fmt.Errorf("agent abort: --claim is required (a run that never claimed has nothing to abort)")
+	}
+	// Absent is the ordinary case, not a failure: the file exists only
+	// when the model run is what died, so an abort reporting anything
+	// else appends nothing rather than a cause it made up.
+	if *errPath != "" {
+		if raw, err := os.ReadFile(*errPath); err == nil {
+			*message = agent.WithRunOutput(*message, string(raw))
+		}
 	}
 	p, _, err := agentDeps(*cfgPath)
 	if err != nil {

@@ -24,6 +24,7 @@ func cmdAudit(args []string) error {
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	changedPath := fs.String("changed-files", "", "file with one changed path per line (git diff --name-only)")
 	addedPath := fs.String("added-files", "", "file with one ADDED path per line (git diff --diff-filter=A --name-only); enables the class audit")
+	designPath := fs.String("design-files", "", "file with one path per line, written by the design agent's commits only (git log --author=pipeline-design-agent); enables the design ownership audit")
 	ticket := fs.String("ticket", "", "ticket key to read labels from the tracker (needs LINEAR_API_KEY)")
 	labelsFlag := fs.String("labels", "", "comma-separated labels (offline alternative to --ticket)")
 	root := fs.String("root", "", "project root containing systems/ and screens/ (default: the config file's directory)")
@@ -43,6 +44,11 @@ func cmdAudit(args []string) error {
 	}
 
 	added, err := readPathList(*addedPath)
+	if err != nil {
+		return err
+	}
+
+	designWrote, err := readPathList(*designPath)
 	if err != nil {
 		return err
 	}
@@ -140,6 +146,34 @@ func cmdAudit(args []string) error {
 		fmt.Println("class audit: skipped — --labels carries no issue text to check a component's name against; use --ticket")
 	default:
 		violations = append(violations, filemap.ClassAudit(cfg.ComponentPaths, added, ticketText)...)
+	}
+
+	// The design ownership audit, the mutex audit's mirror image: that
+	// one asks whether a path the diff touched is claimed by a doc whose
+	// label the ticket lacks, this one whether a path the *design agent*
+	// wrote is one design owns at all (DESIGN §5, §9).
+	//
+	// Attribution is the whole reason this needs a third list. A PR
+	// carries design's commits and dev's on one branch, and dev may
+	// amend design-owned files on discovery — so "what the diff touched"
+	// cannot answer the question. `git log --author` splits them: the
+	// two agents commit under `pipeline-design-agent` and
+	// `pipeline-dev-agent`, which was true before anything read it.
+	//
+	// Skipped states say which half was missing, for the reason the
+	// class audit's do: "the design agent wrote nothing outside its
+	// paths" and "nobody told me what the design agent wrote" must not
+	// print the same, or a check that never ran reads as one that
+	// passed. That failure is not hypothetical here — the mutex audit
+	// spent its early life reporting "clean ... against 0 system and 0
+	// screen maps" from inside the wrong directory.
+	switch {
+	case *designPath == "":
+		fmt.Println("design ownership audit: skipped — no --design-files given, so design's commits are indistinguishable from dev's (DESIGN §5)")
+	case len(designWrote) == 0:
+		fmt.Println("design ownership audit: no commits by the design agent in this diff")
+	default:
+		violations = append(violations, filemap.DesignAudit(cfg.DesignOwnedPaths, designWrote)...)
 	}
 
 	if len(violations) == 0 {

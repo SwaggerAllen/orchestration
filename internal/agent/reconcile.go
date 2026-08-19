@@ -52,10 +52,14 @@ func ClaimReconcile(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, 
 		Description: t.Description,
 		Branch:      pr.Branch,
 		PRNumber:    pr.Number,
-		// Carried because the labels are what select the non-asks this
-		// pass reads (DESIGN §4). Reconciliation runs late enough that
-		// the mutex labels exist, so unlike design's claim this one
-		// selects on more than the ticket's words.
+		// Carried for two things. A re-evaluate flag among them means
+		// another thread moved the ground under this ticket, and
+		// reconciliation is the thread that owns the state it is
+		// flagged in (DESIGN §7) — it cannot answer a question nobody
+		// handed it. They also select the non-asks this pass reads
+		// (§4); reconciliation runs late enough that the mutex labels
+		// exist, so unlike design's claim this one selects on more than
+		// the ticket's words.
 		Labels: append([]string(nil), t.Labels...),
 		// Reconciliation is the last gate before the merge (DESIGN §11),
 		// so it is the last chance to catch a diff that landed
@@ -91,7 +95,26 @@ type Verdict struct {
 	// told). On a pass it carries the callouts, e.g. a surface changed
 	// with no storybook variation (DESIGN §9).
 	Report string `json:"report"`
+	// Collision answers the re-evaluate flag: "holds" or "bites".
+	// Required exactly when the ticket carries the flag, ignored
+	// otherwise.
+	//
+	// Its own axis rather than a fourth outcome, because the two
+	// questions are independent and collapsing them loses answers. The
+	// outcome asks whether the diff says what the argument asked for;
+	// this asks whether what another ticket did since invalidates it. A
+	// diff can be a clean pass whose ground has moved, and it must not
+	// merge; a diff can have drifted for reasons that have nothing to do
+	// with the collision. One field cannot carry both without the model
+	// choosing which answer to discard.
+	Collision string `json:"collision,omitempty"`
 }
+
+// Collision verdicts.
+const (
+	CollisionHolds = "holds"
+	CollisionBites = "bites"
+)
 
 // LoadVerdict reads and validates a verdict file.
 func LoadVerdict(path string) (*Verdict, error) {
@@ -102,6 +125,11 @@ func LoadVerdict(path string) (*Verdict, error) {
 	var v Verdict
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, fmt.Errorf("verdict %s: %w", path, err)
+	}
+	switch v.Collision {
+	case "", CollisionHolds, CollisionBites:
+	default:
+		return nil, fmt.Errorf("verdict: collision %q is not %q or %q", v.Collision, CollisionHolds, CollisionBites)
 	}
 	switch v.Outcome {
 	case "pass":
@@ -166,6 +194,12 @@ The verdict that stood, for context:
 //     deliberate — holding it would lock the screen mutex for weeks, and
 //     "cannot tell" was never a finding of fault
 func FinishReconcile(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, v *Verdict) error {
+	if carriesLabel(res.Labels, core.LabelReEvaluate) {
+		bounced, err := settleCollision(ctx, p, res, v)
+		if err != nil || bounced {
+			return err
+		}
+	}
 	switch v.Outcome {
 	case "fail":
 		m := marker.Marker{Kind: marker.ReconcileBounce, Fields: map[string]string{"pr": fmt.Sprintf("%d", res.PRNumber)}}
@@ -252,4 +286,55 @@ func recordStandInDeploy(ctx context.Context, p *plane.Plane, h host.Host, sha s
 		return fmt.Errorf("recording the stand-in deployment for %s: %w", sha, err)
 	}
 	return nil
+}
+
+// settleCollision answers the re-evaluate flag before the verdict is
+// applied, and reports whether it took the ticket away.
+//
+// Reconciliation owns the state the flag is sitting in, so it is the
+// thread that clears it (DESIGN §7) — and it is the last thread before
+// a merge, so if the collision bites this is the last chance to say so.
+// The flag is cleared either way: the question has been answered, and a
+// flag left behind would send the ticket to a design re-read that would
+// evaluate the same collision a second time.
+func settleCollision(ctx context.Context, p *plane.Plane, res *ClaimResult, v *Verdict) (bool, error) {
+	// An unanswered collision bounces rather than merging. The two ways
+	// to be wrong are not equal: a bounce costs a rework pass on work
+	// that was fine, and a merge under a collision nobody judged is the
+	// thing the flag exists to prevent, past recall the moment it lands.
+	scope := ""
+	switch v.Collision {
+	case CollisionHolds:
+	case CollisionBites:
+		scope = v.Report
+	default:
+		scope = "The run did not answer whether the collision still matters, so this bounces rather than merging on an unjudged one."
+	}
+	if err := p.RemoveTicketLabel(ctx, res.TicketID, core.LabelReEvaluate); err != nil {
+		return false, err
+	}
+	if scope == "" {
+		return false, p.CommentTicket(ctx, res.TicketID,
+			"**Re-evaluated: the collision does not invalidate this work.** Another thread flagged this ticket while it was in flight; reconciliation read the diff against the argument with that in view and the argument still holds. The flag is cleared and this proceeds on its own verdict (DESIGN §7).")
+	}
+	// The same marker the drift bounce uses, so the second-bounce
+	// escalation counts them together (DESIGN §12). Two failures to land
+	// one scope is a sequencing problem for the author whichever half
+	// noticed it.
+	m := marker.Marker{Kind: marker.ReconcileBounce, Fields: map[string]string{"pr": fmt.Sprintf("%d", res.PRNumber), "collision": "1"}}
+	prose := "**Re-evaluated: the ground moved under this ticket.** Another thread changed something this work depends on, and reconciliation judged that it no longer says what the argument asked for.\n\n" +
+		"This comment is the newest, so it is the scope (DESIGN §2.3). **The finding is not about your diff being wrong when it was written** — it is about what changed around it since:\n\n" + scope
+	if err := p.CommentTicket(ctx, res.TicketID, m.Comment(prose)); err != nil {
+		return false, err
+	}
+	return true, p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRework, core.RoleReconcile)
+}
+
+func carriesLabel(labels []string, want string) bool {
+	for _, l := range labels {
+		if l == want {
+			return true
+		}
+	}
+	return false
 }

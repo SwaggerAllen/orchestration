@@ -147,11 +147,22 @@ runs:
         PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        # stderr captured as well as shown, for the reason the claim's
+        # is: this step's failure reaches the ticket as "run failed:
+        # <url>" and nothing else, so a Go error that says exactly what
+        # went wrong ends its life in a collapsed step nobody opens.
+        # `abort on failure` reads this file back.
+        mkdir -p "$RUNNER_TEMP/pipeline"
+        set +e
         pipeline agent finish \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --verdict "$RUNNER_TEMP/pipeline/verdict.json" \
-          --findings "$RUNNER_TEMP/pipeline/findings.json"
+          --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          2> "$RUNNER_TEMP/pipeline/run-error.txt"
+        rc=$?
+        cat "$RUNNER_TEMP/pipeline/run-error.txt" >&2
+        exit $rc
 
     - name: say so when the claim itself failed
       if: failure() && steps.claim.outcome == 'failure'
@@ -185,4 +196,5 @@ runs:
           --claim "$RUNNER_TEMP/pipeline/claim.json" \
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
+          --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
           --message "Reconcile run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

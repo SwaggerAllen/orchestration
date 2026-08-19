@@ -55,7 +55,8 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	}
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-		Mode: mode,
+		Mode:             mode,
+		DesignOwnedPaths: append([]string(nil), p.Config.DesignOwnedPaths...),
 		// Carried for the non-asks selection (DESIGN §4). Usually empty
 		// here and that is expected — the design pass is what creates
 		// the mutex labels (§6) — which is exactly why the selection
@@ -162,7 +163,36 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
-func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string) error {
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string, changed []string) error {
+	// The ownership boundary, held before anything else lands. A pass
+	// that wrote outside it does not get a draft PR and does not reach
+	// Design review: returning here fails the finish step, and the
+	// action's abort step parks the ticket in Blocked with the finding
+	// already on it (DESIGN §5, §12).
+	//
+	// CI holds the same rule on the PR, and this is not a duplicate of
+	// it. On a first pass there is no PR when the design finishes, so
+	// CI has not run and cannot — this is the gate that stops the author
+	// being asked to review a strayed diff as design. CI is the backstop
+	// on every later push.
+	//
+	// After the push rather than before, deliberately. The strays are on
+	// the branch by the time this runs and stay there — which is the
+	// point: the author needs to read the diff to strip it, and a run
+	// that swallowed its own output would leave a Blocked ticket with
+	// nothing to look at. This stops the ticket advancing, not the
+	// commit.
+	//
+	// An empty list passes rather than failing. The harness supplies it
+	// from the branch diff, and a caller running an older action passes
+	// none — losing the audit is the right cost there, where failing
+	// would block every project whose stub predates it.
+	for _, f := range filemap.DesignAudit(res.DesignOwnedPaths, changed) {
+		if err := p.CommentTicket(ctx, res.TicketID, f); err != nil {
+			return err
+		}
+		return fmt.Errorf("design finish %s: %s", res.TicketKey, f)
+	}
 	// Recorded before the outcome branches, on every pass that hands the
 	// ticket forward: the base check is what warns the next dev pass that
 	// main moved under the design (DESIGN §2.4), and a decisionless pass

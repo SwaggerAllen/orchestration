@@ -65,16 +65,30 @@ A project also needs:
   `GITHUB_REF_NAME` gets `N/merge` and silently audits nothing.
 
   It runs the quality gates from the config, plus `pipeline audit` —
-  one command for all three of DESIGN §9's checks (mutex, doc lint,
-  class):
+  one command for all four of DESIGN §9's checks (mutex, doc lint,
+  class, design ownership):
 
   ```sh
   BASE="origin/main...HEAD"
   git diff --name-only "$BASE" > /tmp/changed
   git diff --diff-filter=A --name-only "$BASE" > /tmp/added
+  # What the design agent wrote, and only that: the two agents commit
+  # under distinct names, and a PR carries both their commits on one
+  # branch. Dev may amend design-owned files on discovery (DESIGN §5),
+  # so the plain diff cannot answer whose those paths were.
+  git log --format=%H --author=pipeline-design-agent origin/main..HEAD \
+    | xargs -r -n1 git show --name-only --format= \
+    | sort -u > /tmp/design
   pipeline audit --changed-files /tmp/changed --added-files /tmp/added \
-    --ticket <key>
+    --design-files /tmp/design --ticket <key>
   ```
+
+  Note the two-dot `origin/main..HEAD` in the `git log`, against the
+  three-dot form in the diffs above it. They are asking different
+  questions — which commits are on this branch, versus what the branch
+  changed relative to where it forked — and the three-dot form of
+  `git log` is a symmetric difference that would drag main's own commits
+  in.
 
   `--ticket` needs `LINEAR_API_KEY` in the step's env — the class
   audit fetches the issue's labels and text from the tracker, and the
@@ -92,9 +106,11 @@ A project also needs:
 
   The ticket key parses out of the branch name. `--added-files` is what
   turns on the class audit — a component arriving and a component being
-  edited are the same line in `--name-only`. Without it, or without
-  `componentPaths` in the config, the audit says which check it skipped
-  rather than reporting a clean run it didn't make.
+  edited are the same line in `--name-only`. `--design-files` is what
+  turns on the design ownership audit, which fails a PR whose design
+  commits reached outside the config's `designOwnedPaths`. Without
+  either, or without the matching config key, the audit says which check
+  it skipped rather than reporting a clean run it didn't make.
 - `pipeline-preflight.yml` (recommended). Exercises every
   credential-bearing call the pipeline makes, on demand. Permission
   gaps do not surface where they are introduced — they surface at

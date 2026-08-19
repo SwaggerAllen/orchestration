@@ -12,6 +12,9 @@ workflows and carry thin stubs (DESIGN §5).
   M0–M7, each with an exit gate.
 - **[SETUP.md](SETUP.md)** — the ordered checklist from empty accounts
   to a running pipeline, Cloudflare steps included.
+- **[CLAUDE.md](CLAUDE.md)** — working in this repo: the gates, the
+  comment convention, and the changes that have to land somewhere else
+  first.
 
 ## Repo map
 
@@ -37,6 +40,25 @@ or `ANTHROPIC_API_KEY`), a `ci` workflow, branch
 protection, and the metronome. `pipeline setup` provisions the Linear
 team; `pipeline ids` prints the ids the config needs; `configs/README.md`
 covers the scratch/dry-run environment.
+
+## Changing the protocol state set
+
+`protocol.AllStates` is canonical, and every project's
+`pipeline.config.json` maps every member of it to a tracker state name.
+Validation requires the whole mapping and runs before anything else, so
+a state added here without the matching line in a project's config makes
+**every** `pipeline` command fail in that project — the sweep included.
+Nothing dispatches, promotes or reverts until the line lands.
+
+So the order is: project configs first, then this repo, then
+`pipeline setup --apply` per project to create the tracker state.
+`setup` enumerates `AllStates` and needs no edit of its own. Adding
+`ready_for_design` in the other order took a project's pipeline down for
+about ninety minutes.
+
+The strictness is deliberate — a state the pipeline will write needs a
+tracker name, and failing at config load beats failing mid-transition —
+so the ordering is the part to get right rather than the check.
 
 ## Secrets inventory
 

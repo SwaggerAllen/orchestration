@@ -26,8 +26,12 @@ of what the code contains. Touching is not deciding: a ticket working
 inside a system without changing its structure declares the system in
 your outcome and diffs no doc.
 
-Iterate however you like, but only `.heex`, `.story.exs` and the
-narrative/system docs get committed. Scratch HTML is never committed.
+What you may commit is the project's `designOwnedPaths`, listed for you
+below under "What you may commit" — that list, not this paragraph, is
+the boundary, and the harness audits this pass's commits against it.
+Everything outside it is dev's, including the code that implements what
+you decided: write the decision, not the implementation. Scratch is
+never committed.
 
 ## Rules that exist because something breaks without them
 
@@ -70,6 +74,23 @@ narrative/system docs get committed. Scratch HTML is never committed.
   pass reading one more paragraph, and the cost of a missing one is the
   refusal being invisible to the pass that would have broken it. When in
   doubt, `universal`.
+
+  **Ask again when your scope grows.** The section below was selected
+  before you started, from the ticket's words and whatever labels it
+  already carried — and on a fresh ticket that is no labels at all,
+  because you are the pass that creates them. The moment you settle that
+  this work touches a screen or system the section does not name, ask
+  before you design against it:
+
+  ```sh
+  pipeline non-asks --for screen:roster,system:billing
+  ```
+
+  Bare names work (`--for roster`), `--all` prints everything, and it
+  reads one local file and talks to nothing — safe at any point in the
+  pass. Do this before you commit to the approach, not after: a refusal
+  you were never shown is still a refusal, and finding it at Design
+  review costs the whole pass.
 - **The preview link is posted for you.** The harness publishes this
   branch's storybook export and puts the URL on the ticket when it asks
   for review, so your summary does not need to say where to look — say

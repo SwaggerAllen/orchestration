@@ -57,6 +57,21 @@ runs:
           echo "::error::no model credential — set claude_code_oauth_token (from \`claude setup-token\`) or anthropic_api_key" >&2
           exit 1
         fi
+        # Where a failed pass leaves its evidence. Two well-known paths
+        # rather than step outputs, for the reason the claim's are files:
+        # an output on a failed step is not somewhere to bet a ticket
+        # comment on, and the abort step runs precisely when this one
+        # failed.
+        LOGDIR="$RUNNER_TEMP/pipeline"
+        mkdir -p "$LOGDIR"
+        ERRFILE="$LOGDIR/run-error.txt"
+        CODEFILE="$LOGDIR/run-exit-code.txt"
+        # Cleared up front and again on success: these files mean "the
+        # model run is what failed". Left behind from a first attempt
+        # that failed over and succeeded, they would put a stale cause on
+        # a ticket whose real failure was somewhere else entirely.
+        rm -f "$ERRFILE" "$CODEFILE"
+
         # The prompt reaches the CLI on stdin, never as an argument.
         #
         # Linux caps a single argv element at MAX_ARG_STRLEN — 32 pages,
@@ -102,15 +117,85 @@ runs:
           esac
         }
 
+        # attempt, with its output kept rather than only shown.
+        #
+        # Until now the run's only record was the workflow log, and the
+        # ticket said "Design agent run failed: <url>" — so a bare exit
+        # 249 arrived with nothing attached and nothing to look up. The
+        # code is the CLI's, not this harness's, which is exactly why the
+        # output beside it is the part worth keeping.
+        #
+        # Both streams, because which one carries the failure is the
+        # CLI's business and not something to assume: stdout is piped
+        # through `tee` so it still streams into the log live, and stderr
+        # is captured to a file and replayed after. Ordering between the
+        # two is lost in the log, which is the price.
+        #
+        # `| tee` rather than `2> >(tee ...)`: process substitution is
+        # asynchronous, so the reader has no guarantee of having flushed
+        # by the time the step ends — the same race that cost the claim
+        # step its stderr.
+        run_attempt() {
+          local mode="$1"
+          local err="$LOGDIR/model-$mode.err" out="$LOGDIR/model-$mode.out"
+          local rc
+          attempt "$mode" 2> "$err" | tee "$out"
+          rc="${PIPESTATUS[0]}"
+          cat "$err" >&2
+          if [ "$rc" -ne 0 ]; then
+            report "$mode" "$rc" "$err" "$out"
+          fi
+          return "$rc"
+        }
+
+        report() {
+          local mode="$1" rc="$2" err="$3" out="$4" note=""
+          # 129-159 is the shell's own convention for a process killed by
+          # signal rc-128, so decoding that range states a fact. Anything
+          # else is the program's exit table, which is not this harness's
+          # to guess at — inventing a meaning for 249 would be how the
+          # number becomes misleading rather than merely opaque.
+          if [ "$rc" -ge 129 ] && [ "$rc" -le 159 ]; then
+            note=" (killed by signal $((rc - 128)))"
+          fi
+          echo "::error::the $mode model run exited $rc$note"
+          {
+            echo "the $mode model run exited $rc$note"
+            echo
+            echo "--- stderr ---"
+            if [ -s "$err" ]; then
+              tail -n 60 "$err"
+            else
+              echo "(empty: the run wrote nothing to stderr)"
+            fi
+            echo "--- last of stdout ---"
+            if [ -s "$out" ]; then
+              tail -n 30 "$out"
+            else
+              echo "(empty: the run wrote nothing to stdout)"
+            fi
+          } > "$ERRFILE"
+          echo "$rc" > "$CODEFILE"
+          # The run summary, so the failure is legible without opening a
+          # collapsed step — the same reason the audit writes one.
+          {
+            echo "### Model run failed — $mode credential, exit $rc$note"
+            echo
+            echo '```'
+            cat "$ERRFILE"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        }
+
         if [ -z "$SUBSCRIPTION_TOKEN" ]; then
           echo "model credential: API key (no subscription token configured)"
-          attempt api
+          run_attempt api
           exit $?
         fi
 
         echo "model credential: subscription"
         status=0
-        attempt subscription || status=$?
+        run_attempt subscription || status=$?
         if [ "$status" -eq 0 ]; then
           exit 0
         fi
@@ -131,4 +216,12 @@ runs:
         # see, and discarding it would throw away real work when the
         # exhaustion lands near the end of a pass.
         echo "::warning::the subscription run exited $status — retrying once on the API key"
-        attempt api
+        run_attempt api
+        status=$?
+        if [ "$status" -eq 0 ]; then
+          # The failover worked, so the run did not fail — clear the
+          # first attempt's evidence rather than leaving it to be read as
+          # this run's cause of death.
+          rm -f "$ERRFILE" "$CODEFILE"
+        fi
+        exit "$status"
