@@ -76,6 +76,17 @@ type ClaimResult struct {
 	// exists yet (DESIGN §5: the branch name carries the issue key).
 	Branch   string
 	PRNumber int // 0 = no PR yet
+	// DesignOwnedPaths is the project's design ownership boundary
+	// (config `designOwnedPaths`), carried so the design prompt can
+	// state it and the design finish can hold it.
+	//
+	// Carried rather than read at either end because the boundary has to
+	// be one value in one place. It used to be two: dev's prompt named
+	// the config key, and design's named a hardcoded list of file
+	// extensions that assumed every project's design output is a `.heex`
+	// and a `.story.exs`. Two statements of one rule, and the weaker one
+	// bound the role it mattered most for.
+	DesignOwnedPaths []string `json:",omitempty"`
 	// Labels are the ticket's labels as the claim found them.
 	//
 	// Carried because they are what the run is judged against and the

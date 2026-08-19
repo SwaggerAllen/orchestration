@@ -408,6 +408,22 @@ to the same branch; reconciliation reviews it; a bounce is more commits on the s
 rather than a second PR against an already-merged change. Dev may amend design-owned files when
 implementation discovers something, which keeps storybook current instead of letting it lag.
 
+**The ownership table is two-way.** Dev's side is the amendment right above. Design's side is
+the same sentence read backwards: a design pass commits *only* within the project's
+`designOwnedPaths`, and everything else — the code that implements what it decided included —
+is dev's. Both halves are needed, and only one of them existed for a while: dev's prompt named
+the config key, while design's named a hardcoded list of file extensions that assumed every
+project's design output is a component template and a story file. One rule stated twice, in two
+forms, and the weaker form bound the role it mattered most for. Catapult's ORC-84 is what that
+costs — a design pass that committed six implementation modules and several thousand lines of
+bundled content alongside its docs, with nothing in its prompt drawing the line and nothing
+downstream noticing. The design in that pass was right; an unbounded role simply keeps going.
+
+**Widening the boundary is a proposal, not an edit.** A design pass that believes work outside
+`designOwnedPaths` is genuinely design's says so in its summary and stops. It must not reach
+for the config: `pipeline.config.json` is author-only by the rows above, so the repair that
+looks obvious from inside the run is the one that takes the run down with it.
+
 **The branch name carries the issue key** (Linear's suggested branch name format works as-is),
 and the PR URL is recorded on the issue when the draft opens. Linear's auto-linking makes this
 feel free, but it is a requirement rather than a habit: every trigger that maps a PR event to a
@@ -792,6 +808,21 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   linted, and that is the point — a standing decision naming `farewell/1` is the decision doing
   its job, while a heading with a list under it is the split the rule was written against. A
   check that failed good docs would be switched off, taking the rule with it.
+
+**Design finish (blocking, in the harness):**
+- a design pass that committed outside the project's `designOwnedPaths` does not open a draft
+  PR and does not reach `Design review` — the finish fails and the ticket parks in `Blocked`
+  (§12) with the stray paths named on it. The audit runs on this pass's commits only, diffed
+  from where the pass started, so a re-pass is not billed for the artifacts and dev commits the
+  branch already carried.
+- the check lands here rather than in CI, where its mirror image (the mutex audit above) lives,
+  for an ownership reason rather than a design one: a project's `ci.yml` is author-only by §5,
+  so wiring it into `pipeline audit` is a change the author makes in every project repo. The
+  harness half is the pipeline's to ship on its own. Moving or duplicating it into CI later is
+  a separate, author-owned change.
+- the strays stay on the branch. Blocking the *advance* rather than the commit is deliberate:
+  the author has to read the diff to strip it, and a run that swallowed its own output would
+  leave a `Blocked` ticket with nothing to look at.
 
 **Reconciliation (blocking, and the last gate before production):**
 - the PR diff says what the issue asked for

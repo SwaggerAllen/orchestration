@@ -232,3 +232,41 @@ func TestDevPromptSaysSoWhenTheTicketCarriesNoLabels(t *testing.T) {
 		t.Errorf("a ticket with no labels gets no section, which reads as the harness staying silent:\n%s", got)
 	}
 }
+
+// The design pass is bound by the project's designOwnedPaths, and the
+// only place it can read them is this prompt: pipeline.config.json is
+// not something the agent is told to open, and the bound used to be a
+// hardcoded list of file extensions in design.md instead (DESIGN §5).
+func TestDesignPromptStatesTheOwnershipBoundary(t *testing.T) {
+	got := assembleDesignPrompt("ROLE", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "t", Mode: "design", Branch: "b",
+		DesignOwnedPaths: []string{"screens/*.md", "lib/app_web/components/**"},
+	}, "/tmp/outcome.json")
+
+	for _, want := range []string{"screens/*.md", "lib/app_web/components/**"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt does not name %q — the pass is bound by a list it cannot read", want)
+		}
+	}
+	// Widening is the repair a blocked pass reaches for, and it is the
+	// one that gets the push rejected and takes the run down.
+	if !strings.Contains(got, "author-only") {
+		t.Error("the prompt does not say the config is author-only")
+	}
+	if strings.Index(got, "screens/*.md") > strings.Index(got, "## Mechanics") {
+		t.Error("the boundary lands after the mechanics; it is a constraint on the work, not a footnote")
+	}
+}
+
+// Empty and unstated are different facts. No boundary passed means the
+// harness did not say, which is not the same as the project owning
+// nothing — and an absent section reads as the second.
+func TestDesignBoundsSectionSaysWhenItWasNotTold(t *testing.T) {
+	got := designBoundsSection(nil)
+	if got == "" {
+		t.Fatal("an empty boundary renders nothing; the pass reads that as no boundary at all")
+	}
+	if !strings.Contains(got, "harness finding") {
+		t.Error("the gap is not routed anywhere it gets fixed")
+	}
+}

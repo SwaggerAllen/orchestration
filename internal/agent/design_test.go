@@ -28,7 +28,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
-	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -61,7 +61,7 @@ func TestDesignDecisionlessAutoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
-	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -109,7 +109,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 	o := &DesignOutcome{Outcome: "clear", Summary: "The colliding ticket rewrote a different region; this scope still holds."}
-	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -131,7 +131,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	o2 := &DesignOutcome{Outcome: "demote", Summary: "The ground moved under this scope; it needs a fresh pass."}
-	if err := FinishDesign(ctx, p, h, res2, o2, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res2, o2, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForDesign {
@@ -250,7 +250,7 @@ func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
 	const url = "https://abc123.orchestration-dummy.pages.dev"
-	if err := FinishDesign(ctx, p, h, res, o, url, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, url, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -287,7 +287,7 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -315,7 +315,7 @@ func TestDesignFinishRecordsTheBaseSHA(t *testing.T) {
 
 	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b"}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234"); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234", nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,7 +374,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "")
+	err = FinishDesign(ctx, p, h, res, o, "", "", nil)
 	if err == nil {
 		t.Fatal("a touch list naming a doc that does not exist was accepted")
 	}
@@ -389,7 +389,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 
 	// The correct spelling passes, and so does a screen beside it.
 	o = &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core_dsl"}, Screens: []string{"home"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
 		t.Fatalf("a touch list naming real docs was refused: %v", err)
 	}
 }
@@ -408,7 +408,7 @@ func TestDesignReportsEveryUnknownDocAtOnce(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl", "foundation"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "")
+	err = FinishDesign(ctx, p, h, res, o, "", "", nil)
 	if err == nil {
 		t.Fatal("unknown docs were accepted")
 	}
@@ -433,7 +433,7 @@ func TestDesignAcceptsAnyNameWhenTheProjectHasNoDocs(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"anything"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
 		t.Fatalf("a project with no system docs was refused: %v", err)
 	}
 }
@@ -506,5 +506,83 @@ func TestDesignRereadLeavesTheDevQueueAlone(t *testing.T) {
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
 		t.Errorf("state = %q, want the dev queue untouched", got)
+	}
+}
+
+// A design pass that wrote outside designOwnedPaths must not advance the
+// ticket. Catapult's ORC-84 opened a draft PR carrying six implementation
+// modules and asked for Design review on it; the pass had no boundary in
+// its prompt and nothing checked the diff (DESIGN §5, §9).
+func TestDesignFinishRefusesStraysOutsideOwnedPaths(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_90", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home"}, Summary: "s"}
+	changed := []string{
+		"screens/home.md",
+		"lib/sample/greetings.ex",
+		"lib/sample_web/live/home_live.ex",
+	}
+	err = FinishDesign(ctx, p, h, res, o, "", "", changed)
+	if err == nil {
+		t.Fatal("finish accepted a pass that committed implementation")
+	}
+	// Blocked is the abort step's job, not this one's — what has to hold
+	// here is that the ticket did not reach Design review and no draft PR
+	// invited the author to read the strays as design.
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
+		t.Errorf("state = %q, want the ticket left where the pass held it", got)
+	}
+	if len(h.PRs) != 0 {
+		t.Errorf("want no PR, got %+v", h.PRs)
+	}
+	// The finding goes on the ticket, naming every stray: the author
+	// reads the comment, not the run log, and one aggregated finding is
+	// what tells them the size of what to strip.
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	last := ""
+	if cs := issues[0].Comments; len(cs) > 0 {
+		last = cs[len(cs)-1].Body
+	}
+	for _, want := range []string{"lib/sample/greetings.ex", "lib/sample_web/live/home_live.ex", "proposal"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("comment does not mention %q: %s", want, last)
+		}
+	}
+	if strings.Contains(last, "screens/home.md") {
+		t.Errorf("the owned path was reported as a stray: %s", last)
+	}
+}
+
+// The ordinary pass: docs and components, all inside the owned paths.
+func TestDesignFinishAcceptsOwnedPaths(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_91", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.DesignOwnedPaths) == 0 {
+		t.Fatal("the claim carried no boundary; the prompt has nothing to state and the finish nothing to hold")
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home"}, Summary: "s"}
+	changed := []string{
+		"screens/home.md",
+		"systems/greetings.md",
+		"lib/sample_web/components/cap_banner.ex",
+		"non-asks.md",
+	}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", changed); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
+		t.Errorf("state = %q, want design_review", got)
 	}
 }

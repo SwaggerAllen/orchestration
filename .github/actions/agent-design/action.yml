@@ -123,6 +123,7 @@ runs:
         exit $rc
 
     - name: check out the ticket branch
+      id: branch
       shell: bash
       run: |
         git config user.name "pipeline-design-agent"
@@ -132,6 +133,12 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+        # Where this pass starts, for the ownership audit at finish
+        # (DESIGN 5). Recorded here rather than derived from origin/main
+        # later, because a re-pass runs on a branch that already carries
+        # the earlier passes' artifacts and dev's commits — diffing
+        # against main would bill this pass for all of them.
+        echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
     # The prompt inlines the confirmed non-asks (DESIGN §4), and claim
     # assembled it one step too early: the branch to check out is an
@@ -186,6 +193,14 @@ runs:
         if [ -n "$(git log origin/main..HEAD --oneline 2>/dev/null)" ]; then
           git push -u origin "${{ steps.claim.outputs.branch }}"
         fi
+        # What this pass wrote, scoped to this pass, for the finish
+        # step's ownership audit. Written after the push on purpose: a
+        # pass that strayed is blocked at finish and the author reads
+        # the diff to strip it, so the files have to be somewhere to
+        # read.
+        git diff --name-only "${{ steps.branch.outputs.before }}"..HEAD \
+          > "$RUNNER_TEMP/pipeline/changed.txt"
+        cat "$RUNNER_TEMP/pipeline/changed.txt"
 
     # The branch preview, published by the harness rather than by a
     # workflow watching for a push. That watcher could never fire for
@@ -251,6 +266,7 @@ runs:
           --outcome "$RUNNER_TEMP/pipeline/outcome.json" \
           --preview-url "${{ steps.published.outputs.deployment-url }}" \
           --base-sha "${{ steps.base.outputs.sha }}" \
+          --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
           --findings "$RUNNER_TEMP/pipeline/findings.json"
 
     - name: say so when the claim itself failed

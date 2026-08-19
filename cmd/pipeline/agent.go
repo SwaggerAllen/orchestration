@@ -425,11 +425,46 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 		}
 	}
 	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design"))
+	add(designBoundsSection(res.DesignOwnedPaths))
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
 	if outcomePath != "" {
 		add(fmt.Sprintf("- Write your outcome JSON to `%s` before you finish (see Outcomes above).\n", outcomePath))
 	}
 	return string(b)
+}
+
+// designBoundsSection states the paths this pass may commit inside
+// (DESIGN §5's ownership table, config `designOwnedPaths`).
+//
+// Inlined for the reason the labels are: the boundary lives in
+// `pipeline.config.json`, which the agent has no reason to open and no
+// instruction to trust, so a bound stated only there is a bound the run
+// never reads. It used to be stated in `design.md` instead, as a
+// hardcoded list of extensions — `.heex`, `.story.exs` and the docs —
+// which is this project's answer to a question every project answers
+// differently, and which nothing checked.
+//
+// Measured on Catapult's ORC-84: a design pass committed six Elixir
+// modules and ~4,000 lines of bundled content alongside its docs, 762
+// insertions of implementation, with nothing in the prompt drawing the
+// line. The design in that pass was right — an unbounded role simply
+// keeps going.
+//
+// The proposal rule is stated here rather than left to be inferred
+// because the obvious repair for a blocked pass is to widen the config,
+// and `pipeline.config.json` is author-only (DESIGN §5): the push is
+// rejected and takes the run down with it.
+//
+// The empty case is stated rather than skipped, like the labels': "this
+// project declares no design-owned paths" and "the harness did not tell
+// me" license very different confidence about whether a path is in
+// bounds.
+func designBoundsSection(owned []string) string {
+	if len(owned) == 0 {
+		return "\n## What you may commit\n\nThe harness passed no design-owned paths for this project, so the boundary is unknown rather than wide. Commit the narrative and system docs and nothing else, and record the gap as a harness finding.\n"
+	}
+	return fmt.Sprintf("\n## What you may commit (DESIGN §5)\n\n%s\n\nThat list is the whole of it — this pass's commits are audited against it at finish, and a file outside it parks the ticket in Blocked. Everything else is dev's, including the code that implements what you decided: write the decision, not the implementation. Iterate however you like; scratch is never committed.\n\nIf the work genuinely belongs to design and the list does not cover it, that is a **proposal in your summary, not an edit**. `pipeline.config.json` is author-only — a commit touching it is rejected and takes the run down with it.\n",
+		"- "+strings.Join(owned, "\n- "))
 }
 
 // nonAsksSection renders the confirmed non-asks document (DESIGN §4).
@@ -635,7 +670,7 @@ func cmdAgentFinish(args []string) error {
 	// and reading "nobody said" as "nothing landed" would park a ticket
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
-	changedPath := fs.String("changed-files", "", "file with one changed path per line (dev); what a reported mutex label is checked against")
+	changedPath := fs.String("changed-files", "", "file with one changed path per line; what a reported mutex label (dev) and the design ownership boundary (design) are checked against")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -653,6 +688,19 @@ func cmdAgentFinish(args []string) error {
 	// The claim recorded where the run holds the ticket. Without it the
 	// move is recorded with no origin, and a half-edge is unjudgeable.
 	p.KnownState(res.TicketID, res.State)
+
+	// What this pass wrote, read once for both roles that judge it: dev
+	// checks a reported mutex label against it, design checks its
+	// ownership boundary against it.
+	//
+	// Absent is not fatal here, unlike the audit's own copy of this
+	// flag. A missing list only costs those two checks — which each say
+	// so where it matters — while failing would land a finished run in
+	// Blocked over a file the harness was supposed to write.
+	changed, err := readPathList(*changedPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	if res.Mode == "reconcile" {
 		if *verdict == "" {
@@ -680,7 +728,7 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed); err != nil {
 			return err
 		}
 		if err := postFindings(p, res.TicketID, *findings); err != nil {
@@ -699,15 +747,6 @@ func cmdAgentFinish(args []string) error {
 	}
 	devOutcome, err := agent.LoadDevOutcome(*outcome)
 	if err != nil {
-		return err
-	}
-	// Absent is not fatal here, unlike the audit's own copy of this
-	// flag. A missing list only costs a reported label its check, which
-	// applyDiscoveredLabels says on the ticket — while failing would
-	// land a finished run in Blocked over a file the harness was
-	// supposed to write.
-	changed, err := readPathList(*changedPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome, changed); err != nil {

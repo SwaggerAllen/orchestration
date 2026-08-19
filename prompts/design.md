@@ -26,8 +26,12 @@ of what the code contains. Touching is not deciding: a ticket working
 inside a system without changing its structure declares the system in
 your outcome and diffs no doc.
 
-Iterate however you like, but only `.heex`, `.story.exs` and the
-narrative/system docs get committed. Scratch HTML is never committed.
+What you may commit is the project's `designOwnedPaths`, listed for you
+below under "What you may commit" — that list, not this paragraph, is
+the boundary, and the harness audits this pass's commits against it.
+Everything outside it is dev's, including the code that implements what
+you decided: write the decision, not the implementation. Scratch is
+never committed.
 
 ## Rules that exist because something breaks without them
 
