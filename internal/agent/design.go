@@ -55,14 +55,21 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	}
 	res := &ClaimResult{
 		TicketID: t.ID, TicketKey: t.Key, Title: t.Title,
-		Mode:        mode,
+		Mode: mode,
+		// Carried for the non-asks selection (DESIGN §4). Usually empty
+		// here and that is expected — the design pass is what creates
+		// the mutex labels (§6) — which is exactly why the selection
+		// also reads the ticket's own words.
+		Labels:      append([]string(nil), t.Labels...),
 		Role:        core.RoleDesign,
 		State:       t.State,
 		Scope:       t.Description,
 		Description: t.Description,
 	}
 	for _, c := range t.Comments {
-		res.Comments = append(res.Comments, c.Body)
+		if prose, worth := marker.Prose(c.Body); worth {
+			res.Comments = append(res.Comments, prose)
+		}
 	}
 	// Read before proposing (DESIGN §4), and written back to in the same
 	// artifacts commit when a push-back establishes a new refusal.

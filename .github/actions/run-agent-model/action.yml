@@ -57,21 +57,47 @@ runs:
           echo "::error::no model credential — set claude_code_oauth_token (from \`claude setup-token\`) or anthropic_api_key" >&2
           exit 1
         fi
-        PROMPT="$(cat "$PROMPT_PATH")"
-
+        # The prompt reaches the CLI on stdin, never as an argument.
+        #
+        # Linux caps a single argv element at MAX_ARG_STRLEN — 32 pages,
+        # 131072 bytes on every architecture this runs on — independently
+        # of the much larger ARG_MAX for the whole vector. Over that,
+        # execve returns E2BIG, which bash reports as "/usr/bin/env:
+        # Argument list too long" and exit 126: the credential failover
+        # then dutifully retried and hit the identical wall, so a design
+        # pass died 35ms in having never invoked the model at all.
+        #
+        # The prompt is not incidentally large, it is structurally large.
+        # It inlines the ticket, its comments, the repo context and the
+        # confirmed non-asks (DESIGN §4), each for a stated reason. On
+        # Catapult's ORC-84 the harness's own reprompt step measured
+        # non-asks.md at 83468 bytes — 64% of the cap before anything
+        # else is added — and that document only grows, because passes
+        # append to it and never delete.
+        #
+        # `-p/--print` is a boolean flag and the prompt is a positional
+        # argument, so the prompt was never `-p`'s value — it was its own
+        # argv element, and that is the one the cap applies to. Dropping
+        # the positional makes the CLI read the prompt from stdin, which
+        # is what `--input-format text (default)` and "-p ... useful for
+        # pipes" describe. Checked against the CLI rather than assumed.
+        #
+        # A redirect rather than a pipe: each attempt re-reads the file,
+        # so the failover gets the whole prompt rather than the remains
+        # of a stream the first attempt drained.
         attempt() {
           case "$1" in
           subscription)
             env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN="$SUBSCRIPTION_TOKEN" \
               npx --yes @anthropic-ai/claude-code@latest \
-                -p "$PROMPT" \
-                --dangerously-skip-permissions
+                -p \
+                --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
           api)
             env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY="$API_KEY" \
               npx --yes @anthropic-ai/claude-code@latest \
-                -p "$PROMPT" \
-                --dangerously-skip-permissions
+                -p \
+                --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
           esac
         }

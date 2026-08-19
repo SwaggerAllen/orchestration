@@ -51,6 +51,25 @@ narrative/system docs get committed. Scratch HTML is never committed.
   add an entry with its reason, in the same commit as your artifacts.
   Add and amend; never delete. Arguing against a recorded decision is
   allowed, silently contradicting it is not.
+
+  **Every entry you add carries a scope**, because the section below is
+  selected rather than complete — a pass is shown the refusals that bind
+  it, and an entry with no scope is shown to every pass forever:
+
+  ```markdown
+  ## No client-side validation on the cap form
+  scope: screen:cap, system:billing
+
+  The server is the only authority; a second copy of the rules drifts.
+  ```
+
+  Scope is a list of the screen and system labels the refusal is about —
+  the same names as the mutex labels — or `universal` for one that binds
+  every pass regardless of what it touches. List every name it touches
+  rather than picking the closest one; the cost of an extra name is a
+  pass reading one more paragraph, and the cost of a missing one is the
+  refusal being invisible to the pass that would have broken it. When in
+  doubt, `universal`.
 - **The preview link is posted for you.** The harness publishes this
   branch's storybook export and puts the URL on the ticket when it asks
   for review, so your summary does not need to say where to look — say

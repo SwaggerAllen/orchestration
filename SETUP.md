@@ -691,11 +691,60 @@ step 5 already covered them.
    attended, to split the existing architecture doc into
    `systems/*.md` with file maps, stub `screens/*.md` (DESIGN §4), a
    root `non-asks.md` seeded with whatever the existing docs already
-   refuse, and a root `CLAUDE.md` holding that repo's own specifics —
+   refuse (schema below), and a root `CLAUDE.md` holding that repo's own specifics —
    toolchain, gates, domain. The protocol half needs no copying: agent runs are
    given `prompts/repo-context.md` from the pipeline checkout at claim
    time, so editing it here reaches every project on its next run.
-4. Secrets on that repo: `LINEAR_API_KEY`, the model credential
+4. **Every project needs a `non-asks.md`, and it needs the schema.**
+   The path is the config's `nonAsksPath` (default `non-asks.md` at the
+   repo root). Create it in the bootstrap commit even if the project
+   refuses nothing yet — a file with a heading and no entries says "the
+   author has recorded none", and the prompt renders that differently
+   from "the file was not there", which is what a pass has to know
+   before it argues against a decision (DESIGN §4).
+
+   One entry per `## ` heading, a `scope:` line, then the reason:
+
+   ```markdown
+   # Confirmed non-asks
+
+   ## No offline mode
+   scope: universal
+
+   The sync cost outweighs the demand.
+
+   ## No client-side validation on the cap form
+   scope: screen:cap, system:billing
+
+   The server is the only authority; a second copy of the rules drifts.
+   ```
+
+   | field | meaning |
+   |---|---|
+   | `## <heading>` | the refusal, one line. Opens an entry; `###` and deeper are prose inside it |
+   | `scope:` | comma-separated screen and system labels — the same names as the mutex labels — or `universal`. Must be the first line under the heading; further down it is read as prose |
+   | everything else | the reason, free prose |
+
+   The harness selects on `scope:` rather than inlining the file whole,
+   so a pass reads the universal entries plus the ones scoped to what it
+   is working on. Two consequences worth knowing before you write the
+   file:
+
+   - **An entry with no `scope:` line is universal**, and a file with no
+     `## ` headings at all is one universal entry. Nothing is ever
+     dropped for being unparseable — but nothing is narrowed either, so
+     an unmigrated file is carried whole by every pass, which is the
+     cost this schema exists to avoid.
+   - **Name every screen and system a refusal touches**, not the closest
+     one. An extra name costs a pass one paragraph; a missing one hides
+     the refusal from the pass that would have broken it. When in doubt,
+     `universal`.
+
+   Anything below the last heading is an entry; anything above the first
+   is preamble and is never inlined, so a long explanation at the top of
+   the file is free.
+
+5. Secrets on that repo: `LINEAR_API_KEY`, the model credential
    (`CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`),
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
    grants read on the pipeline repo), `AGENT_GITHUB_TOKEN` (add this

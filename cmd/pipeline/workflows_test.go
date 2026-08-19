@@ -146,3 +146,32 @@ func TestSetupStubsGrantDeploymentsRead(t *testing.T) {
 		t.Error("no stub runs pipeline setup — the command moved and this test now checks nothing")
 	}
 }
+
+// The prompt must reach the model on stdin, never as an argument.
+//
+// Linux caps a single argv element at MAX_ARG_STRLEN (32 pages, 131072
+// bytes), independently of the much larger ARG_MAX for the whole
+// vector. The prompt inlines the ticket, its comments, the repo context
+// and the confirmed non-asks, so it crosses that on a real project:
+// Catapult's ORC-84 died 35ms into three consecutive design runs with
+// "/usr/bin/env: Argument list too long", the credential failover
+// dutifully retrying into the identical wall, having never invoked the
+// model at all.
+//
+// Guarded by a test because `-p "$PROMPT"` is the obvious way to write
+// this and reads as correct until the prompt gets big.
+func TestModelRunPassesThePromptOnStdin(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	if strings.Contains(body, `"$PROMPT"`) {
+		t.Error("the prompt is interpolated into the command line; over 128KiB that is E2BIG before the model is reached")
+	}
+	// Two attempts, subscription and API key, and the failover has to
+	// re-read the file rather than inherit a drained stream.
+	if n := strings.Count(body, `< "$PROMPT_PATH"`); n != 2 {
+		t.Errorf("the prompt is redirected into %d attempt(s), want both", n)
+	}
+}
