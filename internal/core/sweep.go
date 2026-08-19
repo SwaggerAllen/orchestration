@@ -571,11 +571,18 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 	}
 	switch t.CI.Status {
 	case CIGreen:
-		// re-evaluate holds promotion: the dev thread evaluates in place
-		// and clears or returns to Reworking (DESIGN §7).
-		if t.HasLabel(LabelReEvaluate) {
-			return nil
-		}
+		// A re-evaluate flag does not hold promotion. It used to, and
+		// the hold was a dead end: Checks has no agent, so nothing in
+		// that state ever evaluated the flag, and a green ticket sat
+		// waiting on a human. Reconciliation is the thread that owns
+		// the next state and it is about to read the diff against the
+		// argument anyway — asking it one more question is cheaper than
+		// stopping the pipeline until somebody notices (DESIGN §7).
+		//
+		// Reconcile is what merges, so nothing has been given up by
+		// letting the ticket through: the flag travels with it and the
+		// verdict decides.
+		//
 		// Reconciling means "the reconcile agent, now" — promotion waits
 		// for the agent to be free rather than queueing inside the state.
 		if s.agentBusy(AgentReconcile) {

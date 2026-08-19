@@ -602,8 +602,8 @@ surprise at merge.
 | `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
-| `Checks` | **Holds the promotion into `Reconciling`.** A green verdict does not advance the ticket while the flag is set. No agent evaluates it here — `Checks` has none. | author, or design once a red or conflicted verdict has sent the ticket to `Ready for rework` |
-| `Reconciling` | **Nothing, and this one is a gap rather than a decision.** The reconcile agent is never told the flag is set — it reads no labels — so a flagged ticket merges. Reachable only when the flag arrives after the ticket left `Checks`. | — |
+| `Checks` | Nothing. The flag travels with the ticket into `Reconciling`, which is the thread that answers it. | — |
+| `Reconciling` | **Answered as a second question, alongside the verdict.** `holds` clears the flag and the ticket proceeds on its outcome; `bites` sends it to `Ready for rework` whatever the outcome said, with the report as the scope. | reconcile |
 | `Merged` | Deferred — the change is merged and past recall. Becomes a finding → Triage. | — |
 | `Done` / `Canceled` | No action. If the collision matters it is a new finding → Triage. | — |
 
@@ -611,31 +611,35 @@ surprise at merge.
 state** — never by the thread that noticed. Otherwise the noticing thread clears its own flag
 and nothing is re-evaluated.
 
-**`Checks` is the one state with no such thread, and the row above says so rather than
-pretending otherwise.** It used to read "evaluated in place by dev", which described nobody: the
-dev run ended when the ticket entered `Checks`, and nothing dispatches an agent to a ticket
-sitting there. What is implemented is the hold — a green verdict stops at the gate — and two
-ways out of it. A red or conflicted verdict moves the ticket to `Ready for rework` carrying the
-flag, where it becomes an ordinary queue re-read and design resolves it. A green one waits for
-the author.
+**`Checks` is the one state with no thread of its own, and the answer is to carry the question
+rather than to stop.** `Checks` has no agent — nothing is dispatched to a ticket sitting there —
+so a flag arriving in that state had nobody to evaluate it. Holding promotion was tried and is a
+dead end for the same reason: it stops the ticket at a gate nobody is standing at, and a green
+one waits on a human indefinitely. Which is what re-evaluation is not supposed to need.
 
-What the hold actually stops is the **promotion into `Reconciling`**, not a merge — `Checks`
-never merges anything. That distinction matters more than it looks, because the row below used
-to claim `Reconciling` blocks the merge and it does not: the reconcile agent reads no labels and
-is never told the flag is set. So the `Checks` hold is not one guard among two. **It is the only
-thing standing between a flagged ticket and a merge**, which is why it holds rather than
-clearing itself: an automatic clear would be the pipeline deciding a collision no longer matters
-at the moment that judgment is most expensive to get wrong, with nothing downstream to catch it.
+So the flag travels. **Reconciliation is the thread that answers it**, and it is the right one
+twice over: it owns the state the ticket lands in, and it is the last thread before the merge,
+so nothing has been given up by letting the ticket through. It is also already reading the diff
+against the argument, which is most of the work — asking it one more question is cheap.
 
-The cost is a green ticket that waits on a human, which the boundary gate surfaces: no milestone
-completes while a `re-evaluate` label is outstanding (§10).
+**The collision is a separate axis from the verdict, not a fourth outcome.** The outcome asks
+whether the diff says what the argument asked for; the collision asks whether what changed
+around it since means it no longer does. Those are independent: a clean `pass` whose ground has
+moved must not merge, and a diff that drifted for unrelated reasons is still a `fail`. One field
+carrying both would make the run choose which answer to throw away.
 
-**The `Reconciling` gap is narrow but real.** A ticket flagged in `Checks` never reaches
-`Reconciling` — the hold is what prevents it — so the only way in is a flag applied *after* the
-promotion, which is exactly what a thread acquiring a mutex label mid-flight can do. That ticket
-merges with the collision unresolved. Closing it wants the flag in the reconcile claim and a
-verdict that can decline on it; until that exists this row says so rather than describing an
-intention.
+`holds` clears the flag and the ticket proceeds on its outcome. `bites` sends it to `Ready for
+rework` whatever the outcome said, with the report as the scope — and that scope has to say
+plainly that the diff was not wrong when it was written, or the rework agent re-litigates a
+design nothing questioned (the same care §2.4's conflict bounce takes). Either way the flag is
+cleared, because the question has been answered and a flag left behind would send the ticket to
+a design re-read that judges the same collision twice.
+
+**An unanswered collision bounces rather than merging.** The two ways to be wrong are not equal:
+a bounce costs a rework pass on work that was fine, and a merge under a collision nobody judged
+is the thing the flag exists to prevent, past recall the moment it lands. Both bounces carry the
+reconcile-bounce marker, so the second-bounce escalation counts them together (§12) — two
+failures to land one scope is a sequencing problem for the author whichever half noticed it.
 
 **All `re-evaluate` labels must be clear before a milestone can complete** (§10).
 

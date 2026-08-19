@@ -13,6 +13,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -380,8 +381,27 @@ func assembleReconcilePrompt(template string, res *agent.ClaimResult, verdictPat
 			add("\n---\n" + c + "\n")
 		}
 	}
+	flagged := false
+	for _, l := range res.Labels {
+		if l == core.LabelReEvaluate {
+			flagged = true
+		}
+	}
+	if flagged {
+		add("\n## This ticket carries re-evaluate — answer it as well\n\n" +
+			"Another thread discovered scope nobody predicted and flagged every ticket it collides with (DESIGN 7). You are the thread that owns this ticket's state, so you are the one that answers it, and you are the last one before the merge.\n\n" +
+			"The question is NOT whether the diff was right when it was written. It is whether what changed around it since means it no longer says what the argument asked for. Read the comments above for what moved.\n\n" +
+			"By the precedence rule the ticket further along holds the ground, and this one is as far along as they get — so `holds` is the ordinary answer and `bites` is the exception you have to argue for.\n")
+	}
 	if verdictPath != "" {
-		add(fmt.Sprintf("\n## Verdict\n\nWrite JSON to `%s`: {\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\"}.\nA fail's report is the rework scope — name exactly what is missing. A cannot-tell's report is what a human must look at. Ambiguity must never resolve itself as pass.\n", verdictPath))
+		schema := "{\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\"}"
+		if flagged {
+			schema = "{\"outcome\": \"pass\"|\"fail\"|\"cannot-tell\", \"report\": \"...\", \"collision\": \"holds\"|\"bites\"}"
+		}
+		add(fmt.Sprintf("\n## Verdict\n\nWrite JSON to `%s`: %s.\nA fail's report is the rework scope — name exactly what is missing. A cannot-tell's report is what a human must look at. Ambiguity must never resolve itself as pass.\n", verdictPath, schema))
+		if flagged {
+			add("`collision` is required here and is a separate answer from `outcome` — a clean pass whose ground has moved still must not merge. On `bites` the report is the rework scope, so say what moved and what it costs. Omitting it bounces the ticket rather than merging on a collision nobody judged.\n")
+		}
 	}
 	return string(b)
 }

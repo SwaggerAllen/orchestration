@@ -1,0 +1,9 @@
+{
+  "name": "re-evaluate in Checks does not hold: the flag travels into Reconciling, which is the thread that answers it (DESIGN 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks", "labels": ["re-evaluate"]},
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "reconciling", "hasLabels": ["re-evaluate"], "runKind": "reconcile", "runLive": true}
+  ]
+}

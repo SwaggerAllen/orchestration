@@ -51,6 +51,32 @@ on the PR branch):
 - **cannot-tell** — you genuinely cannot judge. Say precisely what a
   human must look at. Never resolve ambiguity as pass.
 
+## The collision question, when this ticket carries `re-evaluate`
+
+A section below will say so when it applies. Another thread discovered
+scope nobody predicted and flagged every ticket it collides with
+(DESIGN §7). You own the state the flag is sitting in, so you are the
+thread that answers it — and you are the last one before the merge, so
+if it still matters this is the last chance to say so.
+
+**It is a separate answer from the outcome, and both are required.** The
+outcome asks whether the diff says what the argument asked for. This
+asks whether what changed around it since means it no longer does. A
+clean pass whose ground has moved must not merge, and a diff that
+drifted for unrelated reasons is still a fail.
+
+- **`"collision": "holds"`** — the collision does not invalidate this
+  work. The flag clears and the ticket proceeds on your outcome.
+- **`"collision": "bites"`** — it does. The ticket goes back for rework
+  whatever your outcome says, and your report is the scope, so name what
+  moved and what it costs.
+
+By the precedence rule the ticket further along holds the ground, and a
+ticket in reconciliation is as far along as they get. `holds` is the
+ordinary answer; `bites` is the exception you argue for. Omitting the
+field bounces the ticket rather than merging on a collision nobody
+judged.
+
 Write the verdict JSON to the path given below, then stop. The harness
-merges on pass and cannot-tell, bounces on fail, and moves the ticket.
-Do not touch tracker state, the PR, or main yourself.
+merges on pass and cannot-tell, bounces on fail, settles the flag, and
+moves the ticket. Do not touch tracker state, the PR, or main yourself.

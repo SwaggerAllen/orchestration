@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -276,4 +277,92 @@ func TestUnmergeablePassGoesBackToTheQueue(t *testing.T) {
 	if w.h.Merged[5] != "" {
 		t.Error("the PR was merged despite the conflict")
 	}
+}
+
+// Reconciliation answers the re-evaluate flag: it owns the state the
+// flag sits in (DESIGN §7) and it is the last thread before the merge.
+// The Checks hold that used to stand in for this was a dead end —
+// Checks has no agent, so nothing evaluated the flag and a green ticket
+// waited on a human.
+func TestReconcileSettlesTheCollision(t *testing.T) {
+	t.Run("holds: clears the flag and merges on its own verdict", func(t *testing.T) {
+		w := seedFlaggedReconciling(t)
+		v := &Verdict{Outcome: "pass", Report: "matches", Collision: CollisionHolds}
+		if err := FinishReconcile(w.ctx, w.p, w.h, w.res, v); err != nil {
+			t.Fatal(err)
+		}
+		if issue := findIssue(t, w.tr, w.cfg, w.id); hasLabel(issue.Labels, core.LabelReEvaluate) {
+			t.Error("the flag survived a settled collision, so a design re-read would judge it twice")
+		}
+		w.check(t, protocol.Merged)
+	})
+
+	t.Run("bites: bounces to rework whatever the outcome says", func(t *testing.T) {
+		w := seedFlaggedReconciling(t)
+		// A clean pass whose ground has moved still must not merge —
+		// which is why collision is its own axis, not a fourth outcome.
+		v := &Verdict{Outcome: "pass", Report: "the licensing rule it depends on was rewritten", Collision: CollisionBites}
+		if err := FinishReconcile(w.ctx, w.p, w.h, w.res, v); err != nil {
+			t.Fatal(err)
+		}
+		w.check(t, protocol.ReadyForRework)
+		if w.h.Merged[5] != "" {
+			t.Error("merged under a collision the verdict said still bites")
+		}
+		issue := findIssue(t, w.tr, w.cfg, w.id)
+		if hasLabel(issue.Labels, core.LabelReEvaluate) {
+			t.Error("the flag survived; the question has been answered")
+		}
+		last := issue.Comments[len(issue.Comments)-1].Body
+		if !strings.Contains(last, "licensing rule") {
+			t.Errorf("the report is not the rework scope:\n%s", last)
+		}
+		// The scope must say the diff was not wrong when written, or the
+		// rework agent re-litigates a design nothing questioned.
+		if !strings.Contains(last, "not about your diff being wrong") {
+			t.Errorf("the scope reads as a finding against the diff:\n%s", last)
+		}
+	})
+
+	t.Run("unanswered: bounces rather than merging on an unjudged collision", func(t *testing.T) {
+		w := seedFlaggedReconciling(t)
+		v := &Verdict{Outcome: "pass", Report: "matches"} // no collision field
+		if err := FinishReconcile(w.ctx, w.p, w.h, w.res, v); err != nil {
+			t.Fatal(err)
+		}
+		w.check(t, protocol.ReadyForRework)
+		if w.h.Merged[5] != "" {
+			t.Error("merged on a collision nobody judged")
+		}
+	})
+
+	t.Run("unflagged tickets are unaffected", func(t *testing.T) {
+		w := seedReconciling(t)
+		if err := FinishReconcile(w.ctx, w.p, w.h, w.res, &Verdict{Outcome: "pass"}); err != nil {
+			t.Fatal(err)
+		}
+		w.check(t, protocol.Merged)
+	})
+}
+
+// seedFlaggedReconciling is seedReconciling with the flag on before the
+// claim, which is the only order that matters: the claim is what carries
+// the labels into the run.
+func seedFlaggedReconciling(t *testing.T) *reconcileWorld {
+	t.Helper()
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Flagged work", "The argument.", protocol.Reconciling)
+	if err := p.AddTicketLabel(ctx, i.ID, core.LabelReEvaluate); err != nil {
+		t.Fatal(err)
+	}
+	h.PRs = []host.PR{{Number: 5, Branch: strings.ToLower(i.Key) + "-flagged", HeadSHA: "sha5"}}
+	res, err := ClaimReconcile(ctx, p, i.Key, "run_91", "https://gh/91", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasLabel(res.Labels, core.LabelReEvaluate) {
+		t.Fatal("the claim did not carry the flag, so the run cannot answer it")
+	}
+	return &reconcileWorld{ctx: ctx, tr: tr, h: h, cfg: cfg, p: p, id: i.ID, res: res}
 }

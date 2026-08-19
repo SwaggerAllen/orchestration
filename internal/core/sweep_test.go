@@ -189,13 +189,24 @@ func TestCIGreenPromotesAndDispatchesReconcile(t *testing.T) {
 	}
 }
 
-func TestCIGreenHeldByReEvaluate(t *testing.T) {
+// re-evaluate no longer holds promotion out of Checks. The hold was a
+// dead end: Checks has no agent, so nothing in that state evaluated the
+// flag, and a green ticket waited on a human. Reconciliation owns the
+// next state, is about to read the diff against the argument anyway,
+// and is what merges — so the flag travels with the ticket and the
+// verdict answers it (DESIGN §7).
+func TestCIGreenPromotesEvenWhenFlagged(t *testing.T) {
 	s := snap(tk("T1", protocol.Checks, func(t *Ticket) {
 		t.CI = CIInfo{Status: CIGreen}
 		t.Labels = []string{LabelReEvaluate}
 	}))
-	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
-		t.Errorf("re-evaluate must hold promotion, got %v", *a)
+	acts := Sweep(s)
+	a := find(acts, ActTransition, "T1")
+	if a == nil || a.To != protocol.Reconciling {
+		t.Fatalf("a flagged green ticket did not promote: %v", a)
+	}
+	if d := find(acts, ActDispatch, "T1"); d == nil || d.Agent != AgentReconcile {
+		t.Errorf("no reconcile dispatch to answer the flag: %v", d)
 	}
 }
 
@@ -1338,75 +1349,20 @@ func TestTheQueueRescueYieldsToTheRulesThatOwnTheTicket(t *testing.T) {
 	}
 }
 
-// DESIGN §7's Checks row, pinned to what is actually implemented. The
-// row used to say "evaluated in place by dev", which described nobody:
-// the dev run ended when the ticket entered Checks, and nothing
-// dispatches an agent to a ticket sitting there.
-//
-// What exists is the hold, and the two ways out of it.
-func TestReEvaluateOnChecksHoldsPromotionAndTravelsOnABounce(t *testing.T) {
-	// Green: promotion stops at the gate. Nothing merges under an
-	// unresolved collision, and nothing here resolves it either.
-	green := tk("T1", protocol.Checks, func(t *Ticket) {
-		t.Labels = []string{LabelReEvaluate}
-		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
-	})
-	for _, a := range Sweep(snap(green)) {
-		if a.TicketID == green.ID {
-			t.Errorf("a flagged green ticket was acted on: %+v", a)
-		}
-	}
-	// And the same ticket without the flag does promote, so the hold is
-	// the label's doing rather than something else being in the way.
-	clear := tk("T2", protocol.Checks, func(t *Ticket) {
-		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
-	})
-	if a := find(Sweep(snap(clear)), ActTransition, "T2"); a == nil || a.To != protocol.Reconciling {
-		t.Fatalf("an unflagged green ticket did not promote: %v", a)
-	}
-
-	// Red: the verdict is the more specific scope and the ticket moves,
-	// carrying the flag to the rework queue — where design re-reads it
-	// as it would any queue ticket, which is the resolution path.
-	red := tk("T3", protocol.Checks, func(t *Ticket) {
-		t.Labels = []string{LabelReEvaluate}
-		t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/2", FailedJobs: []string{"gates"}}
-	})
-	s := snap(red)
-	a := find(Sweep(s), ActTransition, "T3")
-	if a == nil || a.To != protocol.ReadyForRework {
-		t.Fatalf("a flagged red ticket did not bounce: %v", a)
-	}
-	// The flag is not stripped on the way, or the re-read never happens.
-	if !red.HasLabel(LabelReEvaluate) {
-		t.Error("the bounce dropped the flag, so nothing would re-read the ticket")
-	}
-	queued := tk("T4", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{LabelReEvaluate} })
-	d := find(Sweep(snap(queued)), ActDispatch, "T4")
-	if d == nil || d.Agent != AgentDesign {
-		t.Errorf("design does not re-read a flagged rework ticket: %v", d)
-	}
-}
-
-// The Checks hold is the only guard, so the property worth pinning is
-// that a flagged ticket never reaches the state that merges. DESIGN §7
-// used to claim Reconciling blocks the merge as well; it does not — the
-// reconcile agent reads no labels — so if this hold regresses, a
-// collision merges with nothing in the way.
-func TestAFlaggedTicketNeverReachesReconciling(t *testing.T) {
+// The flag has to survive the promotion, or reconciliation is handed a
+// question nobody told it about. Nothing in the sweep strips it on the
+// way through Checks.
+func TestTheFlagTravelsIntoReconciling(t *testing.T) {
 	flagged := tk("T1", protocol.Checks, func(t *Ticket) {
-		t.Labels = []string{LabelReEvaluate}
 		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+		t.Labels = []string{LabelReEvaluate}
 	})
 	for _, a := range Sweep(snap(flagged)) {
-		if a.TicketID != flagged.ID {
-			continue
+		if a.TicketID == flagged.ID && a.Kind == ActRemoveLabel && a.Label == LabelReEvaluate {
+			t.Error("the sweep cleared the flag on promotion; reconcile would never see it")
 		}
-		if a.Kind == ActTransition && a.To == protocol.Reconciling {
-			t.Error("a flagged ticket was promoted to the state that merges")
-		}
-		if a.Kind == ActDispatch && a.Agent == AgentReconcile {
-			t.Error("reconcile was dispatched against a flagged ticket")
-		}
+	}
+	if !flagged.HasLabel(LabelReEvaluate) {
+		t.Error("the flag did not survive the pass")
 	}
 }
