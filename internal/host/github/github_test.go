@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -111,10 +112,15 @@ func TestChecksForAggregates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
-				if !strings.Contains(r.URL.Path, "/commits/sha1/check-runs") {
+				if strings.Contains(r.URL.Path, "/jobs") {
+					return http.StatusOK, map[string]any{"jobs": []map[string]any{
+						{"name": "ci / test", "status": "completed", "conclusion": "failure"},
+					}}
+				}
+				if !strings.Contains(r.URL.Path, "/actions/runs") {
 					t.Errorf("path = %s", r.URL.Path)
 				}
-				return http.StatusOK, map[string]any{"check_runs": tc.runs}
+				return http.StatusOK, map[string]any{"workflow_runs": tc.runs}
 			})
 			defer srv.Close()
 			got, err := client(t, srv).ChecksFor(context.Background(), "sha1")
@@ -342,28 +348,33 @@ func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) b
 	}))
 }
 
-// The evidence path must never reach the checks API. Agent runs act as
+// Nothing may reach the checks API. Agent runs act as
 // AGENT_GITHUB_TOKEN, a fine-grained PAT, and GitHub offers no Checks
 // permission to grant one — so that call answers 403 for a reason no
-// scope can fix. It cost a rework its evidence before anyone noticed,
-// because the sweep (in-workflow GITHUB_TOKEN, with checks: read) makes
-// the same call successfully every hour.
+// scope can fix.
 //
-// Written as "only ChecksFor may touch it" rather than as a scan of one
-// function's body, so moving code between helpers cannot quietly move
-// the call back onto the agent's path.
-func TestOnlyChecksForReachesTheChecksAPI(t *testing.T) {
+// This used to allow ChecksFor, on the grounds that only the sweep
+// called it and the sweep runs as GITHUB_TOKEN with checks: read. The
+// first half was enforced and the second half was never checked, and it
+// was false: every agent claim builds a project snapshot, and the
+// snapshot reads a CI verdict for every ticket in Checks. Catapult's
+// ORC-7 died on a 403 reading ORC-5's check runs, a ticket it had no
+// interest in. A carve-out for one caller is only as good as the claim
+// about who calls it, so there is no carve-out now.
+//
+// Written as a scan of every function rather than of one body, so
+// moving code between helpers cannot quietly move the call back.
+func TestNothingReachesTheChecksAPI(t *testing.T) {
 	body, err := os.ReadFile("github.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"ChecksFor": true, "checkRuns": true}
 	name := regexp.MustCompile(`^func (?:\(c \*Client\) )?(\w+)`)
 
 	checked := 0
 	for _, chunk := range strings.Split(string(body), "\nfunc ") {
 		m := name.FindStringSubmatch("func " + chunk)
-		if m == nil || allowed[m[1]] {
+		if m == nil {
 			continue
 		}
 		var code strings.Builder
@@ -376,11 +387,96 @@ func TestOnlyChecksForReachesTheChecksAPI(t *testing.T) {
 		checked++
 		for _, bad := range []string{"checkRuns(", "check-runs"} {
 			if strings.Contains(code.String(), bad) {
-				t.Errorf("%s reaches %q — only ChecksFor may, and only because the sweep runs it as GITHUB_TOKEN", m[1], bad)
+				t.Errorf("%s reaches %q — no fine-grained token can be granted it, and the snapshot runs under one", m[1], bad)
 			}
 		}
 	}
 	if checked == 0 {
 		t.Fatal("scanned no functions; the split has drifted")
+	}
+}
+
+// The pipeline's own runs are not the commit's verdict. Agent workflows
+// are dispatched and the sweep is scheduled, both against a ref whose
+// head can coincide with a ticket branch's — at which point an agent
+// run's own status would decide whether that ticket's gates passed.
+// check-runs could not confuse the two; the Actions endpoint can, so
+// the filter is part of the swap rather than a nicety.
+func TestChecksForIgnoresThePipelinesOwnRuns(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+			{"status": "completed", "conclusion": "success", "event": "pull_request", "name": "ci"},
+			{"status": "in_progress", "conclusion": "", "event": "workflow_dispatch", "name": "pipeline: dev ORC-5"},
+			{"status": "completed", "conclusion": "failure", "event": "schedule", "name": "pipeline: sweep",
+				"html_url": "https://gh/sweep"},
+		}}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).ChecksFor(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != host.ChecksGreen {
+		t.Errorf("status = %q, want %q — a live agent run must not read as pending CI, and a red sweep must not read as a red build", got.Status, host.ChecksGreen)
+	}
+}
+
+// Red names the failing jobs, not the workflow, because that is the
+// grain check-runs gave and the rework scope was written against.
+func TestChecksForNamesFailingJobsNotWorkflows(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if strings.Contains(r.URL.Path, "/jobs") {
+			return http.StatusOK, map[string]any{"jobs": []map[string]any{
+				{"name": "ci / gates", "status": "completed", "conclusion": "failure"},
+				{"name": "ci / audit", "status": "completed", "conclusion": "failure"},
+				{"name": "ci / setup", "status": "completed", "conclusion": "success"},
+			}}
+		}
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+			{"id": 7, "status": "completed", "conclusion": "failure", "event": "pull_request",
+				"name": "ci", "html_url": "https://gh/run/7"},
+		}}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).ChecksFor(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != host.ChecksRed || got.RunURL != "https://gh/run/7" {
+		t.Fatalf("verdict = %+v, want red linking the failing run", got)
+	}
+	want := []string{"ci / gates", "ci / audit"}
+	if !reflect.DeepEqual(got.FailedJobs, want) {
+		t.Errorf("failed jobs = %v, want %v — the passing job must not be named", got.FailedJobs, want)
+	}
+}
+
+// A jobs read that fails still produces a red verdict, named at
+// workflow grain. "ci failed" is worse than "ci / gates failed" and far
+// better than red with nothing named, which reads as a build nobody can
+// act on.
+func TestChecksForKeepsTheVerdictWhenJobsCannotBeRead(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if strings.Contains(r.URL.Path, "/jobs") {
+			return http.StatusForbidden, map[string]any{"message": "nope"}
+		}
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+			{"id": 7, "status": "completed", "conclusion": "failure", "event": "pull_request",
+				"name": "ci", "html_url": "https://gh/run/7"},
+		}}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).ChecksFor(context.Background(), "sha1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != host.ChecksRed {
+		t.Fatalf("verdict = %+v, want red", got)
+	}
+	if !reflect.DeepEqual(got.FailedJobs, []string{"ci"}) {
+		t.Errorf("failed jobs = %v, want the workflow name as the fallback", got.FailedJobs)
 	}
 }

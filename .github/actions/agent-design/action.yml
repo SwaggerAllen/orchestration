@@ -90,6 +90,17 @@ runs:
         PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
+        # stderr is captured as well as shown, because the step after
+        # this one puts it on the ticket. A claim that dies takes the
+        # only other channel with it: abort needs claim.json to know
+        # what it is aborting, so the loudest failures used to leave
+        # nothing at all behind (DESIGN §12).
+        # mkdir first: the redirect below opens the file before the
+        # claim runs, and the claim is what would otherwise create the
+        # directory — so without this the step dies on the redirect,
+        # before the command it is trying to capture.
+        mkdir -p "$RUNNER_TEMP/pipeline"
+        set +e
         pipeline agent claim \
           --kind design \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
@@ -100,7 +111,16 @@ runs:
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
-          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          2> "$RUNNER_TEMP/pipeline/claim-error.txt"
+        rc=$?
+        # Written to a file rather than a step output: an output on a
+        # failed step is not somewhere to bet a state transition on, and
+        # the next step reads this to tell a refused pickup (the
+        # pipeline working) from a harness failure (the author's).
+        echo "$rc" > "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
+        cat "$RUNNER_TEMP/pipeline/claim-error.txt" >&2
+        exit $rc
 
     - name: check out the ticket branch
       shell: bash
@@ -232,6 +252,25 @@ runs:
           --preview-url "${{ steps.published.outputs.deployment-url }}" \
           --base-sha "${{ steps.base.outputs.sha }}" \
           --findings "$RUNNER_TEMP/pipeline/findings.json"
+
+    - name: say so when the claim itself failed
+      if: failure() && steps.claim.outcome == 'failure'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+      run: |
+        # Routes on the claim's exit status: a refused pickup is the
+        # pipeline working and only earns a comment, while a harness
+        # failure parks the ticket in Blocked — the same place the
+        # stale-claim rule would reach twenty minutes later, with the
+        # reason attached instead of "a run stopped being live".
+        pipeline agent claim-failed \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --ticket "${{ inputs.ticket }}" \
+          --kind design \
+          --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          --error-file "$RUNNER_TEMP/pipeline/claim-error.txt" \
+          --exit-code-file "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
 
     - name: abort on failure
       if: failure() && steps.claim.outcome == 'success'

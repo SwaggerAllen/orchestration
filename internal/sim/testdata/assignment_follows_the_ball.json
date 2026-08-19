@@ -1,10 +1,11 @@
 {
   "name": "assignment mirrors who has the ball across a lifecycle (DESIGN 3)",
   "steps": [
-    {"kind": "seed", "key": "T1", "state": "designing"},
+    {"kind": "seed", "key": "T1", "state": "ready_for_design"},
     {"kind": "sweep"},
-    {"kind": "expect", "key": "T1", "state": "designing", "assignee": "nobody"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_design", "assignee": "nobody"},
 
+    {"kind": "transition", "key": "T1", "to": "designing", "actor": "design"},
     {"kind": "run-end", "key": "T1"},
     {"kind": "transition", "key": "T1", "to": "design_review", "actor": "design"},
     {"kind": "sweep"},

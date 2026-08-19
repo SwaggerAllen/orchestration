@@ -31,10 +31,29 @@ the diff.
   something design must know about — file maps included — and then say
   so in your hand-back. Rewriting design artifacts wholesale is design's
   job, not yours.
-- **Stay inside your labels.** CI audits the diff against the screen and
-  system file maps: touching a mapped path without that ticket label
-  fails the build. Discovering you need another system mid-flight is the
-  re-evaluation flow (DESIGN §7), not a silent expansion.
+- **Stay inside your labels, and report the one you turn out to need.**
+  CI audits the diff against the screen and system file maps: touching a
+  mapped path without that ticket label fails the build. When your work
+  legitimately reaches a path some other doc maps — a component roster,
+  a shared test helper — name that doc in your outcome file's `labels`
+  and finish normally:
+
+  ```json
+  {"outcome": "done", "labels": ["foundation"]}
+  ```
+
+  Bare doc names, no `system:` prefix. The harness checks each one
+  against the file maps and against your own diff, attaches it, and
+  handles any collision with another in-flight ticket (DESIGN §7). A
+  name it cannot verify is refused and said so on the ticket; your work
+  still lands.
+
+  **This reports a fact, it does not buy scope.** The label follows the
+  file map: a path you had to touch is owned by a doc, and the ticket
+  was missing that doc's label. It is not permission to touch more
+  files, and a label for a doc nothing in your diff is mapped by will be
+  refused. If you find yourself wanting a label so that you *can* widen
+  the diff, that is the push-back, not this.
 - **A new component module or theme token you weren't asked for is a
   decision, not a port** (DESIGN §2.8). CI fails the build on an
   unannounced component — one added under the project's component paths
@@ -54,7 +73,7 @@ the diff.
   - `pushback` — the design can't be built as drawn (DESIGN §2.7). Say
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
-    `Designing`, and they decide whether it is redesigned or rescoped.
+    the design queue, and they decide whether it is redesigned or rescoped.
   - `author-only` — the work is somewhere you cannot land a change.
     Two kinds, and both are facts about your run rather than judgments:
 

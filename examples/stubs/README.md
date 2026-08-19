@@ -8,7 +8,7 @@ bindings live.
 |---|---|
 | `pipeline-sweep.yml` | Control-plane pass: metronome dispatch + CI-hop trigger |
 | `pipeline-agent-dev.yml` | Dev agent run, dispatched by the sweep |
-| `pipeline-agent-design.yml` | Design agent run, dispatched on Designing entry and re-evaluate re-reads |
+| `pipeline-agent-design.yml` | Design agent run, dispatched from Ready for design and on re-evaluate re-reads |
 | `pipeline-preview-cleanup.yml` | Deletes a branch's previews when its PR closes |
 | `pipeline-agent-reconcile.yml` | Reconcile agent run, dispatched on CI green |
 | `pipeline-agent-boundary.yml` | Boundary agent run, dispatched on the author's signal |
@@ -106,7 +106,7 @@ A project also needs:
   writes somebody would have to undo, so a green run means "the reads
   are fine", not "the permissions are fine".
 - `pipeline-order.yml` (recommended). Answers "what goes into
-  `Designing` next, and what can run beside it" from the ticket graph,
+  designed next, and what can run beside it" from the ticket graph,
   on demand — the question that comes up away from a terminal. The
   ordering is derived and never stored, deliberately (DESIGN §6): the
   mutex labels that decide what parallelises do not exist until the

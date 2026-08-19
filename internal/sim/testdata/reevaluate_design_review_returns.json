@@ -1,9 +1,9 @@
 {
-  "name": "re-evaluate on Design review returns to Designing; the live pass folds it in (DESIGN 7)",
+  "name": "re-evaluate on Design review returns the ticket to the design queue; the pass that follows folds it in (DESIGN 7)",
   "steps": [
     {"kind": "seed", "key": "T1", "state": "design_review", "labels": ["re-evaluate"]},
     {"kind": "sweep"},
-    {"kind": "expect", "key": "T1", "state": "designing", "hasLabels": ["re-evaluate"], "runKind": "design", "runLive": true},
+    {"kind": "expect", "key": "T1", "state": "ready_for_design", "hasLabels": ["re-evaluate"], "runKind": "design", "runLive": true},
     {"kind": "label", "key": "T1", "remove": ["re-evaluate"]},
     {"kind": "run-end", "key": "T1"},
     {"kind": "transition", "key": "T1", "to": "design_review", "actor": "design"},

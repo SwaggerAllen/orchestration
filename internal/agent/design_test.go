@@ -17,7 +17,7 @@ import (
 func TestDesignArtifactsFlow(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_50", "u", time.Now())
 	if err != nil {
@@ -54,7 +54,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 func TestDesignDecisionlessAutoPass(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	i := seed(t, tr, cfg, "Backend index", "No surfaces.", protocol.Designing)
+	i := seed(t, tr, cfg, "Backend index", "No surfaces.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_51", "u", time.Now())
 	if err != nil {
@@ -134,8 +134,8 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 	if err := FinishDesign(ctx, p, h, res2, o2, "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.Designing {
-		t.Errorf("demote: state = %q, want designing", got)
+	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForDesign {
+		t.Errorf("demote: state = %q, want the design queue", got)
 	}
 }
 
@@ -171,7 +171,7 @@ func TestDesignClaimCarriesTheNonAsksDocument(t *testing.T) {
 	tr, _, cfg, p := world(t)
 	cfg.Root = t.TempDir()
 	writeNonAsks(t, cfg, "- No dark mode: two palettes, one designer.")
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_54", "u", time.Now())
 	if err != nil {
@@ -193,7 +193,7 @@ func TestDesignClaimReportsAnAbsentNonAsksDocument(t *testing.T) {
 	ctx := context.Background()
 	tr, _, cfg, p := world(t)
 	cfg.Root = t.TempDir()
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_55", "u", time.Now())
 	if err != nil {
@@ -217,7 +217,7 @@ func TestDesignClaimReadsTheNonAsksFromTheProjectNotTheWorkingDirectory(t *testi
 	cfg.Root = t.TempDir()
 	writeNonAsks(t, cfg, "- No dark mode.")
 	t.Chdir(t.TempDir()) // stand somewhere else entirely, as a real run does
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_56", "u", time.Now())
 	if err != nil {
@@ -242,7 +242,7 @@ func writeNonAsks(t *testing.T, cfg *config.Config, body string) {
 func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_60", "u", time.Now())
 	if err != nil {
@@ -281,7 +281,7 @@ func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
 
 	res, err := ClaimDesign(ctx, p, i.Key, "run_61", "u", time.Now())
 	if err != nil {
@@ -311,7 +311,7 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 func TestDesignFinishRecordsTheBaseSHA(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
-	i := seed(t, tr, cfg, "Cap screen", "The argument, with no Base line", protocol.Designing)
+	i := seed(t, tr, cfg, "Cap screen", "The argument, with no Base line", protocol.ReadyForDesign)
 
 	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b"}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}}
@@ -367,7 +367,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 	cfg.Root = t.TempDir()
 	writeDoc(t, cfg, "systems", "core_dsl", "lib/dsl/**")
 	writeDoc(t, cfg, "screens", "home", "lib/web/home/**")
-	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.ReadyForDesign)
 	res, err := ClaimDesign(ctx, p, i.Key, "run_60", "u", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +401,7 @@ func TestDesignReportsEveryUnknownDocAtOnce(t *testing.T) {
 	tr, h, cfg, p := world(t)
 	cfg.Root = t.TempDir()
 	writeDoc(t, cfg, "systems", "core_dsl", "lib/dsl/**")
-	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.ReadyForDesign)
 	res, err := ClaimDesign(ctx, p, i.Key, "run_61", "u", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestDesignAcceptsAnyNameWhenTheProjectHasNoDocs(t *testing.T) {
 	ctx := context.Background()
 	tr, h, cfg, p := world(t)
 	cfg.Root = t.TempDir()
-	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.Designing)
+	i := seed(t, tr, cfg, "The loader", "The argument.", protocol.ReadyForDesign)
 	res, err := ClaimDesign(ctx, p, i.Key, "run_62", "u", time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -447,5 +447,64 @@ func writeDoc(t *testing.T, cfg *config.Config, dir, name, glob string) {
 	body := "---\npaths:\n  - " + glob + "\n---\n\n# " + name + "\n"
 	if err := os.WriteFile(filepath.Join(d, name+".md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// State-transition-as-claim, now that design has a queue to be claimed
+// out of. The ORC-7 failure in one assertion: a claim that never
+// completes leaves the ticket in the queue, not in a state asserting an
+// agent is working on it.
+func TestDesignClaimMovesTheTicketOutOfTheQueue(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDesign {
+		t.Fatalf("fixture is in %q", got)
+	}
+	res, err := ClaimDesign(ctx, p, i.Key, "run_90", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
+		t.Errorf("state = %q, want the claim to have taken it out of the queue", got)
+	}
+	if res.State != protocol.Designing {
+		t.Errorf("claim reports state %q, want the state it just wrote", res.State)
+	}
+	if res.Mode != "design" {
+		t.Errorf("mode = %q, want a normal pass", res.Mode)
+	}
+
+	// And a second run cannot claim what the first one took: the queue
+	// is empty, so the pickup assertion refuses rather than two agents
+	// working one ticket.
+	if _, err := ClaimDesign(ctx, p, i.Key, "run_91", "u", time.Now()); err == nil {
+		t.Error("a second design run claimed a ticket already in Designing")
+	} else if !core.Refused(err) {
+		t.Errorf("the refusal is not marked as one, so it would park the ticket: %v", err)
+	}
+}
+
+// A re-evaluate re-read is design looking at a ticket that belongs to
+// the dev queue. It must not move it — the ticket is not being designed,
+// it is being re-read in place (DESIGN §7).
+func TestDesignRereadLeavesTheDevQueueAlone(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDev)
+	if err := p.AddTicketLabel(ctx, i.ID, core.LabelReEvaluate); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_92", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Mode != "design-reread" {
+		t.Errorf("mode = %q, want a re-read", res.Mode)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
+		t.Errorf("state = %q, want the dev queue untouched", got)
 	}
 }

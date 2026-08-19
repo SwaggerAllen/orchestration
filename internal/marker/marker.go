@@ -116,6 +116,16 @@ const (
 	// reconstructed from a branch name and a Pages project. Field:
 	// url=<the published preview>.
 	Preview Kind = "preview"
+	// ClaimFailed records a run that died before it held the ticket.
+	//
+	// Every other failure route posts through the claim: the abort path
+	// needs claim.json to know what it is aborting, and a run that never
+	// got one skips it. So the loudest failures — the harness broken
+	// before the agent even started — were the only ones that left
+	// nothing on the ticket at all. ORC-7 sat in Designing for 23
+	// minutes with no comment, until the stale-claim rule moved it and
+	// said only that a run had died.
+	ClaimFailed Kind = "claim-failed"
 )
 
 // Marker is one parsed or to-be-formatted marker line.

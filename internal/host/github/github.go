@@ -301,7 +301,7 @@ func (c *Client) MergeStateFor(ctx context.Context, number int) (host.MergeState
 }
 
 func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, error) {
-	runs, err := c.checkRuns(ctx, headSHA)
+	runs, err := c.runsForSHA(ctx, headSHA)
 	if err != nil {
 		return host.Checks{}, err
 	}
@@ -317,19 +317,31 @@ func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, er
 			}
 			continue
 		}
-		switch r.Conclusion {
-		case "success", "neutral", "skipped":
-		default:
-			// failure, timed_out, cancelled, action_required: the branch
-			// is not green. Every failing check is named, not just the
-			// first — a build that broke three jobs is a different fact
-			// from one that broke one, and the agent reading this is
-			// deciding what to fix. The link stays the first one, which
-			// is what the marker has always carried.
-			if red.RunURL == "" {
-				red.RunURL = r.HTMLURL
-			}
+		if !failedConclusion(r.Conclusion) {
+			continue
+		}
+		// The link stays the first failing run, which is what the
+		// marker has always carried.
+		if red.RunURL == "" {
+			red.RunURL = r.HTMLURL
+		}
+		// Every failing job is named, not just the first — a build that
+		// broke three jobs is a different fact from one that broke one,
+		// and the agent reading this is deciding what to fix. Jobs
+		// rather than the workflow's name because that is the grain the
+		// check-runs API gave and the rework prompt was written against.
+		jobs, err := c.runJobs(ctx, r.ID)
+		if err != nil {
+			// Named at workflow grain rather than dropped: "ci failed"
+			// is worse than "ci / test failed" and far better than a
+			// red verdict with nothing named.
 			red.FailedJobs = append(red.FailedJobs, r.Name)
+			continue
+		}
+		for _, j := range jobs {
+			if j.Status == "completed" && failedConclusion(j.Conclusion) {
+				red.FailedJobs = append(red.FailedJobs, j.Name)
+			}
 		}
 	}
 	if red.RunURL != "" {
@@ -338,24 +350,64 @@ func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, er
 	return agg, nil
 }
 
-// checkRun is one check run as both ChecksFor and FailedJobLogs read it.
-type checkRun struct {
+// workflowRun is one Actions run as the CI verdict reads it.
+type workflowRun struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
+	Event      string `json:"event"`
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	HTMLURL    string `json:"html_url"`
 }
 
-func (c *Client) checkRuns(ctx context.Context, headSHA string) ([]checkRun, error) {
-	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", c.owner, c.repo, headSHA)
+// runsForSHA lists the Actions runs that judged a commit.
+//
+// The obvious endpoint for "is this commit green" is
+// `/commits/{sha}/check-runs`, and this used to call it. **A
+// fine-grained token cannot be granted the check-runs API at all** —
+// the endpoint appears nowhere in GitHub's fine-grained permissions
+// reference, and "Commit statuses" is a different API. So that call
+// answers 403 for a reason no scope can fix, under any token that is
+// not a workflow's own GITHUB_TOKEN. SETUP.md has said so for a while.
+//
+// What it did not say is that this function is on the agents' path.
+// Every claim builds a full project snapshot, and the snapshot reads a
+// CI verdict for every ticket sitting in Checks — under
+// AGENT_GITHUB_TOKEN, which is exactly the token that cannot make the
+// call. Measured on Catapult: ORC-7's design claim died 35 seconds in
+// on a 403 reading ORC-5's check runs, a ticket it had no interest in,
+// and sat in Designing until the stale-claim grace expired 23 minutes
+// later. The sweep had read the same verdict successfully minutes
+// earlier, under GITHUB_TOKEN, which is what made it look intermittent.
+//
+// The Actions API answers the same question under a permission a PAT
+// can hold, and FailedJobLogs already reads CI this way. The tradeoff
+// is real and worth naming: this sees workflow runs in this repository
+// and not third-party checks, so a project whose gates run outside
+// Actions needs another reader. Every project here runs its gates in
+// Actions.
+func (c *Client) runsForSHA(ctx context.Context, headSHA string) ([]workflowRun, error) {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", c.owner, c.repo, headSHA)
 	var data struct {
-		CheckRuns []checkRun `json:"check_runs"`
+		WorkflowRuns []workflowRun `json:"workflow_runs"`
 	}
 	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
 		return nil, err
 	}
-	return data.CheckRuns, nil
+	out := make([]workflowRun, 0, len(data.WorkflowRuns))
+	for _, r := range data.WorkflowRuns {
+		// The pipeline's own machinery is not this commit's verdict.
+		// Agent workflows are dispatched and the sweep is scheduled, and
+		// both run against a ref whose head can coincide with a
+		// ticket's — at which point an agent run's own status would
+		// decide whether the ticket's gates passed. check-runs could not
+		// confuse the two; this endpoint can.
+		if r.Event == "workflow_dispatch" || r.Event == "schedule" {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // Bounds on what a failing build may put in a prompt. Three jobs and a
@@ -369,15 +421,16 @@ const (
 	maxLogTailBytes = 20000
 )
 
-// FailedJobLogs reads the Actions API rather than the check-runs API that
-// ChecksFor uses, and the difference is which credential each call can be
-// made with. ChecksFor runs in the sweep, under the workflow's own
-// GITHUB_TOKEN, where `checks: read` is grantable from the permissions
-// block. This runs at claim time in an agent workflow, under
-// AGENT_GITHUB_TOKEN — and a fine-grained PAT has no check-runs
-// permission to grant: the endpoint appears nowhere in GitHub's
-// fine-grained permissions reference, so no setting fixes it. The first
-// rework run to need a log got a bare 403 and worked the ticket blind.
+// FailedJobLogs reads the Actions API, and was the first call here to
+// do so — it runs at claim time under AGENT_GITHUB_TOKEN, and a
+// fine-grained PAT has no check-runs permission to grant: the endpoint
+// appears nowhere in GitHub's fine-grained permissions reference, so no
+// setting fixes it. The first rework run to need a log got a bare 403
+// and worked the ticket blind.
+//
+// ChecksFor has since moved to the same API for the same reason, so
+// this is no longer the exception it was written as — see runsForSHA
+// for the failure that finished the argument.
 //
 // Actions runs and jobs are grantable (`Actions`, which agent tokens
 // already hold to dispatch), and they are the only thing with a log to

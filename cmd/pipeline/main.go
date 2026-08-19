@@ -29,9 +29,22 @@ import (
 // version is stamped by the release build; "dev" otherwise.
 var version = "dev"
 
+// exitRefused is the status a claim exits with when the protocol
+// declined the pickup, as opposed to the harness failing to evaluate it.
+//
+// A separate code rather than a parsed message, because the caller is a
+// workflow: it has an exit status and a log, and routing on prose is how
+// a message reword silently changes behaviour. Refusal is the pipeline
+// working (a held mutex, a busy agent, an open blocker) and the ticket
+// should sit; anything else is broken and the author has to hear it.
+const exitRefused = 2
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "pipeline:", err)
+		if core.Refused(err) {
+			os.Exit(exitRefused)
+		}
 		os.Exit(1)
 	}
 }

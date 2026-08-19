@@ -30,7 +30,12 @@ type Memory struct {
 	// FailRecordDeployment makes RecordDeployment error, standing in for
 	// the 403 a workflow without deployments: write actually gets.
 	FailRecordDeployment bool
-	nextPR               int
+	// FailChecksFor makes the verdict read error for one head SHA,
+	// standing in for the 403 that took a whole snapshot down. Keyed by
+	// SHA rather than a flag, because the property worth testing is that
+	// *one* ticket's unreadable verdict costs only that ticket.
+	FailChecksFor map[string]bool
+	nextPR        int
 }
 
 // Deployment is one recorded deployment.
@@ -49,12 +54,13 @@ var _ Host = (*Memory)(nil)
 
 func NewMemory() *Memory {
 	return &Memory{
-		CheckState:  map[string]Checks{},
-		JobLogs:     map[string][]JobLog{},
-		Merged:      map[int]string{},
-		Ancestry:    map[string]bool{},
-		Files:       map[string]string{},
-		Unmergeable: map[int]bool{},
+		CheckState:    map[string]Checks{},
+		JobLogs:       map[string][]JobLog{},
+		Merged:        map[int]string{},
+		Ancestry:      map[string]bool{},
+		Files:         map[string]string{},
+		Unmergeable:   map[int]bool{},
+		FailChecksFor: map[string]bool{},
 	}
 }
 
@@ -84,6 +90,9 @@ func (m *Memory) ListOpenPRs(_ context.Context) ([]PR, error) {
 func (m *Memory) ChecksFor(_ context.Context, headSHA string) (Checks, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.FailChecksFor[headSHA] {
+		return Checks{}, fmt.Errorf("memory host: checks for %s are refused (HTTP 403)", headSHA)
+	}
 	return m.CheckState[headSHA], nil
 }
 

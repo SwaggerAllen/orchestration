@@ -15,7 +15,7 @@
       "labels": ["frontend"],
       "milestone": "Rehearsal 1",
       "priority": 2,
-      "state": "designing"
+      "state": "ready_for_design"
     }
   ],
   "expect": {

@@ -64,16 +64,30 @@ able to do exactly one job and nothing else.
   by writing a correct `ci.yml` fix it could not push; the run died at
   the push and took its hand-back with it, which is the trade this
   setting makes and is meant to make.
-- **There is no check-runs permission to add, and this is why the plane
-  reads CI two different ways.** A fine-grained token cannot be granted
-  the check-runs API at all — the endpoint appears nowhere in GitHub's
+- **There is no check-runs permission to add, and nothing in the plane
+  asks for one any more.** A fine-grained token cannot be granted the
+  check-runs API at all — the endpoint appears nowhere in GitHub's
   fine-grained permissions reference, and "Commit statuses" is a
-  different API (`/statuses`, not `/check-runs`). So the sweep reads
-  check runs under the workflow's own `GITHUB_TOKEN`, where
-  `checks: read` is grantable from the `permissions:` block, while
-  anything running under this token reads the Actions API instead.
+  different API (`/statuses`, not `/check-runs`). The plane used to read
+  CI two ways because of it: check runs under a workflow's own
+  `GITHUB_TOKEN`, where `checks: read` is grantable, and the Actions API
+  everywhere else. **That split is gone** — every CI read goes through
+  `/actions/runs?head_sha=`, under `actions: read`, which a PAT can
+  hold. No stub asks for `checks: read`.
+
+  The split was not a stable arrangement, and the way it failed is the
+  reason to keep it gone. "Only the sweep reads check runs" was true of
+  the call site and false of the call graph: every agent claim builds a
+  project snapshot, and the snapshot reads a CI verdict for every ticket
+  sitting in `Checks`. Catapult's `ORC-7` design claim died 35 seconds
+  in on a 403 reading `ORC-5`'s check runs — a ticket it had no interest
+  in — and sat until the stale-claim grace expired 23 minutes later. The
+  sweep read the same verdict successfully minutes either side, which is
+  what made it look intermittent rather than structural.
+
   Watch for this when adding a call: a `permissions:` block in a stub
-  grants nothing to the token the agent actions are handed.
+  grants nothing to the token the agent actions are handed, and a call
+  reachable from `Build` is reachable from every agent.
 - Named without a `GITHUB_` prefix because Actions reserves it.
 
 **Why this exists, and why the default token is not enough.** Every
@@ -364,7 +378,7 @@ later add them to the protocol set — today they are ignored.
 1. Merge the scaffold PR on `orchestration-dummy` (its own `ci` run is
    the first live gate check).
 2. Create a first milestone in Test orchestration and a seed ticket in it
-   (state **Todo**, then move to **Designing** when ready), e.g. "Add a
+   (state **Todo**, then move to **Ready for design** when ready), e.g. "Add a
    farewell to the home screen" — small, touches one screen and one
    system, exercises the whole loop.
 3. Trigger a sweep: Actions (dummy) → **pipeline-sweep** → Run

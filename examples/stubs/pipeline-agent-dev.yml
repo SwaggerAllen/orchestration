@@ -27,8 +27,7 @@ on:
 permissions:
   contents: write # commits the implementation, and reads ancestry
   pull-requests: write # opens or un-drafts the PR, and reads the open list
-  actions: read # the snapshot's agent run list
-  checks: read # CI verdict per PR head
+  actions: read # the snapshot's agent run list, and the CI verdict per PR head
   deployments: read # deploy state, when the project's provider is "github"
 
 jobs:

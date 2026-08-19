@@ -48,7 +48,7 @@ agent. Several assumptions here are load-bearing and are called out where they a
 | Actor | Owns |
 |---|---|
 | **Author** (human) | Scope. Design sign-off. Milestone boundaries. Issue creation. |
-| **Design agent** | Designing. Produces stories, components, narrative docs. |
+| **Design agent** | Designing, claimed from Ready for design. Produces stories, components, narrative docs. |
 | **Dev agent** | All pipeline repository work that isn't design-owned. Singular. Out-of-band fixes are the author's (§5). |
 | **Reconcile agent** | Pre-merge verification against intent. Merges. |
 | **Boundary agent** | Archive, debt scan and grooming at a milestone boundary. |
@@ -90,7 +90,7 @@ and the drift shows up as agents disagreeing about what a state means.
    conflict at that. The resolution rule is semantic and has no git equivalent: the repo moved
    and both changes touch the same behavior → **repo wins, and the ticket stops** with a
    comment naming what moved. It stops as a push-back (§2.7), so it parks in `Blocked` and the
-   author sends it back to `Designing` — the design has to be re-decided either way, and an
+   author sends it back to `Ready for design` — the design has to be re-decided either way, and an
    agent routing it there itself is the loop §2.7 describes. Never reconcile by guessing; that
    produces a design nobody agreed to.
 5. **Undesigned changes remain legal.** Small fixes and vulnerability patches land on main
@@ -104,9 +104,9 @@ and the drift shows up as agents disagreeing about what a state means.
    ticket itself. It lands in `Blocked` under a `pushback` label, and the author decides
    whether it is redesigned or rescoped.
 
-   **It parks rather than returning to `Designing`, and that is a correction.** Routing it
+   **It parks rather than returning to the design queue, and that is a correction.** Routing it
    straight back is the obvious shape and it has a cycle in it: a design pass runs on every
-   entry to `Designing`, so a decisionless pass that finds nothing to decide and a push-back
+   entry to `Ready for design`, so a decisionless pass that finds nothing to decide and a push-back
    that finds nothing to build can hand one ticket between them indefinitely, each pass correct
    on its own terms and neither able to see the loop. Counting the bounces was the alternative
    — a third counter beside the CI and reconcile ones (§12) — and it is more machinery to stop
@@ -121,7 +121,7 @@ and the drift shows up as agents disagreeing about what a state means.
    milestone is fine; an honest empty beats a padded one.
 10. **State admission test:** each state answers *who has the ball* differently.
     **Label admission test:** anything you'd remove when work changes hands is a state wearing
-    a label. `needs-design` is `Designing`; `deferred` is `Backlog`; `blocked` is `Blocked`.
+    a label. `needs-design` is `Ready for design`; `deferred` is `Backlog`; `blocked` is `Blocked`.
 
 ---
 
@@ -131,7 +131,8 @@ and the drift shows up as agents disagreeing about what a state means.
 |---|---|---|
 | `Backlog` | Nobody. Not committed to. | author, grooming pass |
 | `Todo` | Nobody. Committed, not started. | author, milestone pull |
-| `Designing` | Design agent, now. | design |
+| `Ready for design` | The queue. Scope is the **description**. | author |
+| `Designing` | Design agent, now. | design (claim) |
 | `Design review` | **Author.** Artifacts ready, not yet approved. | design |
 | `Ready for dev` | The queue. Scope is the **description**. | author (sign-off) |
 | `In progress` | Dev agent, now. | dev (claim) |
@@ -166,9 +167,9 @@ is a confusion every agent prompt would have to fight.
 **Why `Design review` exists.** Without it there is no signal for *design is finished and
 waiting on the author* as distinct from *design is still working*. Sign-off is the transition
 `Design review` → `Ready for dev`, and it is the author's, always. **Declining is
-`Design review` → `Designing` with a comment**, for the same reason the dev agent's push-back
+`Design review` → `Ready for design` with a comment**, for the same reason the dev agent's push-back
 carries its argument: a rejection without one is a rejection the next pass repeats. The author
-may route straight to `Designing` because they are the one who would notice a ticket going
+may route straight to `Ready for design` because they are the one who would notice a ticket going
 round; an agent's push-back parks instead (§2.7).
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
@@ -176,6 +177,20 @@ and no diff to any `systems/*.md` — no new system, table, dependency, componen
 advances straight to `Ready for dev` (§6), recording its reasoning and touch list in the
 marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
 stamp, and rubber stamps train the author to skim the reviews that matter.
+
+**Design gets a queue state for the same reason dev has one, and did not have one for far too
+long.** `Designing` used to mean both "queued for design" and "a design agent is working on
+this", so no writer rule could be true of it — the author moved tickets in to queue them and the
+agent worked in it — and a run that died before claiming left a ticket asserting an agent was on
+it. Catapult's `ORC-7` sat that way for 23 minutes. Now the author moves `Todo` → `Ready for
+design`, and the design claim writes `Designing`, which makes it the design agent's claim
+exactly as `In progress` is the dev agent's (§6, §9). A dead run in `Designing` is now
+unambiguously a stale claim, because nothing else can put a ticket there.
+
+Everything that meant "queue this for design" moves with it: the author's send-back from `Design
+review`, a re-evaluate flag on a `Design review` ticket, and a design pass's own `demote`
+outcome all target `Ready for design`. Demoting into `Designing` would park a ticket in a state
+nothing dispatches from — sent back for redesign, and never redesigned.
 
 **Why the queue and the agent get separate states on both sides.** `Ready for dev` /
 `In progress` and `Ready for rework` / `Reworking` are the same split for the same reason:
@@ -527,9 +542,29 @@ beats starting them.
 
 ### Re-evaluation
 
-When a thread discovers scope nobody predicted, it **finishes the step it's on**, adds the
-newly-discovered mutex label — `screen:<name>` or `system:<name>` — to its own ticket, and
-adds `re-evaluate` to every ticket it now collides with.
+When a thread discovers scope nobody predicted, it **finishes the step it's on** and **reports**
+the newly-discovered mutex label — `screen:<name>` or `system:<name>`. The harness attaches it
+to the ticket and adds `re-evaluate` to every ticket it now collides with.
+
+**Reported, not written, and the distinction is why this used to be a sentence with no
+implementation.** An agent holds the model credential and nothing else; every role prompt
+forbids it from touching labels, for the same reason it cannot move a ticket (§9). So the
+thread that is best placed to notice could not act, and the closest outcome available to it was
+a push-back — which parks finished work and asks a human to add a label by hand. Measured on
+Catapult's `ORC-5`: a complete, green, reviewed diff had to register its new component in
+`config/config.exs`, a path `systems/foundation.md` owns deliberately, and the run's only
+channel was to stop.
+
+**The harness verifies before it attaches**, so declaring is not acquiring: the name has to
+resolve to a real doc, and something in the run's own diff has to be mapped by that doc. A
+label locks a system for every other ticket, and one taken by a run that does not touch it is a
+queue held for nothing. A name that fails either check is refused, recorded on the ticket, and
+does not stop the run finishing — the audit is the backstop, and landing complete work in
+`Blocked` over a label is the failure this path exists to remove.
+
+**A label reports a fact the file maps already decided; it is never permission to widen the
+diff.** The path was touched because the work required it and some doc owns that path. An agent
+that wants a label in order to touch more files is describing a push-back (§2.7).
 
 By the precedence rule, the ticket further along **holds the ground** and the earlier one
 **absorbs**. So `re-evaluate` on a further-along ticket is a *check* — does what I'm doing still
@@ -546,10 +581,10 @@ surprise at merge.
 
 | State | What happens | Cleared by |
 |---|---|---|
-| `Backlog` / `Todo` | Nothing. Cleared automatically on entry to `Designing`. | — |
-| `Designing` | Folded into the live pass. | design |
-| `Design review` | Returns to `Designing`. Nothing is built; revision is cheap. | design |
-| `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Designing`. | design |
+| `Backlog` / `Todo` | Nothing. Cleared automatically on entry to `Ready for design`. | — |
+| `Ready for design` / `Designing` | Folded into the pass. | design |
+| `Design review` | Returns to `Ready for design`. Nothing is built; revision is cheap. | design |
+| `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
 | `Checks` | Evaluated in place. No state move. Clear with a comment, or return to `Reworking`. | dev |
@@ -654,7 +689,7 @@ the one failure that would make it cost more than it saves.
 milestone was the older default and hid a case: a ticket accepted out of Triage but not yet
 assigned a milestone. **Startable and committed are separate axes.** Nothing sequences a
 milestone-less ticket and no dispatcher reads milestones, so the queue takes it as soon as it
-reaches `Designing` — it belongs in the startable layers. But it is absent from any milestone's
+reaches `Ready for design` — it belongs in the startable layers. But it is absent from any milestone's
 scope, because that scope is the work committed to that milestone and nobody committed this
 one. Asking for a milestone by name asks what is in it; asking for nothing asks what can be
 started.
@@ -1121,7 +1156,7 @@ the comment and a label say which:
   wants rewriting, and the pipeline cannot tell which. It parks with the run's hand-back and
   the author decides.
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
-  parks here rather than looping back to `Designing`.
+  parks here rather than looping back to the design queue.
 - **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
   `.github/workflows/**` or `pipeline.config.json` (§5), or in another repository the run is
   not checked out in — the pipeline's own, most often, when what needs fixing is a gate, a
@@ -1160,6 +1195,42 @@ was tried and dropped: it is the same status, read by the same person, answering
 question, and two labels somebody triages identically are two labels they have to learn the
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
+
+**Project-wide reads are fatal to a snapshot; per-ticket reads degrade it.** The agent-run list
+and the open-PR list describe the whole project, and a snapshot missing either is not a
+snapshot. A CI verdict or a merge state belongs to one ticket, so losing it costs that ticket
+its facts and nothing else: it is reported and skipped, and the core reads the absence as "not
+judged yet" and waits. A stalled ticket instead of a stalled project.
+
+The rule is stated because it was not obeyed, and the failure did not look like what it was.
+One 403 reading `ORC-5`'s checks aborted the snapshot build — and every claim builds a snapshot,
+so it aborted `ORC-7`'s design claim too, a ticket with no relation to it. What is given up is
+real and is the trade: a ticket whose verdict cannot be read now waits quietly rather than
+failing loudly, so the honest report of the failure has to come from somewhere else, which is
+what the claim-failure record below is for.
+
+**A run that dies before it claims says so, and a broken harness parks the ticket.** Every other
+failure route posts through the abort path, and abort needs the claim file to know what it is
+aborting — so a run that never got one skipped it, and the loudest failures, the ones where the
+harness broke before the agent started, were the only ones that left nothing on the ticket at
+all. Catapult's `ORC-7` sat in `Designing` for 23 minutes showing a healthy state and a
+dispatched run, after its claim died on a 403 reading an unrelated ticket's CI verdict.
+
+**Two failures wear the same shape, and they want opposite handling.** A pickup assertion that
+refuses is the pipeline working — a held mutex, an agent of that kind already running, an open
+blocker — and the ticket is exactly where it should be; parking it would pull work the protocol
+deliberately left alone out of the queue. A snapshot that could not be built is the harness
+unable to evaluate the question at all, which is a failure like any other and the author's to
+see. Both are a claim command exiting non-zero.
+
+So refusal is **a type, not a phrasing**: every branch of the pickup assertion carries a
+sentinel, the claim exits `2` for it and `1` for everything else, and the workflow routes on the
+status rather than on prose that a reword would silently change. A refusal earns a comment and
+nothing more. Anything else earns a comment and `Blocked` — the same place the stale-claim rule
+would have reached twenty minutes later, now immediately and carrying the reason instead of "a
+run stopped being live". An unreadable status is treated as a failure, because a refusal parked
+by mistake is one click to undo and a failure filed as a refusal is a broken pipeline nobody is
+told about.
 
 **Only the author moves a ticket out of `Blocked`,** and they choose the state. There is no
 automatic return path, because unblocking almost always requires something the automation
@@ -1208,6 +1279,21 @@ read and no author reliably remembers.
   but bounded, because without a bound an active main and a slow ticket loop between
   `Reconciling` and the queue forever, burning an agent run each pass. That one is sequencing,
   and sequencing is the author's.
+- **A pass that changed no files still gets a fresh verdict**, because the harness commits an
+  empty one before pushing. CI fires on `pull_request`, which needs a push, which needs a
+  commit — so a rework that correctly changed nothing left the head sha exactly where the last
+  verdict was already recorded. The ticket entered `Checks`, the sweep read that verdict,
+  recognised a run it had already acted on and said nothing, and `Checks` has no agent and no
+  stale-claim timeout to catch it.
+
+  It is not a corner, because **the verdict is a function of the diff and the labels, not the
+  diff alone**: the mutex audit reads the ticket's labels from the tracker when it runs (§9), so
+  the same sha is legitimately red before a label is fixed and green after. Catapult's `ORC-5`
+  sat in `Checks` for half an hour on a rework whose entire fix was two label corrections. The
+  empty commit is what re-arms the trigger; a host capability to re-run a workflow would buy
+  nothing over it, and the port does not have one. Only on the route that reaches `Checks` — a
+  parked outcome hands the ticket to a human, and a commit asking for a verdict nobody will read
+  is a line in the log that lies about why it is there.
 - **A conflicted branch in `Checks` → the same conflict comment, then `Ready for rework`**,
   without waiting for CI. This is the same event as the rule above, caught earlier, and it has
   to be caught earlier because a conflicted PR never reaches the merge attempt at all: GitHub
@@ -1225,7 +1311,7 @@ read and no author reliably remembers.
   at two.
 - **Second bounce from reconciliation on the same ticket → `Blocked`**, not rework again. Two
   failures to land the same scope is a design problem, not an implementation one, and the
-  author will usually route it to `Designing`. Counted the same way: reconciliation's bounce
+  author will usually route it to `Ready for design`. Counted the same way: reconciliation's bounce
   comments carry a marker.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
@@ -1269,7 +1355,7 @@ invariant is only as strong as one-dispatcher.
 
 | Condition | Action |
 |---|---|
-| State → `Designing` | Design agent run |
+| State → `Ready for design` | Design agent run; its claim writes `Designing` |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
 | State → `In progress` / `Reworking` | Dev agent run |

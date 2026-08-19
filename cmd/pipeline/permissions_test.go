@@ -118,9 +118,13 @@ func rank(level string) int {
 // test below and the preflight test after it, so "what the sweep needs"
 // has one definition rather than two that drift.
 var snapshotReads = map[string]string{
-	"actions":       "read", // ListAgentRuns
+	// ListAgentRuns, and ChecksFor — which reads the CI verdict from
+	// the Actions API rather than from check-runs. There is no `checks`
+	// entry here and there must not be one: a fine-grained token cannot
+	// be granted the check-runs API at all, and every agent claim
+	// builds a snapshot under exactly such a token (SETUP.md).
+	"actions":       "read",
 	"pull-requests": "read", // ListOpenPRs
-	"checks":        "read", // ChecksFor
 	"contents":      "read", // IsAncestor, via compare
 	// State, for projects whose deploy provider is "github" — the
 	// dummy's stand-in for a hosting platform. Read lazily, only

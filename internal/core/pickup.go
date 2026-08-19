@@ -1,10 +1,37 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
+
+// ErrRefused marks a pickup the protocol declined, as opposed to one the
+// harness could not evaluate.
+//
+// The two look identical from a workflow — both are a claim command
+// exiting non-zero — and they want opposite handling. A refusal is the
+// pipeline working: the mutex is held, an agent of this kind is already
+// running, a blocker is open. The ticket is exactly where it should be
+// and a human needs no telling. A snapshot that could not be built is
+// the harness broken, and the author has to hear about it.
+//
+// Catapult's ORC-7 is why this is a type rather than a convention: its
+// claim died building the snapshot, which is the second kind, and the
+// only thing distinguishing it from the first was prose in an error
+// string. So the run was handled as neither — the ticket sat in a state
+// meaning "an agent is working on this" for 23 minutes.
+var ErrRefused = errors.New("pickup refused")
+
+// Refused reports whether an error is the protocol declining a pickup.
+func Refused(err error) bool { return errors.Is(err, ErrRefused) }
+
+// refuse builds a refusal: the message a human reads, carrying the
+// sentinel a caller routes on.
+func refuse(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrRefused, fmt.Sprintf(format, args...))
+}
 
 // VerifyPickup is the agent-side half of enforcement: the claim assertion
 // (DESIGN §6, §9). Tracker enforcement is detect-and-revert, so an agent
@@ -15,10 +42,10 @@ import (
 func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) error {
 	t := s.ticket(ticketID)
 	if t == nil {
-		return fmt.Errorf("pickup: no ticket %q in the project scope — the project filter is part of the queue (DESIGN §2)", ticketID)
+		return refuse("pickup: no ticket %q in the project scope — the project filter is part of the queue (DESIGN §2)", ticketID)
 	}
 	if s.KillSwitch {
-		return fmt.Errorf("pickup %s: kill switch is on", t.Key)
+		return refuse("pickup %s: kill switch is on", t.Key)
 	}
 	// Author-only work is not the pipeline's, whatever state it is in
 	// (DESIGN §8). The sweep already skips these when it dispatches;
@@ -26,7 +53,7 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 	// hand-fired workflow, or a dispatch planned in the beat before the
 	// label was applied.
 	if t.HasLabel(LabelAuthorOnly) {
-		return fmt.Errorf("pickup %s: labelled %s — the author owns this one end to end (DESIGN §8)", t.Key, LabelAuthorOnly)
+		return refuse("pickup %s: labelled %s — the author owns this one end to end (DESIGN §8)", t.Key, LabelAuthorOnly)
 	}
 	// Singularity, asked here because the dispatcher cannot answer it in
 	// time. The sweep's guard reads Run.Live, and that marker is posted
@@ -45,7 +72,7 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 	// decides, so the record exists before the next sweep can read it —
 	// which the move record now gives us somewhere to put.
 	if other := liveRunOfKind(s, t.ID, kind); other != nil {
-		return fmt.Errorf("pickup %s: %s agent already running on %s (run %s) — one agent of a kind at a time (DESIGN §6)",
+		return refuse("pickup %s: %s agent already running on %s (run %s) — one agent of a kind at a time (DESIGN §6)",
 			t.Key, kind, other.Key, other.Run.ID)
 	}
 	// And the same question asked of this ticket, which the check above
@@ -61,48 +88,52 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 	// keeps the resume case — a resumed claim carries the same id its
 	// run was dispatched under — and refuses the second agent.
 	if other := t.OtherLiveRun(kind, runID); other != nil {
-		return fmt.Errorf("pickup %s: %s run %s is already live on this ticket (this run is %s) — one agent of a kind at a time (DESIGN §6)",
+		return refuse("pickup %s: %s run %s is already live on this ticket (this run is %s) — one agent of a kind at a time (DESIGN §6)",
 			t.Key, kind, other.ID, runID)
 	}
 
 	switch kind {
 	case AgentDev:
 		if t.State != protocol.ReadyForDev && t.State != protocol.ReadyForRework {
-			return fmt.Errorf("pickup %s: state is %q, dev picks up from the queues only", t.Key, t.State)
+			return refuse("pickup %s: state is %q, dev picks up from the queues only", t.Key, t.State)
 		}
 		if t.HasLabel(LabelBoundary) {
-			return fmt.Errorf("pickup %s: milestone-boundary tickets are not the dev agent's (DESIGN §10)", t.Key)
+			return refuse("pickup %s: milestone-boundary tickets are not the dev agent's (DESIGN §10)", t.Key)
 		}
 		if t.HasLabel(LabelReEvaluate) {
-			return fmt.Errorf("pickup %s: re-evaluate blocks pickup until design clears it (DESIGN §7)", t.Key)
+			return refuse("pickup %s: re-evaluate blocks pickup until design clears it (DESIGN §7)", t.Key)
 		}
 		if other, mine := MutexHolder(s, t); other != nil {
-			return fmt.Errorf("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
+			return refuse("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
 		}
 		if blockedByOpen(s, t) {
-			return fmt.Errorf("pickup %s: blocked by an open ticket (DESIGN §9)", t.Key)
+			return refuse("pickup %s: blocked by an open ticket (DESIGN §9)", t.Key)
 		}
 		if s.Paused() {
 			b := s.boundaryTicket()
 			if !t.Urgent() && (b == nil || !blocks(t, b.ID)) {
-				return fmt.Errorf("pickup %s: queue is paused for the milestone boundary; only blockers and Urgent run (DESIGN §10)", t.Key)
+				return refuse("pickup %s: queue is paused for the milestone boundary; only blockers and Urgent run (DESIGN §10)", t.Key)
 			}
 		}
 	case AgentDesign:
-		if t.State != protocol.Designing &&
+		// Ready for design, not Designing: the claim is what writes
+		// Designing, the same way dev's claim writes In progress. A
+		// design run that finds the ticket already in Designing is a
+		// second agent on work someone else claimed.
+		if t.State != protocol.ReadyForDesign &&
 			!((t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && t.HasLabel(LabelReEvaluate)) {
-			return fmt.Errorf("pickup %s: design runs on Designing tickets or re-evaluate re-reads, not %q", t.Key, t.State)
+			return refuse("pickup %s: design runs on Ready for design tickets or re-evaluate re-reads, not %q", t.Key, t.State)
 		}
 	case AgentReconcile:
 		if t.State != protocol.Reconciling {
-			return fmt.Errorf("pickup %s: reconcile runs on Reconciling tickets, not %q", t.Key, t.State)
+			return refuse("pickup %s: reconcile runs on Reconciling tickets, not %q", t.Key, t.State)
 		}
 	case AgentBoundary:
 		if !t.IsBoundary() || t.State != protocol.InProgress {
-			return fmt.Errorf("pickup %s: boundary agent runs on the boundary ticket in In progress only (DESIGN §10)", t.Key)
+			return refuse("pickup %s: boundary agent runs on the boundary ticket in In progress only (DESIGN §10)", t.Key)
 		}
 	default:
-		return fmt.Errorf("pickup %s: unknown agent kind %q", t.Key, kind)
+		return refuse("pickup %s: unknown agent kind %q", t.Key, kind)
 	}
 	return nil
 }

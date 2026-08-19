@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,8 @@ func cmdAgent(args []string) error {
 		return cmdAgentFinish(args[1:])
 	case "abort":
 		return cmdAgentAbort(args[1:])
+	case "claim-failed":
+		return cmdAgentClaimFailed(args[1:])
 	case "boundary-archive":
 		return cmdBoundaryArchive(args[1:])
 	case "boundary-file":
@@ -612,6 +615,7 @@ func cmdAgentFinish(args []string) error {
 	// and reading "nobody said" as "nothing landed" would park a ticket
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
+	changedPath := fs.String("changed-files", "", "file with one changed path per line (dev); what a reported mutex label is checked against")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -677,7 +681,16 @@ func cmdAgentFinish(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome); err != nil {
+	// Absent is not fatal here, unlike the audit's own copy of this
+	// flag. A missing list only costs a reported label its check, which
+	// applyDiscoveredLabels says on the ticket — while failing would
+	// land a finished run in Blocked over a file the harness was
+	// supposed to write.
+	changed, err := readPathList(*changedPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := agent.Finish(context.Background(), p, h, res, string(body), *commits, devOutcome, changed); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {
@@ -920,4 +933,66 @@ func harnessFindingsForBoundary(fs []agent.HarnessFinding) string {
 		fmt.Fprintf(&b, "\n### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
 	}
 	return b.String()
+}
+
+// cmdAgentClaimFailed records a run that died before it claimed.
+//
+// Its own subcommand rather than a flag on abort, because abort's whole
+// contract is claim.json — what state the run held, what role to record
+// the move under — and a run that never claimed has none of it. This
+// takes only what the workflow already knows.
+func cmdAgentClaimFailed(args []string) error {
+	fs := flag.NewFlagSet("claim-failed", flag.ContinueOnError)
+	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
+	ticket := fs.String("ticket", "", "ticket key the failed run was dispatched for")
+	kind := fs.String("kind", "", "agent kind: design, dev, reconcile, boundary")
+	runURL := fs.String("run-url", "", "the workflow run that failed")
+	errPath := fs.String("error-file", "", "file holding the claim's stderr")
+	codePath := fs.String("exit-code-file", "", "file holding the claim's exit status; "+
+		fmt.Sprintf("%d means the pickup assertion refused, anything else means the harness failed", exitRefused))
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *ticket == "" || *kind == "" {
+		return fmt.Errorf("agent claim-failed: --ticket and --kind are required")
+	}
+	var reason string
+	if *errPath != "" {
+		raw, err := os.ReadFile(*errPath)
+		// Absent is not fatal: the comment is worth posting with "no
+		// output was captured" in it, and refusing here would put this
+		// command in the same class as the failure it reports.
+		if err == nil {
+			reason = string(raw)
+		}
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	apiKey := os.Getenv("LINEAR_API_KEY")
+	if apiKey == "" {
+		return fmt.Errorf("agent claim-failed: LINEAR_API_KEY is not set")
+	}
+	// Tracker only — no host, no state store. agentDeps would wire both,
+	// and the host is the likeliest thing to have just failed: a
+	// reporter that needs the subsystem it is reporting on is a reporter
+	// that goes quiet exactly when it is needed.
+	p := plane.New(linear.New(apiKey), cfg)
+	// Unreadable defaults to "the harness failed", which parks the
+	// ticket. The two ways to be wrong are not equal: a refusal parked
+	// as a failure is a ticket the author moves back in one click, and a
+	// failure filed as a refusal is a broken pipeline nobody is told
+	// about.
+	refused := false
+	if *codePath != "" {
+		if raw, err := os.ReadFile(*codePath); err == nil {
+			refused = strings.TrimSpace(string(raw)) == fmt.Sprintf("%d", exitRefused)
+		}
+	}
+	if err := agent.ReportClaimFailure(context.Background(), p, *ticket, *kind, *runURL, reason, refused); err != nil {
+		return err
+	}
+	fmt.Printf("claim-failed %s: recorded on the ticket\n", *ticket)
+	return nil
 }

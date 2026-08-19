@@ -11,6 +11,7 @@ type State string
 const (
 	Backlog        State = "backlog"
 	Todo           State = "todo"
+	ReadyForDesign State = "ready_for_design"
 	Designing      State = "designing"
 	DesignReview   State = "design_review"
 	ReadyForDev    State = "ready_for_dev"
@@ -33,6 +34,7 @@ const (
 var AllStates = []State{
 	Backlog,
 	Todo,
+	ReadyForDesign,
 	Designing,
 	DesignReview,
 	ReadyForDev,
@@ -72,6 +74,7 @@ const (
 var Categories = map[State]Category{
 	Backlog:        CategoryBacklog,
 	Todo:           CategoryUnstarted,
+	ReadyForDesign: CategoryUnstarted,
 	Designing:      CategoryStarted,
 	DesignReview:   CategoryStarted,
 	ReadyForDev:    CategoryUnstarted,
@@ -111,6 +114,7 @@ var Categories = map[State]Category{
 var Colors = map[State]string{
 	Backlog:        "#bec2c8", // grey — not scheduled
 	Todo:           "#e2e2e2", // light grey — queued
+	ReadyForDesign: "#e2e2e2", // light grey — queued, like the other queues
 	Designing:      "#9b8fd4", // violet — design agent
 	DesignReview:   "#f2994a", // orange — YOUR sign-off
 	ReadyForDev:    "#e2e2e2", // light grey — queued

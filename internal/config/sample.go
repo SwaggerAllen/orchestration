@@ -20,6 +20,7 @@ func Sample() *Config {
 		States: map[protocol.State]string{
 			protocol.Backlog:        "Backlog",
 			protocol.Todo:           "Todo",
+			protocol.ReadyForDesign: "Ready for design",
 			protocol.Designing:      "Designing",
 			protocol.DesignReview:   "Design review",
 			protocol.ReadyForDev:    "Ready for dev",

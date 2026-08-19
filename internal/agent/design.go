@@ -17,11 +17,20 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
-// ClaimDesign is the design agent's pickup: a normal pass on a Designing
-// ticket, or a re-evaluate re-read on a queue ticket (DESIGN §7). Neither
-// transitions state — Designing already means "design agent, now", and a
-// re-read leaves the queue state alone; the claim is the assertion plus
-// the dispatch marker.
+// ClaimDesign is the design agent's pickup: a normal pass on a ticket in
+// Ready for design, or a re-evaluate re-read on a dev queue ticket
+// (DESIGN §7).
+//
+// A normal pass transitions Ready for design -> Designing, which is
+// state-transition-as-claim, the same mechanism the dev agent uses
+// (DESIGN §6). It did not used to: Designing was both the queue and the
+// agent's own state, so there was nothing to move and no moment at which
+// a ticket stopped being "waiting" and started being "worked on". A run
+// that died before claiming left a ticket asserting an agent was on it —
+// ORC-7 sat that way for 23 minutes.
+//
+// A re-read leaves the state alone, because the ticket is in the dev
+// queue and design is only looking at it.
 func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dispatchURL string, now time.Time) (*ClaimResult, error) {
 	snap, err := p.Build(ctx, now, false)
 	if err != nil {
@@ -41,7 +50,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	}
 
 	mode := "design"
-	if t.State != protocol.Designing {
+	if t.State != protocol.ReadyForDesign {
 		mode = "design-reread"
 	}
 	res := &ClaimResult{
@@ -65,6 +74,16 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 		res.Branch = deriveBranch(t.Key, t.Title)
 	}
 
+	// State-transition-as-claim, then the dispatch marker, in that order
+	// and for the reason dev's claim gives: the move is what takes the
+	// ticket out of the queue, and the marker is what makes the claim
+	// auditable (DESIGN §6).
+	if mode == "design" {
+		if err := p.TransitionTicket(ctx, t.ID, protocol.Designing, core.RoleDesign); err != nil {
+			return nil, err
+		}
+		res.State = protocol.Designing
+	}
 	m := marker.Marker{Kind: marker.Dispatch, Fields: map[string]string{
 		"id":   dispatchID,
 		"kind": "design",
@@ -204,7 +223,11 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
 			return err
 		}
-		return p.TransitionTicket(ctx, res.TicketID, protocol.Designing, core.RoleDesign)
+		// The queue, not Designing: dispatch reads Ready for design, so
+		// demoting into Designing would park the ticket in a state
+		// nothing picks up — a ticket sent back for redesign that no
+		// design pass ever runs on.
+		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDesign, core.RoleDesign)
 	}
 	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
 }

@@ -208,6 +208,8 @@ func pipelineDepth(s protocol.State) int {
 		return 30
 	case protocol.Designing:
 		return 20
+	case protocol.ReadyForDesign:
+		return 15
 	case protocol.Todo:
 		return 10
 	case protocol.Backlog:
@@ -266,9 +268,12 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 	}
 
 	// No forward transition while re-evaluate is set (DESIGN §7, §9) —
-	// except into Designing, which is where the flag gets folded into the
-	// live pass rather than fought (DESIGN §7's Backlog/Todo row).
-	if t.HasLabel(LabelReEvaluate) && forward(last.From, last.To) && last.To != protocol.Designing {
+	// except into Ready for design, which is where the flag gets folded
+	// into the pass that follows rather than fought (DESIGN §7's
+	// Backlog/Todo row). It was Designing until the queue and the
+	// agent's own state were separated; the exception belongs to
+	// whichever one the author moves a ticket into.
+	if t.HasLabel(LabelReEvaluate) && forward(last.From, last.To) && last.To != protocol.ReadyForDesign {
 		return revert("re-evaluate",
 			"This ticket carries re-evaluate: an unresolved collision. It cannot move forward until the owning thread clears the label."), true
 	}
@@ -356,6 +361,16 @@ func writerViolation(t *Ticket, last *Transition) (rule, prose string, bad bool)
 			return deny("sign-off",
 				"Ready for dev is entered by the author's sign-off from Design review, or by a design pass that declared itself decisionless. Neither happened here.")
 		}
+	case protocol.Designing:
+		// Designing is the design agent's claim, exactly as In progress
+		// is the dev agent's. It could not be judged this way while the
+		// author moved tickets into it to queue them: the state meant
+		// both "queued" and "claimed", so no writer rule could be true
+		// of it. Ready for design is what separated the two.
+		if last.Actor != RoleDesign {
+			return deny("claim",
+				"Designing is written by the design agent as its claim, from Ready for design. Queue a ticket by moving it to Ready for design instead.")
+		}
 	case protocol.InProgress, protocol.Reworking:
 		if last.Actor != RoleDev {
 			return deny("claim",
@@ -400,14 +415,14 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 		})
 	}
 
-	// re-evaluate is cleared automatically on entry to Designing from
-	// Backlog or Todo — nothing was built, the live pass absorbs it
-	// (DESIGN §7).
-	if t.State == protocol.Designing && t.HasLabel(LabelReEvaluate) && t.Last != nil &&
+	// re-evaluate is cleared automatically on entry to the design queue
+	// from Backlog or Todo — nothing was built, the pass that follows
+	// absorbs it (DESIGN §7).
+	if t.State == protocol.ReadyForDesign && t.HasLabel(LabelReEvaluate) && t.Last != nil &&
 		(t.Last.From == protocol.Backlog || t.Last.From == protocol.Todo) {
 		acts = append(acts, Action{
 			Kind: ActRemoveLabel, TicketID: t.ID, Label: LabelReEvaluate,
-			Reason: "re-evaluate clears on entry to Designing; the pass folds it in (DESIGN §7)",
+			Reason: "re-evaluate clears on entry to the design queue; the pass folds it in (DESIGN §7)",
 		})
 	}
 
@@ -415,8 +430,8 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 	// built and revision is cheap (DESIGN §7).
 	if t.State == protocol.DesignReview && t.HasLabel(LabelReEvaluate) {
 		acts = append(acts, Action{
-			Kind: ActTransition, TicketID: t.ID, To: protocol.Designing,
-			Reason: "re-evaluate on Design review returns to Designing (DESIGN §7)",
+			Kind: ActTransition, TicketID: t.ID, To: protocol.ReadyForDesign,
+			Reason: "re-evaluate on Design review returns the ticket to the design queue (DESIGN §7)",
 		})
 	}
 	return acts
@@ -761,10 +776,15 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 				continue
 			}
 			switch {
-			case t.State == protocol.Designing && awaitingDispatch(t):
-				// awaitingDispatch keeps this from resurrecting a crashed
-				// run — that is the stale-claim rule's call, and the
-				// author's after it (DESIGN §12).
+			case t.State == protocol.ReadyForDesign:
+				// The queue, not the agent's state. Dispatching from
+				// Designing meant Designing said two things — "queued
+				// for design" and "a design agent is working on this" —
+				// and a run that died before claiming left the second
+				// reading on a ticket nobody had started. No
+				// awaitingDispatch guard is needed here for the same
+				// reason the dev queue needs none: the claim moves the
+				// ticket out, so a live run is never in this state.
 				acts = append(acts, Action{Kind: ActDispatch, TicketID: t.ID, Agent: AgentDesign,
 					Reason: "ticket in Designing with no live run (DESIGN §13)"})
 			case (t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && t.HasLabel(LabelReEvaluate):

@@ -276,7 +276,12 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 // something that will not move by itself.
 func isStarted(t *Ticket) bool {
 	switch t.State {
-	case protocol.Backlog, protocol.Todo:
+	// Ready for design belongs with the other two: it is a queue, and a
+	// queue is work waiting rather than work happening. It used to be
+	// absent from this list because it did not exist — Designing meant
+	// both, and reading a queued ticket as in flight is exactly the
+	// confusion splitting them removed.
+	case protocol.Backlog, protocol.Todo, protocol.ReadyForDesign:
 		return false
 	}
 	return true

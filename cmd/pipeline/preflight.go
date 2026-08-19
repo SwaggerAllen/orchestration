@@ -137,7 +137,7 @@ func cmdPreflight(args []string) error {
 				_, err := gh.ListOpenPRs(ctx)
 				return err
 			}},
-			check{"CI verdicts per PR head", "checks: read", func(ctx context.Context) error {
+			check{"CI verdicts per PR head", "actions: read", func(ctx context.Context) error {
 				sha, err := headSHA(ctx, gh)
 				if err != nil {
 					return err
