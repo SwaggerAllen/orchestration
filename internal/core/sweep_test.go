@@ -1337,3 +1337,53 @@ func TestTheQueueRescueYieldsToTheRulesThatOwnTheTicket(t *testing.T) {
 		t.Errorf("moved an author-only ticket: %+v", *a)
 	}
 }
+
+// DESIGN §7's Checks row, pinned to what is actually implemented. The
+// row used to say "evaluated in place by dev", which described nobody:
+// the dev run ended when the ticket entered Checks, and nothing
+// dispatches an agent to a ticket sitting there.
+//
+// What exists is the hold, and the two ways out of it.
+func TestReEvaluateOnChecksHoldsPromotionAndTravelsOnABounce(t *testing.T) {
+	// Green: promotion stops at the gate. Nothing merges under an
+	// unresolved collision, and nothing here resolves it either.
+	green := tk("T1", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{LabelReEvaluate}
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+	})
+	for _, a := range Sweep(snap(green)) {
+		if a.TicketID == green.ID {
+			t.Errorf("a flagged green ticket was acted on: %+v", a)
+		}
+	}
+	// And the same ticket without the flag does promote, so the hold is
+	// the label's doing rather than something else being in the way.
+	clear := tk("T2", protocol.Checks, func(t *Ticket) {
+		t.CI = CIInfo{Status: CIGreen, RunURL: "https://ci/1"}
+	})
+	if a := find(Sweep(snap(clear)), ActTransition, "T2"); a == nil || a.To != protocol.Reconciling {
+		t.Fatalf("an unflagged green ticket did not promote: %v", a)
+	}
+
+	// Red: the verdict is the more specific scope and the ticket moves,
+	// carrying the flag to the rework queue — where design re-reads it
+	// as it would any queue ticket, which is the resolution path.
+	red := tk("T3", protocol.Checks, func(t *Ticket) {
+		t.Labels = []string{LabelReEvaluate}
+		t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/2", FailedJobs: []string{"gates"}}
+	})
+	s := snap(red)
+	a := find(Sweep(s), ActTransition, "T3")
+	if a == nil || a.To != protocol.ReadyForRework {
+		t.Fatalf("a flagged red ticket did not bounce: %v", a)
+	}
+	// The flag is not stripped on the way, or the re-read never happens.
+	if !red.HasLabel(LabelReEvaluate) {
+		t.Error("the bounce dropped the flag, so nothing would re-read the ticket")
+	}
+	queued := tk("T4", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{LabelReEvaluate} })
+	d := find(Sweep(snap(queued)), ActDispatch, "T4")
+	if d == nil || d.Agent != AgentDesign {
+		t.Errorf("design does not re-read a flagged rework ticket: %v", d)
+	}
+}

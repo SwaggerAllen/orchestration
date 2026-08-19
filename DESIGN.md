@@ -602,7 +602,7 @@ surprise at merge.
 | `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
-| `Checks` | Evaluated in place. No state move. Clear with a comment, or return to `Reworking`. | dev |
+| `Checks` | **Holds promotion.** A green verdict does not advance the ticket while the flag is set, so nothing merges under an unresolved collision. No agent evaluates it here — `Checks` has none. | author, or design once a red or conflicted verdict has sent the ticket to `Ready for rework` |
 | `Reconciling` | Evaluated in place as an additional reconcile item. **Blocks the merge.** | reconcile |
 | `Merged` | Deferred — the change is merged and past recall. Becomes a finding → Triage. | — |
 | `Done` / `Canceled` | No action. If the collision matters it is a new finding → Triage. | — |
@@ -610,6 +610,20 @@ surprise at merge.
 **A `re-evaluate` label is cleared only by the thread owning the flagged ticket's current
 state** — never by the thread that noticed. Otherwise the noticing thread clears its own flag
 and nothing is re-evaluated.
+
+**`Checks` is the one state with no such thread, and the row above says so rather than
+pretending otherwise.** It used to read "evaluated in place by dev", which described nobody: the
+dev run ended when the ticket entered `Checks`, and nothing dispatches an agent to a ticket
+sitting there. What is implemented is the hold — a green verdict stops at the gate — and two
+ways out of it. A red or conflicted verdict moves the ticket to `Ready for rework` carrying the
+flag, where it becomes an ordinary queue re-read and design resolves it. A green one waits for
+the author.
+
+That asymmetry is the honest shape rather than a gap to fill. `Checks` is the last point before
+a merge, so holding is the conservative answer and an automatic clear would be the pipeline
+deciding a collision no longer matters at exactly the moment that judgment is most expensive to
+get wrong. The cost is a green ticket that waits on a human, which the boundary gate then
+surfaces: no milestone completes while a `re-evaluate` label is outstanding (§10).
 
 **All `re-evaluate` labels must be clear before a milestone can complete** (§10).
 
