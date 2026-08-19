@@ -415,6 +415,35 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 		})
 	}
 
+	// A ticket in an agent's own state that no agent ever claimed goes to
+	// the queue that feeds that agent.
+	//
+	// The hole this closes is narrow and reachable. An agent state is
+	// written by a claim, so a hand-move into one is a §9 violation and
+	// gets reverted — but only if the pipeline has a record of the
+	// ticket to judge the arrival against, and "no record means not
+	// judged" is deliberate (§9: treating an absent record as an author
+	// move would revert the whole backlog on the first sweep). So a
+	// ticket created and dragged straight into Designing before the
+	// pipeline had ever written to it was judged by nothing, dispatched
+	// by nothing — no agent state is a dispatch source — and timed out
+	// by nothing, since the stale-claim rule needs a run to have died.
+	// It simply sat.
+	//
+	// Both conditions are what keeps this from overlapping the rules
+	// that already work. A record means revertFor owns it and sends it
+	// back to where it came from, which is the more precise answer. A
+	// run means an agent is either working (leave it) or dead (the
+	// stale-claim rule's), and neither is this.
+	if q, ok := queueFeeding(t.State); ok && t.Run == nil && !t.IsBoundary() && !t.HasLabel(LabelAuthorOnly) {
+		if _, known := arrival(s, t); !known {
+			acts = append(acts, Action{
+				Kind: ActTransition, TicketID: t.ID, To: q,
+				Reason: "no run ever claimed this and the pipeline has no record of it, so it is queued rather than left in a state that says an agent is working (DESIGN §9)",
+			})
+		}
+	}
+
 	// re-evaluate is cleared automatically on entry to the design queue
 	// from Backlog or Todo — nothing was built, the pass that follows
 	// absorbs it (DESIGN §7).
@@ -923,4 +952,26 @@ func blockedByOpen(s *Snapshot, t *Ticket) bool {
 		}
 	}
 	return false
+}
+
+// queueFeeding maps an agent's own state to the queue it is claimed
+// from, for the states where that is a fact rather than a guess.
+//
+// Checks and Reconciling are absent on purpose. Neither is claimed from
+// a queue — Checks is entered by the dev agent flipping the draft off
+// and Reconciling by the control plane on CI green — so there is no
+// queue to return a ticket to, and the nearest candidates would put one
+// somewhere no PR backs it. A ticket hand-dropped into either still
+// sits; it is a stranger place to drop one, and inventing a destination
+// is worse than leaving it visible.
+func queueFeeding(st protocol.State) (protocol.State, bool) {
+	switch st {
+	case protocol.Designing:
+		return protocol.ReadyForDesign, true
+	case protocol.InProgress:
+		return protocol.ReadyForDev, true
+	case protocol.Reworking:
+		return protocol.ReadyForRework, true
+	}
+	return "", false
 }

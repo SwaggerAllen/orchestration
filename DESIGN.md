@@ -206,6 +206,21 @@ no state meaning "a PR is open, awaiting a person."
 
 **Invariant: no ticket moves forward carrying a `re-evaluate` label** (§7).
 
+**A ticket in an agent's own state that no agent ever claimed is queued rather than left there.**
+Agent states are written by a claim, so a hand-move into one is a §9 violation and is reverted
+to where it came from — but only when the pipeline has a record of the ticket to judge the
+arrival against, and *no record means not judged* is deliberate (§9). A ticket created and
+dragged straight into `Designing` before the pipeline had ever written to it was therefore
+judged by nothing, dispatched by nothing — no agent state is a dispatch source — and timed out
+by nothing, since the stale-claim rule needs a run to have died. It sat.
+
+So a ticket in `Designing`, `In progress` or `Reworking` with **no run at all and no record**
+moves to the queue that feeds that agent. Both conditions are what keep the rule from
+overlapping the ones that already work: a record means the revert owns it and sending it back to
+its origin is the more precise answer, and a run means an agent is either working or dead and
+neither is this. `Checks` and `Reconciling` are excluded — neither is claimed from a queue, so
+there is nowhere to return a ticket to that a PR would back.
+
 **A state the config does not name is read by its category when the category settles it.** The
 tracker has states the protocol never mapped — Linear ships built-in `Duplicate` and `Canceled`
 alongside whatever `pipeline setup` created — and they are two taps away in the UI. A resolved
