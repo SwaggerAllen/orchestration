@@ -165,3 +165,33 @@ func TestRenderRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// The shape a project starts with: the file is created in the bootstrap
+// commit, before anything has been refused. It must not parse as one
+// refusal whose text is the document's title.
+func TestParseTreatsATitleOnlyFileAsNoEntries(t *testing.T) {
+	for _, body := range []string{
+		"# Confirmed non-asks\n",
+		"\n# Confirmed non-asks\n\n",
+		"",
+		"   \n",
+	} {
+		if got := Parse(body); len(got) != 0 {
+			t.Errorf("Parse(%q) = %d entries (%v), want none", body, len(got), titles(got))
+		}
+	}
+}
+
+// But a legacy flat file under that same title keeps every word of it.
+func TestParseKeepsAFlatFilesContentUnderItsTitle(t *testing.T) {
+	got := Parse("# Confirmed non-asks\n\n- No dark mode: two palettes, one designer.\n")
+	if len(got) != 1 || !got[0].IsUniversal() {
+		t.Fatalf("got %d entries", len(got))
+	}
+	if !strings.Contains(got[0].Body, "No dark mode") {
+		t.Errorf("content lost: %q", got[0].Body)
+	}
+	if strings.Contains(got[0].Body, "Confirmed non-asks") {
+		t.Errorf("the document title was carried in as a refusal: %q", got[0].Body)
+	}
+}

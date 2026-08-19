@@ -347,9 +347,10 @@ because a refusal that quietly disappears is one the pipeline proposes again nex
 
 The harness inlines it rather than telling a pass where to find it, for the same reason it
 inlines the scope: a prompt whose most important input is "go read this file" is a prompt whose
-most important input is optional. The section says which of three things happened: here it is,
-the repo records none, or the read failed. The last two look identical in an empty section and
-license very different confidence. Proposing a recorded non-ask isn't forbidden, but do it
+most important input is optional. The section says which of four things happened: here it is,
+the file records none yet, none of them are scoped to this ticket, or the read failed. They
+look identical in an empty section and license very different confidence — only one of them is
+permission. Proposing a recorded non-ask isn't forbidden, but do it
 knowing you are arguing against a recorded decision, and say so in the issue.
 
 **Every pass gets it, and each gets only the entries that bind it.** Both halves of that
