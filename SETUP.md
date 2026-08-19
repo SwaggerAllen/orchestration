@@ -378,7 +378,7 @@ later add them to the protocol set — today they are ignored.
 1. Merge the scaffold PR on `orchestration-dummy` (its own `ci` run is
    the first live gate check).
 2. Create a first milestone in Test orchestration and a seed ticket in it
-   (state **Todo**, then move to **Designing** when ready), e.g. "Add a
+   (state **Todo**, then move to **Ready for design** when ready), e.g. "Add a
    farewell to the home screen" — small, touches one screen and one
    system, exercises the whole loop.
 3. Trigger a sweep: Actions (dummy) → **pipeline-sweep** → Run

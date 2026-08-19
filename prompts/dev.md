@@ -73,7 +73,7 @@ the diff.
   - `pushback` — the design can't be built as drawn (DESIGN §2.7). Say
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
-    `Designing`, and they decide whether it is redesigned or rescoped.
+    the design queue, and they decide whether it is redesigned or rescoped.
   - `author-only` — the work is somewhere you cannot land a change.
     Two kinds, and both are facts about your run rather than judgments:
 

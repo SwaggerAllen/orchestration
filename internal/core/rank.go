@@ -13,6 +13,7 @@ import (
 var precedenceRank = map[protocol.State]int{
 	protocol.Backlog:        0,
 	protocol.Todo:           10,
+	protocol.ReadyForDesign: 15,
 	protocol.Designing:      20,
 	protocol.DesignReview:   30,
 	protocol.ReadyForDev:    40,
@@ -55,16 +56,17 @@ func Precedes(a, b *Ticket) bool {
 var forwardRank = map[protocol.State]int{
 	protocol.Backlog:        0,
 	protocol.Todo:           1,
-	protocol.Designing:      2,
-	protocol.DesignReview:   3,
-	protocol.ReadyForDev:    4,
-	protocol.ReadyForRework: 4,
-	protocol.InProgress:     5,
-	protocol.Reworking:      5,
-	protocol.Checks:         6,
-	protocol.Reconciling:    7,
-	protocol.Merged:         8,
-	protocol.Done:           9,
+	protocol.ReadyForDesign: 2,
+	protocol.Designing:      3,
+	protocol.DesignReview:   4,
+	protocol.ReadyForDev:    5,
+	protocol.ReadyForRework: 5,
+	protocol.InProgress:     6,
+	protocol.Reworking:      6,
+	protocol.Checks:         7,
+	protocol.Reconciling:    8,
+	protocol.Merged:         9,
+	protocol.Done:           10,
 }
 
 // forward reports whether a transition moves toward Done.

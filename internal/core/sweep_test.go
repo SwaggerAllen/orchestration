@@ -1202,3 +1202,64 @@ func TestEveryPickupRefusalIsMarkedAsOne(t *testing.T) {
 		t.Error("a harness failure reads as a refusal, so nobody would be told about it")
 	}
 }
+
+// The whole point of the design queue: dispatch reads it, and the claim
+// is what moves the ticket out. Designing used to be both, so a run that
+// died before claiming left a ticket asserting an agent was working on
+// it — ORC-7 sat that way for 23 minutes.
+func TestDesignDispatchesFromTheQueueAndNotFromDesigning(t *testing.T) {
+	queued := tk("T1", protocol.ReadyForDesign)
+	if d := find(Sweep(snap(queued)), ActDispatch, "T1"); d == nil || d.Agent != AgentDesign {
+		t.Errorf("a ticket in the design queue was not dispatched: %v", d)
+	}
+
+	// A ticket already in Designing has been claimed. Dispatching again
+	// would be a second agent on somebody else's work, and it is the
+	// stale-claim rule's business if the first one died.
+	claimed := tk("T2", protocol.Designing, func(t *Ticket) {
+		t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: true}
+	})
+	if d := find(Sweep(snap(claimed)), ActDispatch, "T2"); d != nil {
+		t.Errorf("dispatched against a claimed ticket: %+v", *d)
+	}
+	// Including when its run is dead: that is a stale claim, not a queue.
+	dead := tk("T3", protocol.Designing, func(t *Ticket) {
+		t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: false, EndedAt: t0.Add(-time.Hour)}
+	})
+	if d := find(Sweep(snap(dead)), ActDispatch, "T3"); d != nil {
+		t.Errorf("resurrected a dead claim as a fresh dispatch: %+v", *d)
+	}
+}
+
+// Designing is the design agent's claim, so a hand-move into it is the
+// same violation a hand-move into In progress is. This rule could not
+// exist while the author moved tickets into Designing to queue them.
+func TestDesigningIsWrittenOnlyByTheDesignClaim(t *testing.T) {
+	handMoved := tk("T1", protocol.Designing, arrived(protocol.Todo, RoleAuthor))
+	a := find(Sweep(snap(handMoved)), ActTransition, "T1")
+	if a == nil || a.Marker.Fields["rule"] != "claim" {
+		t.Fatalf("a hand-moved Designing was not reverted: %v", a)
+	}
+	if a.To != protocol.Todo {
+		t.Errorf("revert target = %q, want the recorded origin", a.To)
+	}
+
+	// The claim itself is fine.
+	claimed := tk("T2", protocol.Designing, arrived(protocol.ReadyForDesign, RoleDesign))
+	if a := find(Sweep(snap(claimed)), ActTransition, "T2"); a != nil && a.Marker != nil &&
+		a.Marker.Fields["rule"] == "claim" {
+		t.Errorf("the design agent's own claim was reverted: %+v", *a)
+	}
+}
+
+// A queued ticket is waiting, not working. The order report separates
+// "ready now" from "in flight", and Ready for design belongs on the
+// first side — reading it as in flight is the confusion the split
+// removed.
+func TestTheDesignQueueIsNotInFlight(t *testing.T) {
+	queued := tk("T1", protocol.ReadyForDesign)
+	o := ComputeOrder(snap(queued), "")
+	if got := layerOf(o, "T1"); got != LayerReady {
+		t.Errorf("a queued ticket is in %q, want %q", got, LayerReady)
+	}
+}

@@ -67,7 +67,8 @@ narrative/system docs get committed. Scratch HTML is never committed.
 
 ## Outcomes (write JSON to the outcome path under Mechanics)
 
-Mode `design` — a normal pass on a Designing ticket:
+Mode `design` — a normal pass. The harness claimed this ticket out of
+`Ready for design` into `Designing` before you started:
 - `{"outcome": "artifacts", "screens": ["home"], "systems": ["billing"], "summary": "..."}`
   — you produced artifacts and/or a systems-doc diff; commit them. The
   harness opens the draft PR and hands the ticket to the author, who
@@ -83,7 +84,7 @@ Mode `design-reread` — a queue ticket flagged re-evaluate (DESIGN §7):
 - `{"outcome": "clear", "summary": "why the scope still holds"}` — the
   collision doesn't invalidate this ticket; it stays queued.
 - `{"outcome": "demote", "summary": "what moved and why it matters"}` —
-  the ground moved; the ticket returns to Designing for a fresh pass.
+  the ground moved; the ticket returns to the design queue for a fresh pass.
   Do not redesign now — the demotion queues that work.
 
 Then stop. The harness pushes commits, manages the PR, and moves the

@@ -114,10 +114,14 @@ func Load(path string) (*Scenario, error) {
 // seedableStates are where an author puts real work. Anything further
 // along is pipeline-owned: seeding into it would rehearse a state the
 // pipeline never creates, and prove nothing about how it got there.
+//
+// Designing left this set when the design queue arrived: it is now the
+// design agent's claim, written by the pipeline, and seeding into it
+// would rehearse a ticket that no run ever picked up.
 var seedableStates = map[protocol.State]bool{
-	protocol.Backlog:   true,
-	protocol.Todo:      true,
-	protocol.Designing: true,
+	protocol.Backlog:        true,
+	protocol.Todo:           true,
+	protocol.ReadyForDesign: true,
 }
 
 func (s *Scenario) Validate() error {
