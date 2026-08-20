@@ -265,7 +265,7 @@ func TestModelRunPassesThePromptOnStdin(t *testing.T) {
 	}
 }
 
-// The CLI version must stay pinned.
+// The CLI must come from the stable dist-tag, resolved and printed.
 //
 // `@latest` made every agent run in every project depend on a
 // third-party publish that can land at any moment with no commit
@@ -277,7 +277,7 @@ func TestModelRunPassesThePromptOnStdin(t *testing.T) {
 // Guarded because `@latest` is the obvious thing to write and reads as
 // helpful right up until a publish nobody here made takes the pipeline
 // down.
-func TestModelRunPinsTheCLIVersion(t *testing.T) {
+func TestModelRunFollowsTheStableChannel(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -286,8 +286,19 @@ func TestModelRunPinsTheCLIVersion(t *testing.T) {
 	if strings.Contains(body, "claude-code@latest") {
 		t.Error("the CLI is installed from @latest; a publish nobody here made can take every project down")
 	}
-	if !strings.Contains(body, `CLI_VERSION="`) {
-		t.Error("no pinned CLI_VERSION")
+	if !strings.Contains(body, `CLI_TAG="stable"`) {
+		t.Error("the CLI does not follow the stable dist-tag")
+	}
+	// An unresolvable tag must not become `claude-code@`, which installs
+	// nothing and fails as if the model had.
+	if !strings.Contains(body, `CLI_FALLBACK="`) {
+		t.Error("no fallback for a registry that cannot be asked")
+	}
+	// The tag is what this follows; the number is what a failed run has
+	// to be able to name. ORC-6 was diagnosed by bracketing the break
+	// against a version nobody had recorded.
+	if !strings.Contains(body, `echo "claude-code $CLI_VERSION`) {
+		t.Error("the resolved version is never printed, so a failed run cannot say which CLI it ran")
 	}
 	// Both attempts, subscription and API key, or the failover silently
 	// runs a different version from the one that was tested.
