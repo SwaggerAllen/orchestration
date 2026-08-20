@@ -725,6 +725,15 @@ step 5 already covered them.
    | `scope:` | comma-separated screen and system labels — the same names as the mutex labels — or `universal`. Must be the first line under the heading; further down it is read as prose |
    | everything else | the reason, free prose |
 
+   **Most refusals do not go in this file.** One about a single system or
+   screen goes in that doc, beside the decision it is the negative half
+   of. The file is for the two kinds with no such home: refusals every
+   pass must see, and refusals spanning systems, which a per-doc home
+   could serve only by copying into each one (DESIGN §4). A `scope:`
+   naming exactly one doc is the sign the entry belongs in that doc — so
+   in a healthy file, most entries are `universal` and the rest name two
+   or more.
+
    The harness selects on `scope:` rather than inlining the file whole,
    so a pass reads the universal entries plus the ones scoped to what it
    is working on. Two consequences worth knowing before you write the

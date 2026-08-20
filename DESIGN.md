@@ -360,6 +360,30 @@ design agent maintains it like any other design artifact: entries are added and 
 same commit as the artifacts, reviewed in the same Design review sign-off, and never deleted,
 because a refusal that quietly disappears is one the pipeline proposes again next quarter.
 
+**Most refusals do not belong in it.** A refusal about one system or one screen goes in that
+doc, beside the decision it is the negative half of — where the pass that could violate it is
+already reading, and where it cannot drift from the positive rule it qualifies. The distinction
+is placement, not category: this file is inlined into every scoped prompt, while a system doc
+is read on the way to changing that system, which is the cheaper and better-aimed moment.
+
+**Two kinds have no such home, and they are what the file is for.** Refusals every pass must
+see, and refusals spanning systems — which a per-doc home could serve only by copying into each
+one, and a copy is drift with extra steps. The tell for the second kind is two docs citing a
+rule that neither of them states. A `scope:` naming exactly one doc is therefore the sign that
+an entry is in the wrong place.
+
+**Check the owning doc before writing an entry.** If it already refuses this, that is the
+record and a second copy is the drift. An argument that is genuinely new belongs in that doc's
+own bullet rather than in a parallel entry beside it.
+
+**A reversed decision is not a refusal**, and its record belongs where the reversal was argued.
+A struck-through entry left in the file makes every scoped pass read what is no longer true —
+which is the failure "never delete" exists to prevent, arrived at from the other direction.
+
+**Relocating an entry is the author's move, not a pass's.** The citations that point at it move
+with it, and a pass that shuffled entries between documents would break references it cannot
+see. A pass that believes an entry is in the wrong place says so in its summary.
+
 The harness inlines it rather than telling a pass where to find it, for the same reason it
 inlines the scope: a prompt whose most important input is "go read this file" is a prompt whose
 most important input is optional. The section says which of four things happened: here it is,
@@ -384,11 +408,13 @@ Catapult's ORC-84: 83468 bytes, inside a design prompt that was 92825 bytes befo
 the ticket, from three files, one of which was 65% of the total. That is what made giving it to
 every pass affordable rather than three times worse.
 
-**So an entry carries a scope: a list of the screen and system labels it is about, or
-`universal`.** A list, rather than moving each entry into the doc that owns it: the docs would
-scope entries for free off the file maps, but then a refusal touching several things is either
-marked global — back in every prompt — or copied into each doc, which is drift with extra
-steps. A list has one representation for that case.
+**So an entry carries a scope: a list of the screen and system labels it spans, or
+`universal`.** A list rather than a per-doc home *for these entries specifically*, and the two
+rules fit together rather than competing: a refusal about one doc goes in that doc, and a
+refusal spanning several has no such home — a per-doc version would be either marked global,
+which puts it back in every prompt, or copied into each doc, which is drift with extra steps. A
+list has one representation for exactly that case, and it is the only case left in the file
+besides the universal ones.
 
 An entry is selected when it is universal, when the ticket carries one of its labels, or when
 one of those labels' names appears in the ticket's own words. That last clause is load-bearing

@@ -47,18 +47,42 @@ never committed.
   could read yet — so an unannounced one costs the author the review
   that would have caught it.
 - **Read the confirmed non-asks** below before proposing anything, and
-  **maintain the file** as you would a system doc. It sits in the repo
-  beside `screens/` and `systems/`, the section below inlines it, and
-  the path to write to is named there. When a pass settles that
-  something is deliberately not wanted — the author pushed back, or you
+  **record what this pass rules out** — the author pushed back, or you
   ruled an approach out for a reason the next pass would re-litigate —
-  add an entry with its reason, in the same commit as your artifacts.
-  Add and amend; never delete. Arguing against a recorded decision is
-  allowed, silently contradicting it is not.
+  in the same commit as your artifacts. Add and amend; never delete.
+  Arguing against a recorded decision is allowed, silently contradicting
+  it is not.
 
-  **Every entry you add carries a scope**, because the section below is
-  selected rather than complete — a pass is shown the refusals that bind
-  it, and an entry with no scope is shown to every pass forever:
+  **Where it goes is the part to get right, and it is usually not the
+  non-asks file.**
+
+  **A refusal about one system or one screen goes in that doc**, beside
+  the decision it is the negative half of. That puts it where the pass
+  that could violate it is already reading, and where it cannot drift
+  from the positive rule it qualifies. The non-asks file is inlined into
+  every scoped prompt; a system doc is read on the way to changing that
+  system, which is the cheaper and better-aimed moment.
+
+  **Two kinds have no such home and belong in the file.** Refusals every
+  pass must see, and refusals spanning systems — which a per-doc home
+  could serve only by copying into each one. The tell for the second
+  kind is two docs citing a rule that neither of them states.
+
+  **Check the owning doc before you write an entry.** If it already
+  refuses this, you are done: a second copy is the drift, not the
+  record. If your argument is genuinely new, add it to that doc's own
+  bullet rather than opening a parallel entry beside it.
+
+  **A reversed decision is not a refusal.** Its record belongs where the
+  reversal was argued. A struck-through entry left in the file makes
+  every scoped pass read what is no longer true.
+
+  **Relocating an entry is the author's move, not yours** — the
+  citations that point at it move with it. If an entry is in the wrong
+  place, say so in your summary.
+
+  An entry that does belong in the file carries a scope, because the
+  section below is selected rather than complete:
 
   ```markdown
   ## No client-side validation on the cap form
@@ -67,13 +91,13 @@ never committed.
   The server is the only authority; a second copy of the rules drifts.
   ```
 
-  Scope is a list of the screen and system labels the refusal is about —
-  the same names as the mutex labels — or `universal` for one that binds
-  every pass regardless of what it touches. List every name it touches
-  rather than picking the closest one; the cost of an extra name is a
-  pass reading one more paragraph, and the cost of a missing one is the
-  refusal being invisible to the pass that would have broken it. When in
-  doubt, `universal`.
+  Scope is a list of the screen and system labels the refusal spans —
+  the same names as the mutex labels — or `universal`. A scope naming
+  exactly one doc is the sign the entry belongs in that doc instead.
+  List every name it spans rather than picking the closest one: the cost
+  of an extra name is a pass reading one more paragraph, and the cost of
+  a missing one is the refusal being invisible to the pass that would
+  have broken it. When in doubt, `universal`.
 
   **Ask again when your scope grows.** The section below was selected
   before you started, from the ticket's words and whatever labels it

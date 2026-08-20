@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+// A deliberately mixed fixture, not a model of a healthy file. Under
+// the placement rule (DESIGN §4) a single-doc scope means the entry
+// belongs in that doc, so `screen:roster` here is a misplaced entry —
+// which is exactly why selection has to keep handling it. Misplaced
+// entries exist in real files, and the parser's job is to select them
+// correctly, not to have opinions about where they should live.
 const doc = `# Confirmed non-asks
 
 Everything here is something the author decided against.
