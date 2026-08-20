@@ -90,6 +90,27 @@ runs:
         # else is added — and that document only grows, because passes
         # append to it and never delete.
         #
+        # The CLI version is pinned, and that is the whole point.
+        #
+        # It was `@latest`, which made every agent run in every project
+        # depend on a third-party publish that can land at any moment
+        # with no commit anywhere in this system. On 2026-08-19 one did:
+        # 2.1.237 went out at 23:57Z and, installed this way, reports
+        # "claude native binary not installed" and exits 1 — its
+        # platform-native binary does not arrive through `npx --yes`.
+        # Catapult's ORC-6 hit it an hour later and every agent run in
+        # the project failed identically until this was pinned.
+        #
+        # Verified both directions on the same machine with the same
+        # command: 2.1.236 answers, 2.1.237 fails. Nothing in the
+        # pipeline had changed.
+        #
+        # Bumping is a deliberate one-line edit that goes through CI, and
+        # that is the trade: a version this pipeline has never run is not
+        # a version to find out about from a red ticket. Raise it when
+        # there is a reason to, not on a schedule.
+        CLI_VERSION="2.1.236"
+
         # `-p/--print` is a boolean flag and the prompt is a positional
         # argument, so the prompt was never `-p`'s value — it was its own
         # argv element, and that is the one the cap applies to. Dropping
@@ -104,13 +125,13 @@ runs:
           case "$1" in
           subscription)
             env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN="$SUBSCRIPTION_TOKEN" \
-              npx --yes @anthropic-ai/claude-code@latest \
+              npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
                 --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
           api)
             env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY="$API_KEY" \
-              npx --yes @anthropic-ai/claude-code@latest \
+              npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
                 --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
