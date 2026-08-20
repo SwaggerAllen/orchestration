@@ -90,6 +90,51 @@ runs:
         # else is added — and that document only grows, because passes
         # append to it and never delete.
         #
+        # The CLI comes from the `stable` dist-tag, never `latest`.
+        #
+        # It was `latest`, which made every agent run in every project
+        # depend on a third-party publish that can land at any moment
+        # with no commit anywhere in this system. On 2026-08-19 one did:
+        # 2.1.237 went out at 23:57Z and, installed this way, reports
+        # "claude native binary not installed" and exits 1 — its
+        # platform-native binary does not arrive through `npx --yes`.
+        # Catapult's ORC-6 hit it an hour later and every agent run in
+        # the project failed identically.
+        #
+        # `stable` is a version somebody deliberately promoted, which is
+        # a different claim from "newest thing published". It lagged
+        # `latest` by nine versions the day this was written, and that
+        # lag is the feature.
+        #
+        # A tag rather than an exact pin, because a pin's failure mode is
+        # nobody moving it: it would sit at whatever was current the day
+        # the pipeline last broke, accumulating a year of fixes nobody
+        # opted out of. The tag still moves under us — the same class of
+        # hazard, much rarer, and now attributable, which is the other
+        # half of this.
+        #
+        # Resolved to a concrete version first, and printed. The tag is
+        # what this follows; the number is what a failed run has to be
+        # able to name. Diagnosing ORC-6 meant bracketing the break
+        # against a version nobody had recorded — the log said which
+        # credential was used and not which CLI.
+        CLI_TAG="stable"
+        # Used only when the registry cannot be asked. Known-good rather
+        # than arbitrary: it is what unblocked ORC-6, verified by hand.
+        # An unresolvable tag must not become `claude-code@`, which
+        # installs nothing and fails as if the model had.
+        CLI_FALLBACK="2.1.236"
+        CLI_VERSION="$(npm view "@anthropic-ai/claude-code@$CLI_TAG" version 2>/dev/null || true)"
+        case "$CLI_VERSION" in
+        [0-9]*)
+          echo "claude-code $CLI_VERSION (dist-tag: $CLI_TAG)"
+          ;;
+        *)
+          echo "::warning::could not resolve the $CLI_TAG dist-tag; using the pinned fallback $CLI_FALLBACK"
+          CLI_VERSION="$CLI_FALLBACK"
+          ;;
+        esac
+
         # `-p/--print` is a boolean flag and the prompt is a positional
         # argument, so the prompt was never `-p`'s value — it was its own
         # argv element, and that is the one the cap applies to. Dropping
@@ -104,13 +149,13 @@ runs:
           case "$1" in
           subscription)
             env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN="$SUBSCRIPTION_TOKEN" \
-              npx --yes @anthropic-ai/claude-code@latest \
+              npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
                 --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
           api)
             env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY="$API_KEY" \
-              npx --yes @anthropic-ai/claude-code@latest \
+              npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
                 --dangerously-skip-permissions < "$PROMPT_PATH"
             ;;
