@@ -851,6 +851,11 @@ The report says what to start next; the control plane starts it. The sweep moves
   at equal state falls through to age, and age is not the layering: a ticket freed later by a
   merge can be older than one that has been startable all along, and would go first. A queue one
   deep cannot disagree with the report.
+
+  `Designing` is not the queue: a ticket the design agent has claimed has left it, and the next
+  may take its place. And an `author-only` ticket parked in the queue does not count as occupying
+  it, because the dispatcher skips those too (§5) — it would sit there for as long as the author
+  left it, and counting it would stop every promotion on the project for that whole time.
 - **It carries the current milestone.** Not another milestone — §2.9 works them in sequence — and
   not none. A milestone-less ticket in `Todo` is startable but uncommitted, and assigning the
   milestone is the commitment (§10), so promoting one commits work as a side effect. It does that
@@ -858,13 +863,14 @@ The report says what to start next; the control plane starts it. The sweep moves
   the assignment still lagging sits in `Todo` with no milestone, and so does a ticket left
   uncommitted on purpose. The report names both and says it cannot tell them apart; the
   automation moves neither.
-- **Every blocker has reached `Merged`.** `Merged`, `Done` and `Canceled` all satisfy it; anything
-  earlier does not. `Merged` rather than `Done` because a design pass reads `main`, and a merged
-  blocker's work is on `main` — what remains of that ticket's life is the deploy and the
-  post-deploy check, neither of which changes anything the pass would read. **The relaxation is
-  design's alone.** Dev pickup keeps `Resolved`, because a ticket that fails its post-deploy check
-  goes to `Blocked`, and code built on top of it would have to be re-examined; a design that
-  described it would only have to be re-read.
+- **Every blocker has reached `Merged`.** `Merged`, `Done` and `Canceled` all satisfy it; nothing
+  else does, `Blocked` included — a ticket that merged and then failed its post-deploy check has
+  its work on `main` and a human owing a judgment on it, and one of the judgments available is a
+  revert. `Merged` rather than `Done` because a design pass reads `main`, and a merged blocker's
+  work is on `main` — what remains of that ticket's life is the deploy and the post-deploy check,
+  neither of which changes anything the pass would read. **The relaxation is design's alone.** Dev
+  pickup keeps `Resolved`, because code built on top of a blocker that fails its check would have
+  to be re-examined; a design that described it would only have to be re-read.
 - **The queue is not paused.** Nothing promotes while a boundary ticket is open, `Urgent`
   included. The pause exists so a milestone's scope stops changing while it is being audited, and
   a design pass is the one thing that adds to that scope: new artifacts, new mutex labels, in the

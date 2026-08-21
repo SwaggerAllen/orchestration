@@ -57,10 +57,14 @@ func TestBoundaryTodoIsTheAuthorsPass(t *testing.T) {
 		t.Errorf("the boundary ticket's Todo is the author's manual pass (DESIGN 10), got %v", a)
 	}
 
-	// An ordinary Todo is nobody's.
-	ord := tk("T2", protocol.Todo)
+	// An ordinary Todo is nobody's. Held there by a blocker, because an
+	// unblocked one no longer settles in Todo — the sweep promotes it
+	// into the design queue on the same pass, and assignment skips a
+	// ticket the pass is already moving (DESIGN §8).
+	held := tk("T0", protocol.InProgress)
+	ord := tk("T2", protocol.Todo, func(t *Ticket) { t.BlockedBy = []string{"T0"} })
 	ord.AssigneeID = "usr_author"
-	s2 := snap(ord)
+	s2 := snap(held, ord)
 	s2.AuthorID = "usr_author"
 	if a := find(Sweep(s2), ActAssign, "T2"); a == nil || a.Assignee != "" {
 		t.Errorf("ordinary Todo must unassign, got %v", a)

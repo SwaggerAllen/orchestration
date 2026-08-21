@@ -4,8 +4,10 @@
     {"kind": "milestone", "name": "M1"},
     {"kind": "seed", "key": "T1", "state": "backlog", "milestone": "M1"},
     {"kind": "seed", "key": "T2", "state": "backlog", "milestone": "M2"},
+    {"kind": "seed", "key": "T3", "state": "backlog", "milestone": "M1", "blockedBy": ["T2"]},
     {"kind": "sweep"},
-    {"kind": "expect", "key": "T1", "state": "todo"},
-    {"kind": "expect", "key": "T2", "state": "backlog"}
+    {"kind": "expect", "key": "T1", "state": "ready_for_design"},
+    {"kind": "expect", "key": "T2", "state": "backlog"},
+    {"kind": "expect", "key": "T3", "state": "todo"}
   ]
 }

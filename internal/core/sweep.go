@@ -102,6 +102,16 @@ func Sweep(s *Snapshot) []Action {
 	// against the state they replaced.
 	plan(boundaryFor(w))
 
+	// Promotion into the design queue, after both of those and for both
+	// their reasons. After the resolutions, so a blocker that reached
+	// Merged or Done on this pass counts as satisfied rather than being
+	// read from the state it just left. After the boundary, so a
+	// boundary ticket created moments ago pauses the queue immediately —
+	// the alternative promotes one last ticket into a milestone that is
+	// closing, which is precisely the scope change the pause exists to
+	// prevent (DESIGN §8, §10).
+	plan(promotionFor(w, moved))
+
 	// Assignment after every transition is known: it is derived from the
 	// state a sweep leaves behind, and a ticket this pass is moving gets
 	// its assignee on the next one rather than one keystroke early.
@@ -892,6 +902,35 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 			Reason: "boundary open: live suite before the author's pass (DESIGN §10)"})
 	}
 	return acts
+}
+
+// promotionFor moves the head of the order into the design queue.
+//
+// One transition at most, because the queue is kept one deep: the design
+// agent is singular (DESIGN §6), so depth buys no throughput, and what it
+// costs is the ordering. Two tickets sitting in `Ready for design` are
+// separated by the precedence rule alone, which at equal state falls
+// through to age — so a ticket freed later by a merge can be older than
+// one that has been startable all along, and would go first. A queue one
+// deep cannot disagree with the report.
+//
+// No marker and no comment. Every other rule in this file that posts one
+// is reporting a judgment the author might dispute — a revert, an
+// escalation, a stale claim. This is the pipeline doing the thing the
+// order report already said it would do, on every ticket, forever; a
+// comment per promotion would be the noisiest marker in the project and
+// would say nothing the state history does not. The move is recorded and
+// attributed like any control-plane write, which is what keeps §9 from
+// judging it as an author move.
+func promotionFor(s *Snapshot, moved map[string]bool) []Action {
+	p := nextPromotion(s, moved)
+	if p.Ticket == nil {
+		return nil
+	}
+	return []Action{{
+		Kind: ActTransition, TicketID: p.Ticket.ID, To: protocol.ReadyForDesign,
+		Reason: "head of the order, every blocker at Merged or later, design queue empty (DESIGN §8)",
+	}}
 }
 
 // openBlockerFor reports whether any open ticket blocks the given one.
