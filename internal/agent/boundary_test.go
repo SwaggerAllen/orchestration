@@ -641,3 +641,96 @@ func TestClaimBoundaryCarriesTheDebtBacklog(t *testing.T) {
 		}
 	}
 }
+
+// The two kinds have to survive the round trip through the marker, or
+// the boundary sees every finding as a pipeline problem — which is the
+// laundering the field exists to stop.
+func TestFindingKindSurvivesTheMarker(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "arg", protocol.InProgress)
+
+	if err := PostHarnessFindings(ctx, p, i.ID, []HarnessFinding{
+		{Title: "Preflight passes without checking", Detail: "d1", Dedupe: "k-harness"},
+		{Title: "A doc's worked example the loader rejects", Detail: "d2", Dedupe: "k-project", Kind: KindProject},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byKey := map[string]HarnessFinding{}
+	for _, f := range CollectHarnessFindings(snap.Tickets) {
+		byKey[f.Dedupe] = f
+	}
+	if len(byKey) != 2 {
+		t.Fatalf("collected %d findings", len(byKey))
+	}
+	if byKey["k-harness"].IsProject() {
+		t.Error("a harness finding came back as a project finding")
+	}
+	if !byKey["k-project"].IsProject() {
+		t.Errorf("the project kind was lost in the marker: %+v", byKey["k-project"])
+	}
+	// The prose says which it is too — the author reads the ticket, not
+	// the marker.
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	var bodies string
+	for _, c := range issues[0].Comments {
+		bodies += c.Body
+	}
+	if !strings.Contains(bodies, "**Project finding:") || !strings.Contains(bodies, "**Harness finding:") {
+		t.Errorf("the comments do not distinguish the two kinds:\n%s", bodies)
+	}
+}
+
+// Absent reads as harness. Every finding recorded before the field
+// existed has no kind, and reading those as project findings would move
+// a milestone's worth of pipeline problems into the debt backlog on the
+// first run after an upgrade.
+func TestFindingWithoutAKindIsHarness(t *testing.T) {
+	if (HarnessFinding{Dedupe: "k"}).IsProject() {
+		t.Error("a finding with no kind read as a project finding")
+	}
+}
+
+// Every carried finding leaves the pass adjudicated. ORC-90 carried
+// twelve and neither filed nor declined any of them, and nothing said
+// so — they were on tickets the archive step had already deleted.
+func TestUnadjudicatedNamesWhatTheScanPassedOver(t *testing.T) {
+	carried := []HarnessFinding{
+		{Dedupe: "k-filed", Title: "filed"},
+		{Dedupe: "k-declined", Title: "declined"},
+		{Dedupe: "k-dropped", Title: "dropped on the floor"},
+	}
+	ps := &Proposals{
+		Proposals: []Proposal{{Dedupe: "k-filed"}},
+		Declined:  []Decline{{Dedupe: "k-declined", Why: "fixed last week"}},
+	}
+	got := unadjudicated(carried, ps)
+	if len(got) != 1 || !strings.Contains(got[0], "k-dropped") {
+		t.Errorf("unadjudicated = %v, want only the dropped one", got)
+	}
+	// And a pass that adjudicated everything reports nothing, or the
+	// warning becomes noise the author learns to skip.
+	ps.Declined = append(ps.Declined, Decline{Dedupe: "k-dropped", Why: "not worth a ticket"})
+	if got := unadjudicated(carried, ps); len(got) != 0 {
+		t.Errorf("a fully adjudicated scan still reported %v", got)
+	}
+}
+
+// A decline with no reason is the silent drop it replaces, one field
+// wider.
+func TestProposalsRefuseADeclineWithoutAReason(t *testing.T) {
+	if _, err := ParseProposals([]byte(`{"declined":[{"dedupe":"k"}]}`)); err == nil {
+		t.Error("a decline with no reason was accepted")
+	}
+	if _, err := ParseProposals([]byte(`{"declined":[{"why":"because"}]}`)); err == nil {
+		t.Error("a decline naming no finding was accepted")
+	}
+	if _, err := ParseProposals([]byte(`{"declined":[{"dedupe":"k","why":"already fixed"}]}`)); err != nil {
+		t.Errorf("a well-formed decline was refused: %v", err)
+	}
+}

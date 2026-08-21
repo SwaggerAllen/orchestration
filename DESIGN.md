@@ -1103,6 +1103,20 @@ signal that was missing.
 8. **Grooming pass.** Re-ranks existing debt as well as proposing additions.
 9. Proposals land in **Triage**. Design findings and debt only, never bugs: a bug parked in a
    queue has been rescheduled rather than repaired.
+   **Every carried finding leaves the pass adjudicated** — filed under its own dedupe key, or
+   declined with a reason recorded on the ticket. Those findings were carried off tickets the
+   archive step deleted, so the boundary that sees them is the last one that can: a finding
+   neither filed nor declined is not deferred to the next milestone, it is deleted. Declining is
+   frequently right and costs a sentence; what the author cannot review is a judgment nobody
+   wrote down. Measured on Catapult's ORC-90 — twelve findings carried, one unrelated proposal
+   filed, no record that any of the twelve had been read.
+   **A finding says what it is about.** An agent records `harness` for the pipeline and
+   `project` for the repository it is working in, and the two reach different judgments: the
+   first asks whether the pipeline is costing tickets, the second goes through the debt scan's
+   gating test like any other debt. The distinction was stated in the prompts and enforced
+   nowhere, and it lost to an incentive — a hand-back is prose in a ticket comment, while a
+   finding is collected, deduped, carried past the archive and put in front of the boundary, so
+   the only durable channel an agent had for a project defect was the one labelled `harness`.
 10. Boundary agent moves the ticket to `Boundary review`.
 11. **Author** accepts or declines Triage, confirms the ranking, closes the boundary ticket, and
     pulls the next milestone into `Todo` in one pass. `Done` resumes the queue.
