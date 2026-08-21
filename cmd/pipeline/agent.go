@@ -1002,23 +1002,35 @@ func harnessFindingsSection(path string) string {
 You may record findings about **the pipeline**, and only about the
 pipeline, by writing a JSON array to `+"`%s`"+`:
 
-    [{"title": "...", "detail": "...", "dedupe": "stable-key"}]
+    [{"title": "...", "detail": "...", "dedupe": "stable-key",
+      "kind": "harness" | "project"}]
 
 The harness posts them for the milestone boundary to judge. Writing
 nothing is the normal case and needs no explanation.
 
-**In scope:** a check that passed without checking anything; a value the
-protocol says exists and doesn't; a credential or permission you needed
-and did not have; a state you reached with no legal way out; an
-instruction in your own prompt contradicted by the repository. Things
-where the pipeline lied to you or left you stuck.
+**kind "harness"** — the pipeline itself. A check that passed
+without checking anything; a value the protocol says exists and doesn't;
+a credential or permission you needed and did not have; a state you
+reached with no legal way out; an instruction in your own prompt
+contradicted by the repository. Things where the pipeline lied to you or
+left you stuck.
 
-**Out of scope, and this is the important half:** product tech debt,
-code quality, test coverage, refactors, anything about the project's own
-architecture. Those have their own route — the milestone boundary's
-bounded scan — and filing them here floods the one list the author reads
-for "is the pipeline costing me tickets". If your finding would still be
-true on a project using none of this machinery, it does not belong here.
+**kind "project"** — a real defect in **this repository**, found
+outside your own scope. Product tech debt, a doc whose worked example
+the code rejects, a stale rationale, test coverage, anything about the
+project's own architecture. These reach the boundary's debt scan rather
+than the pipeline list.
+
+**The test between them:** would your finding still be true on a project
+using none of this machinery? Then it is a "project" finding.
+
+Keeping them apart is the whole point of the field. The harness list is
+what the author reads to answer "is the pipeline costing me tickets",
+and a project defect filed into it is noise in the one place that
+question gets asked. The reverse is worse: a pipeline gap routed to the
+debt scan competes with product work for a milestone slot.
+
+Omitting the field means "harness", so say "project" when you mean it.
 
 `+"`dedupe`"+` names the thing, never the run: ten runs hitting one gap
 should produce one ticket.
@@ -1063,12 +1075,40 @@ func debtBacklogSection(backlog []agent.CompositionEntry) string {
 // a check that does not exist.
 func harnessFindingsForBoundary(fs []agent.HarnessFinding) string {
 	if len(fs) == 0 {
-		return "\n## Harness findings this milestone\n\nNone recorded. That is a normal milestone, not a gap in the input.\n"
+		return "\n## Findings carried into this boundary\n\nNone recorded. That is a normal milestone, not a gap in the input.\n"
+	}
+	var harness, project []agent.HarnessFinding
+	for _, f := range fs {
+		if f.IsProject() {
+			project = append(project, f)
+			continue
+		}
+		harness = append(harness, f)
 	}
 	var b strings.Builder
-	b.WriteString("\n## Harness findings this milestone\n\nRecorded by the agents that hit them, deduped. These are about the pipeline, not this project's code — file the ones worth a ticket with `\"kind\": \"harness\"`, and say so plainly when one is not worth filing.\n")
-	for _, f := range fs {
-		fmt.Fprintf(&b, "\n### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
+	// The rule stated once, above both lists, because it is one rule:
+	// every carried finding leaves this pass either as a proposal or as
+	// a decline. It used to be a clause inside the harness heading, and
+	// ORC-90's pass answered it by doing neither to all twelve.
+	fmt.Fprintf(&b, "\n## Findings carried into this boundary (%d)\n\n"+
+		"Recorded by the agents that hit them, deduped, and carried past the archive — the tickets they were written on are gone, so this is the last pass that can see them.\n\n"+
+		"**Every one leaves here adjudicated.** File it as a proposal, reusing the finding's own dedupe key so the decision ties to the thing decided, or decline it in `declined` with the reason. A finding you neither file nor decline is not deferred, it is deleted.\n", len(fs))
+	if len(harness) > 0 {
+		b.WriteString("\n### About the pipeline — file as `\"kind\": \"harness\"`\n")
+		for _, f := range harness {
+			fmt.Fprintf(&b, "\n#### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
+		}
+	}
+	if len(project) > 0 {
+		// Separated because they are judged by a different test. A
+		// pipeline problem is worth a ticket when the pipeline is
+		// costing tickets; a project defect goes through the same gating
+		// test as anything else the debt scan turns up.
+		b.WriteString("\n### About this project — candidates for the debt scan, file as `\"kind\": \"debt\"`\n\n" +
+			"Found by an agent working outside its own scope, so nothing has judged them yet. Apply the gating test as you would to a finding of your own, and decline the ones that are not worth a ticket.\n")
+		for _, f := range project {
+			fmt.Fprintf(&b, "\n#### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
+		}
 	}
 	return b.String()
 }

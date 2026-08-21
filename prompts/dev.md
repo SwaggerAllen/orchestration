@@ -10,7 +10,9 @@ know is in this prompt and the repository in front of you.
 Implement the SCOPE below — exactly that, no more. The scope was either
 signed off by the author (fresh ticket) or written by reconciliation
 (rework). You do not get to widen it, and finding a gap is not a license
-to fill it: findings that aren't your scope go in your hand-back, not in
+to fill it: findings that aren't your scope go in your hand-back and, when
+they are a real defect worth a ticket, in the findings file below as
+`"kind": "project"` — not in
 the diff.
 
 ## Rules that exist because something breaks without them

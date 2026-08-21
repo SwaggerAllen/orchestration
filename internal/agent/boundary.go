@@ -321,6 +321,32 @@ type RankEntry struct {
 type Proposals struct {
 	Proposals []Proposal  `json:"proposals"`
 	Ranking   []RankEntry `json:"ranking"`
+	// Declined are the carried findings this pass judged not worth a
+	// ticket, with the reason.
+	//
+	// The prompt asked for this before there was anywhere to put it —
+	// "say so plainly when one is not worth filing" — against a schema
+	// of proposals and ranking, parsed by a bare json.Unmarshal over the
+	// whole comment. Prose alongside the JSON fails that parse and takes
+	// the file step down, so the pass had two options per finding: file
+	// it, or drop it silently.
+	//
+	// Measured on Catapult's ORC-90: twelve findings carried past the
+	// archive, one proposal filed and none of the twelve among them, no
+	// record that any had been read. Declining most of them was probably
+	// right — several were fixed that same week. The defect was that the
+	// judgment left no trace.
+	Declined []Decline `json:"declined"`
+}
+
+// Decline is a carried finding the pass read and chose not to file.
+type Decline struct {
+	// Dedupe is the carried finding's key, which is what ties the
+	// decision to the thing decided.
+	Dedupe string `json:"dedupe"`
+	// Why is the argument. Required: "declined" with no reason is the
+	// silent drop this field exists to replace, one field wider.
+	Why string `json:"why"`
 }
 
 // LoadProposals reads and validates the scan output.
@@ -353,7 +379,44 @@ func ParseProposals(raw []byte) (*Proposals, error) {
 			return nil, fmt.Errorf("ranking %d: want a ticket key and priority 1-4, got %+v", i, r)
 		}
 	}
+	for i, d := range ps.Declined {
+		if strings.TrimSpace(d.Dedupe) == "" || strings.TrimSpace(d.Why) == "" {
+			return nil, fmt.Errorf("declined %d: both the finding's dedupe key and the reason are required — a decline with neither is the silent drop this replaces (DESIGN §10)", i)
+		}
+	}
 	return &ps, nil
+}
+
+// unadjudicated names the carried findings this pass neither filed nor
+// declined, by dedupe key.
+//
+// Matched on the key rather than the title, because the key is the one
+// field the finding's own contract calls stable — "name the thing, not
+// the run" — while titles are rewritten between scans. Measured on
+// ORC-45: two concurrent scans of one tree kept every harness key
+// byte-identical while rewording the titles.
+//
+// A proposal counts as adjudicating a finding when it carries the key,
+// which is why the boundary prompt asks for the carried key as the
+// proposal's dedupe rather than a fresh one.
+func unadjudicated(carried []HarnessFinding, ps *Proposals) []string {
+	if len(carried) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, pr := range ps.Proposals {
+		seen[pr.Dedupe] = true
+	}
+	for _, d := range ps.Declined {
+		seen[d.Dedupe] = true
+	}
+	var out []string
+	for _, f := range carried {
+		if !seen[f.Dedupe] {
+			out = append(out, fmt.Sprintf("`%s` — %s", f.Dedupe, f.Title))
+		}
+	}
+	return out
 }
 
 // RecoverProposals reads the scan step's marker comment back into
@@ -519,6 +582,33 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		prose := fmt.Sprintf("Filed %d proposals (%d deduped), re-ranked %d tickets.", filed, skipped, ranked)
 		if len(unknown) > 0 {
 			prose += fmt.Sprintf(" Unknown keys skipped: %v.", unknown)
+		}
+		if len(ps.Declined) > 0 {
+			var lines []string
+			for _, d := range ps.Declined {
+				lines = append(lines, fmt.Sprintf("`%s` — %s", d.Dedupe, d.Why))
+			}
+			prose += fmt.Sprintf("\n\nDeclined %d carried finding(s), with the reason:\n\n- %s",
+				len(ps.Declined), strings.Join(lines, "\n- "))
+		}
+		// Every carried finding has to be accounted for, and this is the
+		// only moment anyone could notice that one was not.
+		//
+		// The findings the archive step carried lived on the tickets it
+		// deleted. They survive on that step's own comment, which a
+		// resume re-reads — so they persist across passes on this
+		// ticket, and are gone the moment the next milestone opens a new
+		// one. A finding neither filed nor declined is therefore not
+		// merely unrecorded: it is on a clock nobody can see.
+		//
+		// Named rather than fatal. The pass did its work, the tickets it
+		// filed are real, and failing here would throw that away over a
+		// judgment the author is about to make anyway at Boundary
+		// review. What the author cannot do is be a backstop for
+		// something they are never shown.
+		if missed := unadjudicated(plan.HarnessFindings, ps); len(missed) > 0 {
+			prose += fmt.Sprintf("\n\n**%d carried finding(s) were neither filed nor declined.** They are recorded on this ticket's archive-step comment and nowhere else, so they are lost when the next milestone opens a new boundary ticket:\n\n- %s",
+				len(missed), strings.Join(missed, "\n- "))
 		}
 		if len(failures) > 0 {
 			prose += fmt.Sprintf("\n\n%d did not land, and this comment is the record of which:\n\n- %s",

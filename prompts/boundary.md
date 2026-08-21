@@ -88,9 +88,24 @@ Write JSON to the outcome path given below:
   ],
   "ranking": [
     {"key": "PIPE-9", "priority": 2}
+  ],
+  "declined": [
+    {"dedupe": "<the carried finding's own key>", "why": "the argument"}
   ]
 }
 ```
+
+**`declined` is how a carried finding leaves this pass without becoming a
+ticket.** Every finding in the section above leaves adjudicated: a
+proposal reusing its dedupe key, or a decline with the reason. Neither is
+not deferral — those findings were carried off tickets the archive step
+deleted, so this is the last pass that can see them, and one you pass
+over is gone when the next milestone opens a new boundary ticket.
+
+Declining is often right. Already fixed, no longer reproducible, not
+worth the ticket it would cost — all fine, said in a sentence. What is
+not fine is silence, because the author reviewing this ticket cannot
+disagree with a judgment nobody recorded.
 
 Then stop. The harness files proposals (deduped), applies the ranking,
 posts the step comments, computes the next debt milestone's proposed

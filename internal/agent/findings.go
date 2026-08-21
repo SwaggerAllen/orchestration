@@ -41,7 +41,50 @@ type HarnessFinding struct {
 	// one ticket. Stable across runs by construction: name the thing,
 	// not the run.
 	Dedupe string `json:"dedupe"`
+	// Kind is what the finding is about: KindHarness for the pipeline,
+	// KindProject for the repository the pass is working in. Empty means
+	// harness, which is what every finding recorded before this field
+	// existed was.
+	//
+	// The distinction was stated sharply in the prompt and enforced
+	// nowhere, and it lost against an incentive. A hand-back is prose in
+	// a ticket comment: not collected, not deduped, not carried past the
+	// archive, not surfaced to any boundary. A harness finding is all
+	// four. So an agent that found a real project defect outside its
+	// scope, and wanted it to survive, had exactly one structured
+	// channel and it was labelled `harness`.
+	//
+	// Measured on Catapult's ORC-90: of twelve findings carried past the
+	// archive, two were plainly about the project — a ticket's own text
+	// against the loader it described, and a worked example in a doc
+	// that the loader rejects. Neither would have been true on a project
+	// using none of this machinery, which is the prompt's own test.
+	//
+	// A field rather than a second findings file, for the reason the
+	// non-asks scope is a field: this is a property of the finding, and
+	// two files is two places to explain and two write paths to get
+	// wrong.
+	Kind string `json:"kind,omitempty"`
 }
+
+// The two kinds a finding can carry.
+const (
+	// KindHarness is a problem with the pipeline: a check that passed
+	// without checking, a value the protocol promises and does not
+	// deliver, a credential the run needed and lacked.
+	KindHarness = "harness"
+	// KindProject is a defect in the repository the pass is working in,
+	// found outside the pass's own scope. It reaches the boundary's debt
+	// scan rather than its harness list.
+	KindProject = "project"
+)
+
+// IsProject reports whether this finding is about the project rather
+// than the pipeline. Empty reads as harness: every finding recorded
+// before the field existed was one, and reading them as project findings
+// would move a milestone's worth of pipeline problems into the debt
+// backlog on the first run after an upgrade.
+func (f HarnessFinding) IsProject() bool { return f.Kind == KindProject }
 
 // LoadHarnessFindings reads and validates the findings file. An absent
 // file is not an error — most runs have nothing to report, and requiring
@@ -72,6 +115,16 @@ func LoadHarnessFindings(path string) ([]HarnessFinding, error) {
 		if strings.TrimSpace(f.Detail) == "" {
 			return nil, fmt.Errorf("harness finding %d (%s): no detail — a finding nobody can act on costs a read and buys nothing", i, f.Title)
 		}
+		// Empty is legal and means harness; a wrong spelling is not.
+		// Silently reading "porject" as harness would put a project
+		// defect back in the list this field exists to keep clean, and
+		// the run is the only place that still knows which was meant.
+		switch f.Kind {
+		case "", KindHarness, KindProject:
+		default:
+			return nil, fmt.Errorf("harness finding %d (%s): kind %q — %q for the pipeline, %q for this repository, or omit it for %q",
+				i, f.Title, f.Kind, KindHarness, KindProject, KindHarness)
+		}
 	}
 	return fs, nil
 }
@@ -82,11 +135,23 @@ func LoadHarnessFindings(path string) ([]HarnessFinding, error) {
 // itself writes nothing to the tracker (DESIGN §9).
 func PostHarnessFindings(ctx context.Context, p *plane.Plane, ticketID string, fs []HarnessFinding) error {
 	for _, f := range fs {
-		m := marker.Marker{Kind: marker.HarnessFinding, Fields: map[string]string{
+		// The marker keeps its kind — it is recorded wire format in every
+		// project's ticket history, and renaming it would orphan every
+		// finding already written. What the finding is *about* travels
+		// as a field, absent meaning harness.
+		fields := map[string]string{
 			"id":    f.Dedupe,
 			"title": f.Title,
-		}}
-		prose := fmt.Sprintf("**Harness finding: %s**\n\n%s\n\nRecorded for the milestone boundary, which decides whether it becomes a ticket (DESIGN §10). Not a change to this ticket's scope.", f.Title, f.Detail)
+		}
+		heading := "Harness finding"
+		routed := "Recorded for the milestone boundary, which decides whether it becomes a ticket (DESIGN §10). Not a change to this ticket's scope."
+		if f.IsProject() {
+			fields["kind"] = KindProject
+			heading = "Project finding"
+			routed = "Recorded for the milestone boundary's debt scan, which decides whether it becomes a ticket (DESIGN §10). Not a change to this ticket's scope — a defect that blocks this milestone is filed against it directly instead."
+		}
+		m := marker.Marker{Kind: marker.HarnessFinding, Fields: fields}
+		prose := fmt.Sprintf("**%s: %s**\n\n%s\n\n%s", heading, f.Title, f.Detail, routed)
 		if err := p.CommentTicket(ctx, ticketID, m.Comment(prose)); err != nil {
 			return err
 		}
@@ -122,6 +187,9 @@ func CollectHarnessFindings(tickets []*core.Ticket) []HarnessFinding {
 				Title:  m.Fields["title"],
 				Detail: strings.TrimSpace(detail),
 				Dedupe: id,
+				// Absent reads as harness, which is what every marker
+				// written before this field existed was.
+				Kind: m.Fields["kind"],
 			})
 		}
 	}
