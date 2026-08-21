@@ -878,11 +878,25 @@ Among the tickets that qualify, the sweep takes the first the ordering gives: th
 which is what the report sorts each layer by. Promotion is a control-plane write like any other —
 recorded, attributed, and therefore not judged as an author move by §9.
 
-**The report has to show the same answer**, or the automation and the thing the author reads to
-predict it disagree on the one case where the thresholds differ. A ticket whose blockers are all
-`Merged` sits in *freed by what is in flight*, not *ready now*, because the layering answers for
-the whole pipeline rather than for design. It stays there — moving it would be wrong about dev —
-and says in its note that design can start on it regardless.
+**The report changes with it.** `pipeline order` was advisory: it derived the next move and a
+human made it, so a reader who disagreed simply did something else. Once the sweep acts on the
+same derivation the report stops being advice and becomes a prediction, and a prediction that
+omits the rule it is predicting is worse than none. Three things it owes.
+
+- **It names the ticket the sweep will promote next**, or says why it will promote nothing: the
+  design queue is occupied, the queue is paused, the head of *ready now* carries no milestone.
+  *Ready now* is a fact about blockers; *next* is a fact about all five conditions above, and
+  those are not the same set. A reader looking at three unblocked tickets while the pipeline
+  promotes none of them has been told the truth and misled by it.
+- **A ticket whose blockers have all reached `Merged` says design can start on it.** It stays in
+  *freed by what is in flight* rather than moving to *ready now*, because the layering answers
+  for the whole pipeline and promoting it into `Ready for dev` would still be wrong. The note is
+  what carries the difference, and without it the report and the sweep disagree on the one case
+  where their thresholds do.
+- **The layer prose stops addressing the reader as the one who acts.** *Ready now* means "the
+  candidates the control plane draws from", not "the candidates to start"; and the
+  milestone-less note gains its consequence — the automation will not move this, so it waits for
+  the author whether the missing milestone was an oversight or a choice.
 
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
