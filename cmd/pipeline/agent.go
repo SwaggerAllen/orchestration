@@ -1102,10 +1102,16 @@ func harnessFindingsForBoundary(fs []agent.HarnessFinding) string {
 	if len(project) > 0 {
 		// Separated because they are judged by a different test. A
 		// pipeline problem is worth a ticket when the pipeline is
-		// costing tickets; a project defect goes through the same gating
-		// test as anything else the debt scan turns up.
-		b.WriteString("\n### About this project — candidates for the debt scan, file as `\"kind\": \"debt\"`\n\n" +
-			"Found by an agent working outside its own scope, so nothing has judged them yet. Apply the gating test as you would to a finding of your own, and decline the ones that are not worth a ticket.\n")
+		// costing tickets; a project finding goes through the same
+		// judgment as anything else the scan turns up — the gating test
+		// if it is debt, and straight to a ticket if it is a defect.
+		//
+		// Both kinds are named here rather than only `debt`, because
+		// naming one kind is how the harness list filled up with
+		// defects: an agent routes a finding into whatever channel will
+		// take it.
+		b.WriteString("\n### About this project — candidates for the debt scan, file as `\"kind\": \"debt\"` or `\"kind\": \"bug\"`\n\n" +
+			"Found by an agent working outside its own scope, so nothing has judged them yet. A defect — something that does not do what it says — is a `bug`; work on the shape of the code is `debt`, and takes the gating test as a finding of your own would. Decline the ones that are not worth a ticket.\n")
 		for _, f := range project {
 			fmt.Fprintf(&b, "\n#### %s\n\n_dedupe: %s_\n\n%s\n", f.Title, f.Dedupe, f.Detail)
 		}

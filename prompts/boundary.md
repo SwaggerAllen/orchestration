@@ -33,10 +33,22 @@ should change. The author reviews your ranking before the queue resumes.
 
 ## Rules
 
-- **Design findings and debt only, never bugs.** A bug parked in a queue
-  has been rescheduled rather than repaired. If you find a bug, say so
-  in a proposal description marked kind `debt` ONLY if the debt is the
-  cause; the bug itself is the author's to file.
+- **A defect is filed as a bug, not disguised as debt.** `bug` is for
+  something that does not do what it says; `debt` is for work on the
+  shape of the code rather than what it does. Where debt is the cause of
+  a defect those are two findings and both can be filed, keyed
+  separately.
+
+  Bugs were refused here until this milestone, on the argument that a
+  bug parked in a queue has been rescheduled rather than repaired. The
+  argument is still true; refusing the kind is just not what prevents
+  it. A defect you cannot name as one gets filed as debt, and debt is
+  what the next debt milestone schedules. A bug runs as soon as the
+  author accepts it out of Triage.
+
+  You do not assign milestones (see the end of this file), so if you
+  think a defect blocks this milestone from closing, say that in the
+  description. The assignment is the author's.
 - **Every proposal names its `subject`**: the concrete thing it is
   about, as the repository names it — a file path, a config key, a mix
   task, a gate line, a doc section, a module. `ci.yml`,
@@ -69,12 +81,17 @@ should change. The author reviews your ranking before the queue resumes.
 
 ## Output
 
-`kind` is one of three, and the third is easy to miss because its input
-arrives further down: `debt` and `design` are findings about the
-project, and `harness` is a finding about the pipeline — the section
-below headed "Harness findings this milestone" is what you file under
-it. A boundary that reads only this schema files them as `debt` or drops
+`kind` is one of four. `debt`, `design` and `bug` are findings about the
+project; `harness` is a finding about the pipeline, and it is the one
+easy to miss because its input arrives further down — the section below
+headed "Findings carried into this boundary" is what you file under it.
+A boundary that reads only this schema files those as `debt` or drops
 them, which puts a pipeline problem in the product backlog or nowhere.
+
+`gating` is read only when the next debt milestone is composed, and that
+composition draws tech-debt. On a `bug` it records your judgment and
+schedules nothing, which is intended: a bug does not wait for a debt
+milestone.
 
 Write JSON to the outcome path given below:
 
@@ -82,7 +99,7 @@ Write JSON to the outcome path given below:
 {
   "proposals": [
     {"title": "...", "description": "the argument — why this is worth doing",
-     "kind": "debt" | "design" | "harness", "gating": true|false,
+     "kind": "debt" | "design" | "harness" | "bug", "gating": true|false,
      "subject": "<the file, key, task, gate or module this is about>",
      "dedupe": "<milestone>/<finding-slug>"}
   ],
