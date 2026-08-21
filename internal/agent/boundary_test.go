@@ -326,10 +326,25 @@ func TestASecondArchivePassAddsToTheRetroNoteRatherThanSkippingIt(t *testing.T) 
 	}
 }
 
-func TestParseProposalsRejectsBugs(t *testing.T) {
-	_, err := ParseProposals([]byte(`{"proposals":[{"title":"Crash","kind":"bug","dedupe":"m/crash"}]}`))
-	if err == nil || !strings.Contains(err.Error(), "never bugs") {
-		t.Errorf("bugs must never park in Triage, got %v", err)
+// The reversal (DESIGN §10). Refusing the kind never stopped the
+// boundary finding defects — it stopped it naming them, and a defect it
+// could not name it filed as debt, which is what the composition rule
+// schedules into the next debt milestone.
+func TestParseProposalsAcceptsEveryKindItFiles(t *testing.T) {
+	for _, kind := range []string{"debt", "design", "harness", "bug"} {
+		body := `{"proposals":[{"title":"T","kind":"` + kind + `","dedupe":"m/t"}]}`
+		if _, err := ParseProposals([]byte(body)); err != nil {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+}
+
+// And the vocabulary stays closed, because the filer maps kind to a
+// label and an unmapped kind would file silently under tech-debt.
+func TestParseProposalsRejectsAKindItCannotFile(t *testing.T) {
+	_, err := ParseProposals([]byte(`{"proposals":[{"title":"T","kind":"chore","dedupe":"m/t"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "chore") {
+		t.Errorf("want the unknown kind named back, got %v", err)
 	}
 }
 
@@ -732,5 +747,80 @@ func TestProposalsRefuseADeclineWithoutAReason(t *testing.T) {
 	}
 	if _, err := ParseProposals([]byte(`{"declined":[{"dedupe":"k","why":"already fixed"}]}`)); err != nil {
 		t.Errorf("a well-formed decline was refused: %v", err)
+	}
+}
+
+// A filed bug must not turn up in the debt backlog, because the backlog
+// is what the composition schedules into the next debt milestone — one
+// milestone in two, against a floor of five. Waiting for that is the
+// rescheduling the old never-bugs rule was written to prevent, and it is
+// what filing a defect as debt produced (DESIGN §10).
+//
+// The mapping in FileTriageProposal is the whole mechanism: `tech-debt`
+// is what DebtBacklog draws, so a kind that falls through to the default
+// label is a kind that gets scheduled.
+func TestAFiledBugStaysOutOfTheDebtBacklog(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
+
+	if err := p.FileTriageProposal(ctx, "Extract the cap module", "why", "debt", "lib/cap.ex", false, "M1/cap"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.FileTriageProposal(ctx, "Preflight passes without comparing the label sets", "why", "bug", "cmd/pipeline/preflight.go", false, "M1/preflight"); err != nil {
+		t.Fatal(err)
+	}
+
+	boundary := seedBoundary(t, tr, cfg)
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_90", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range plan.Backlog {
+		got = append(got, c.Title)
+	}
+	if len(got) != 1 || got[0] != "Extract the cap module" {
+		t.Errorf("backlog = %v, want the debt proposal alone", got)
+	}
+}
+
+// And the kind the pass writes has to reach the label the rest of the
+// pipeline reads. Checked as a set rather than one case, because the
+// filer's switch has a default and a kind that falls through it files
+// silently under the wrong one.
+func TestProposalKindsReachTheirLabels(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	want := map[string]string{
+		"debt":    "tech-debt",
+		"design":  "design-inbox",
+		"harness": "harness",
+		"bug":     "bug",
+	}
+	for kind, label := range want {
+		title := "proposal of kind " + kind
+		if err := p.FileTriageProposal(ctx, title, "why", kind, "lib/x.ex", false, "M1/"+kind); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, i := range issues {
+			if i.Title == title {
+				got = i.Labels
+			}
+		}
+		found := false
+		for _, l := range got {
+			if l == label {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("kind %q filed with labels %v, want %q", kind, got, label)
+		}
 	}
 }

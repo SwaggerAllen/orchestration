@@ -270,11 +270,49 @@ func mergedSHAs(t *core.Ticket) []string {
 type Proposal struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
-	// Kind: "debt" or "design". Never "bug" — a bug parked in a queue has
-	// been rescheduled rather than repaired (DESIGN §10).
+	// Kind is "debt", "design", "harness" or "bug". It picks the label
+	// the proposal is filed under, and the label decides which backlog
+	// reads it.
+	//
+	// "bug" was refused here until this milestone, on the argument that
+	// a bug parked in a queue has been rescheduled rather than repaired.
+	// The argument is right about parking and wrong about which rule
+	// prevents it: what keeps a defect from waiting is the split in
+	// DESIGN §10 — work that must be fixed before the milestone closes
+	// is filed against the *current* milestone. Closing the vocabulary
+	// on top of that did not stop the boundary finding defects; it
+	// stopped it naming them, and a defect it cannot name it files as
+	// debt.
+	//
+	// Which is the parking, reached by obeying the rule against it. Debt
+	// carries the `tech-debt` label, `tech-debt` is what DebtBacklog
+	// draws, and the composition schedules that into the next debt
+	// milestone — one milestone in two, against a floor of five.
+	//
+	// Measured on Catapult's ORC-90, from the twelve findings its
+	// archive step carried: an outage that failed every sweep on the
+	// project from 18:06 to 19:58, two boundary agents running
+	// concurrently on one ticket at about twenty-two minutes of spend, a
+	// preflight check holding the expected and live label sets and
+	// comparing neither, and a prompt flag rendered false whatever the
+	// harness had recorded. None of those is work on the shape of the
+	// code rather than what it does, which is DESIGN §8's definition of
+	// debt. Every one is something that does not do what it says.
+	//
+	// Safe to allow because a bug ticket needs no milestone to run:
+	// nothing sequences a milestone-less ticket, so the queue takes it
+	// as soon as the author accepts it out of Triage (DESIGN §8), and
+	// Urgent is what makes it preempt. That is also why a bug never
+	// enters the debt composition — it does not need a slot in it.
 	Kind string `json:"kind"`
 	// Gating: does the next product milestone get materially harder
 	// without it? (DESIGN §10's gating test.)
+	//
+	// Read only by the composition, which draws tech-debt — so on a
+	// `bug` proposal it records the judgment and schedules nothing. Not
+	// rejected there: a bug the scan thinks is gating is worth the
+	// author reading as such, and failing the parse over a field that
+	// steers nothing would take the file step down for no gain.
 	Gating bool `json:"gating"`
 	// Dedupe is milestone+finding; a re-run files nothing twice because
 	// this key is checked against existing issues (DESIGN §10).
@@ -369,9 +407,9 @@ func ParseProposals(raw []byte) (*Proposals, error) {
 			return nil, fmt.Errorf("proposal %d: title and dedupe are required — without the key a re-run files it twice (DESIGN §10)", i)
 		}
 		switch pr.Kind {
-		case "debt", "design", "harness":
+		case "debt", "design", "harness", "bug":
 		default:
-			return nil, fmt.Errorf("proposal %d (%s): kind %q — debt, design findings and harness findings only, never bugs (DESIGN §10)", i, pr.Title, pr.Kind)
+			return nil, fmt.Errorf("proposal %d (%s): kind %q — one of debt, design, harness, bug (DESIGN §10)", i, pr.Title, pr.Kind)
 		}
 	}
 	for i, r := range ps.Ranking {

@@ -747,7 +747,7 @@ failures to land one scope is a sequencing problem for the author whichever half
 |---|---|
 | `frontend` / `backend` | Where the work happens. Not a scoping constraint — one ticket may contain both. |
 | `tech-debt` | Work on the shape of the code rather than what it does. Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
-| `bug` | Defect. Runs the normal pipeline; `Urgent` is what makes it preempt. |
+| `bug` | Defect: something that does not do what it says, as against `tech-debt`'s shape of the code. Runs the normal pipeline; `Urgent` is what makes it preempt. Filed by the author, or proposed by the boundary (§10). |
 | `design-inbox` | Provenance: this came from the design agent. The question you'll want answered later when something looks odd. |
 | `screen:<name>` | The design half of the mutex (§6). |
 | `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
@@ -1101,8 +1101,31 @@ signal that was missing.
    *Gating test:* does the next product milestone get materially harder without it? Yes →
    propose for the gating debt milestone. No → backlog.
 8. **Grooming pass.** Re-ranks existing debt as well as proposing additions.
-9. Proposals land in **Triage**. Design findings and debt only, never bugs: a bug parked in a
-   queue has been rescheduled rather than repaired.
+9. Proposals land in **Triage**, as `debt`, `design`, `harness` or `bug`.
+   **Bugs were refused here until this milestone**, on the argument that a bug parked in a queue
+   has been rescheduled rather than repaired. The argument is sound; it is not what that rule
+   enforced. Parking is prevented by *Blocking work found during the pass* below — work that must be fixed
+   before the milestone closes is filed against the *current* milestone — and closing the
+   vocabulary on top
+   of it did not stop the boundary finding defects. It stopped it naming them, and a defect it
+   cannot name it files as debt: `tech-debt` is the label the composition rule draws, so the fix
+   inherits the debt milestone's cadence of one milestone in two against a floor of five. That is
+   the rescheduling, reached by obeying the rule against it.
+
+   Measured on Catapult's ORC-90, from the twelve findings its archive step carried: an outage
+   that failed every sweep on the project from 18:06 to 19:58, two boundary agents running
+   concurrently on one ticket at about twenty-two minutes of spend, a preflight check holding the
+   expected and the live label sets and comparing neither, and a prompt flag rendered `false`
+   whatever the harness had recorded. None of those is work on the shape of the code rather than
+   what it does, which is §8's definition of debt. Every one is something that does not do what
+   it says. All twelve were recorded under `harness`, the only durable channel that would take them.
+
+   **What makes naming them safe is that a bug needs no milestone to run.** Nothing sequences a
+   milestone-less ticket, so the queue takes it as soon as the author accepts it out of Triage
+   (§8), and `Urgent` is what makes it preempt. A bug proposal therefore never enters the debt
+   composition — it does not need a slot in one. The boundary still does not assign milestones,
+   so a defect it believes blocks the milestone is a proposal whose description says so, and the
+   assignment stays the author's.
    **Every carried finding leaves the pass adjudicated** — filed under its own dedupe key, or
    declined with a reason recorded on the ticket. Those findings were carried off tickets the
    archive step deleted, so the boundary that sees them is the last one that can: a finding

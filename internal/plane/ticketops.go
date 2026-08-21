@@ -137,6 +137,23 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 		// us tickets" is a different question from "is this codebase
 		// accruing debt", and one list cannot answer both.
 		label = "harness"
+	case "bug":
+		// A defect, and this label is the whole of what naming one
+		// buys. DebtBacklog draws `tech-debt`, so a bug left on the
+		// default label is scheduled by the debt milestone's
+		// composition instead of running as soon as the author accepts
+		// it out of Triage (DESIGN §8) — which is the rescheduling the
+		// old never-bugs rule was written to prevent and, filed as
+		// debt, produced.
+		//
+		// No provisioning risk: `bug` entered protocol.Labels on
+		// 2026-08-11, three days before `harness` did, so setup has
+		// been creating it on every team since. Worth stating because
+		// `harness` above shipped without that property — the filer
+		// learned to emit it in the same commit that added it, nothing
+		// re-runs setup after an upgrade, and ORC-45 died twice at
+		// eleven minutes of spend on `no label "harness" in team`.
+		label = "bug"
 	}
 	m := marker.Marker{Kind: marker.TriageProposal, Fields: map[string]string{
 		"dedupe": dedupe,
