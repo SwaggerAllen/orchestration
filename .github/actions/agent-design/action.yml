@@ -184,8 +184,49 @@ runs:
     - name: push artifacts (if any)
       shell: bash
       run: |
-        if ! git diff --quiet || ! git diff --cached --quiet; then
-          git add -A ':!.pipeline'
+        # `git status --porcelain`, not `git diff`: diff inspects tracked
+        # files only, so a pass whose whole output is NEW files passes a
+        # `git diff --quiet` guard as clean, the net below never fires,
+        # and the artifacts die with the runner while the run reports
+        # success. That is the shape of a first design pass on a new
+        # screen — every file it writes is new.
+        #
+        #   $ git status --porcelain      # only an untracked file
+        #   ?? screens/cap.md
+        #   $ git diff --quiet; echo $?
+        #   0
+        #
+        # Measured alongside the `git add` fix below, which is how it was
+        # found: verifying that fix against a realistic pass produced a
+        # run that committed nothing and said nothing. Losing artifacts
+        # loudly was the bug being fixed; this loses them quietly.
+        if [ -n "$(git status --porcelain)" ]; then
+          # No pathspec. `.pipeline/` is already in .git/info/exclude,
+          # written by the branch step above, and `git add -A` skips an
+          # excluded path silently — but ANY pathspec, including a pure
+          # exclusion, switches add into the mode where an excluded path
+          # it touches is a hard error rather than a skip:
+          #
+          #   $ git add -A ':!.pipeline'
+          #   The following paths are ignored by one of your .gitignore
+          #   files: .pipeline
+          #   hint: Use -f if you really want to add them.
+          #   $ echo $?
+          #   1
+          #
+          # Measured on git 2.43.0 against the runner's own setup, and
+          # `git add -A` alone exits 0 and stages exactly the same files.
+          # So `:!.pipeline` was redundant with the exclude and fatal
+          # under `set -e`.
+          #
+          # It cost a whole design pass. Catapult ORC-92, run
+          # 32496587226: the model ran nine minutes and succeeded, this
+          # step died in 28ms before the commit and before the push, and
+          # the branch never reached origin — the ticket went to Blocked
+          # saying only "Design agent run failed: <url>". Latent since
+          # the actions first shipped, because this block is the safety
+          # net for a pass that ends dirty rather than the normal path.
+          git add -A
           git commit -m "wip: uncommitted design artifacts at end of agent run"
         fi
         # A screenless pass has no commits; pushing an unchanged branch

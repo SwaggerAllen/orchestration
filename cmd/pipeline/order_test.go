@@ -104,3 +104,69 @@ func TestTheMarkdownOrderLinksEveryKey(t *testing.T) {
 		t.Errorf("an empty layer prints nothing at all:\n%s", got)
 	}
 }
+
+// The decision has to be in both forms, above the layers, because it is
+// the answer the report is opened to ask and the layers cannot give it:
+// "ready now" is a fact about blockers, "next" is a fact about the whole
+// promotion rule (DESIGN §8).
+func TestPrintedOrderNamesWhatEntersTheDesignQueue(t *testing.T) {
+	next := &core.Ticket{Key: "ORC-7", Title: "Word the farewell", URL: "https://tracker.invalid/issue/ORC-7"}
+	o := &core.Order{Next: core.Promotion{Ticket: next}}
+
+	for _, render := range []func(*strings.Builder){
+		func(b *strings.Builder) { printOrder(b, o, "") },
+		func(b *strings.Builder) { printOrderMarkdown(b, o, "") },
+	} {
+		var b strings.Builder
+		render(&b)
+		got := b.String()
+		if !strings.Contains(got, "ORC-7") || !strings.Contains(got, "design queue") {
+			t.Errorf("the decision is missing:\n%s", got)
+		}
+		// Above the layers, not buried after them.
+		if i := strings.Index(got, "ORC-7"); i > strings.Index(got, "Everything else") && strings.Contains(got, "Everything else") {
+			t.Errorf("the decision is printed below the layers:\n%s", got)
+		}
+	}
+}
+
+// And the reason, when there is nothing to promote — a report that goes
+// quiet in that case is the one that misleads, because the layers still
+// list unblocked tickets the pipeline is not going to touch.
+func TestPrintedOrderExplainsPromotingNothing(t *testing.T) {
+	o := &core.Order{Next: core.Promotion{Why: "the queue is paused — B1 is open"}}
+	for _, render := range []func(*strings.Builder){
+		func(b *strings.Builder) { printOrder(b, o, "") },
+		func(b *strings.Builder) { printOrderMarkdown(b, o, "") },
+	} {
+		var b strings.Builder
+		render(&b)
+		if got := b.String(); !strings.Contains(got, "B1 is open") {
+			t.Errorf("the reason is missing:\n%s", got)
+		}
+	}
+}
+
+// The one case where the report's threshold and the sweep's differ, so
+// the line that carries it has to survive rendering.
+func TestPrintedOrderCarriesTheMergedBlockerNote(t *testing.T) {
+	o := &core.Order{Layers: []core.Layer{{
+		Name: core.LayerAfterFlight, Why: "every blocker is in flight.",
+		Tickets: []core.OrderedTicket{{
+			Key: "ORC-7", Title: "Word the farewell", URL: "https://tracker.invalid/issue/ORC-7",
+			State:          protocol.Todo,
+			DesignCanStart: true,
+			BlockedBy:      []core.Neighbour{{Key: "ORC-3", Title: "Land it", State: protocol.Merged}},
+		}},
+	}}}
+	for _, render := range []func(*strings.Builder){
+		func(b *strings.Builder) { printOrder(b, o, "") },
+		func(b *strings.Builder) { printOrderMarkdown(b, o, "") },
+	} {
+		var b strings.Builder
+		render(&b)
+		if got := b.String(); !strings.Contains(got, "design pass can start") {
+			t.Errorf("the merged-blocker note is missing:\n%s", got)
+		}
+	}
+}

@@ -1,0 +1,38 @@
+{
+  "name": "the control plane promotes Todo into the design queue, one at a time and in order (DESIGN 8)",
+  "steps": [
+    {"kind": "milestone", "name": "M1"},
+
+    {"kind": "seed", "key": "T1", "state": "todo", "milestone": "M1"},
+    {"kind": "seed", "key": "T2", "state": "todo", "milestone": "M1"},
+    {"kind": "seed", "key": "T3", "state": "todo", "milestone": "M1", "blockedBy": ["T4"]},
+    {"kind": "seed", "key": "T4", "state": "todo", "milestone": "M1"},
+    {"kind": "seed", "key": "T5", "state": "todo"},
+    {"kind": "seed", "key": "T6", "state": "todo", "milestone": "M2"},
+    {"kind": "sweep"},
+
+    {"kind": "expect", "key": "T1", "state": "ready_for_design"},
+    {"kind": "expect", "key": "T2", "state": "todo"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+    {"kind": "expect", "key": "T4", "state": "todo"},
+    {"kind": "expect", "key": "T5", "state": "todo"},
+    {"kind": "expect", "key": "T6", "state": "todo"},
+
+    {"kind": "transition", "key": "T1", "to": "designing", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "state": "ready_for_design"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "T2", "to": "designing", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T4", "state": "ready_for_design"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "T4", "to": "merged", "actor": "reconcile"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "ready_for_design"},
+
+    {"kind": "expect", "key": "T5", "state": "todo"},
+    {"kind": "expect", "key": "T6", "state": "todo"}
+  ]
+}

@@ -24,6 +24,16 @@ import (
 // which tickets are held up, by what, and what would free them.
 type Order struct {
 	Layers []Layer
+	// Next is what the control plane will move into the design queue, or
+	// the reason it will move nothing (DESIGN §8).
+	//
+	// On the report rather than left to the reader, because the layers
+	// cannot answer it. *Ready now* is a fact about blockers; *next* is a
+	// fact about the pause, the queue's depth, the milestone and the
+	// blocker graph together, and those are not the same set. A reader
+	// looking at three unblocked tickets while the pipeline promotes none
+	// of them has been told the truth and misled by it.
+	Next Promotion
 }
 
 // Layer is one band of the answer, in the order they are printed.
@@ -63,6 +73,21 @@ type OrderedTicket struct {
 	// all. The two are exclusive — being outside one requires having
 	// one.
 	Note string
+	// DesignCanStart marks a ticket whose blockers are all outstanding
+	// and all at `Merged`.
+	//
+	// It stays where the layering puts it — *freed by what is in flight*,
+	// not *ready now* — because moving it would be wrong about the half
+	// of the pipeline the layering is mostly about: dev pickup keeps
+	// `Resolved`, since a blocker that fails its post-deploy check goes
+	// to `Blocked` and code built on it has to be re-examined. Design's
+	// threshold is lower, because a design pass reads `main` and merged
+	// work is on `main` (DESIGN §8).
+	//
+	// So this flag is the one place the report and the control plane
+	// would otherwise disagree, and it exists to carry that difference
+	// rather than to hide it.
+	DesignCanStart bool
 	// MutexHeldBy names an in-flight ticket sharing a mutex label with
 	// this one. Not a blocker and not printed as one — design may run on
 	// both at once — but promotion into Ready for dev would be reverted
@@ -228,7 +253,7 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 
 	o := &Order{Layers: []Layer{
 		{Name: LayerStarted, Why: "already past Todo — the pipeline is working these now."},
-		{Name: LayerReady, Why: "nothing outstanding blocks them; these are the candidates to start."},
+		{Name: LayerReady, Why: "nothing outstanding blocks them; the control plane promotes the first of these into the design queue."},
 		{Name: LayerAfterFlight, Why: "every blocker is in flight, so these free themselves as those land."},
 		{Name: LayerAfterReady, Why: "blocked only by the two layers above; they need something started first."},
 		{Name: LayerRest, Why: "blocked by something itself blocked, or held back by a milestone rather than by the graph."},
@@ -252,13 +277,14 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 			d.Milestone = t.Milestone
 		}
 		d.Uncommitted = t.Milestone == ""
+		d.DesignCanStart = !started[t.ID] && allOnMain(openBlockers(t))
 		switch {
 		case gated[t.ID]:
 			d.Note = "outside the current milestone (" + s.CurrentMilestone + ") — milestones are worked in sequence, so nothing here starts until that one drains, whatever its blockers say"
 		case t.Milestone == "":
 			// Mutually exclusive with the gate above, which only fires
 			// on a ticket that has a milestone to be outside of.
-			d.Note = "nothing sequences it, so it is startable as it stands — but if the milestone is missing by oversight rather than by choice, this is where that shows"
+			d.Note = "no milestone, so the control plane will not promote it — nothing sequences it, but committing it is the author's move. If the milestone is missing by oversight rather than by choice, this is where that shows"
 		}
 		o.Layers[i].Tickets = append(o.Layers[i].Tickets, d)
 	}
@@ -266,7 +292,29 @@ func ComputeOrder(s *Snapshot, milestone string) *Order {
 		ts := o.Layers[i].Tickets
 		sort.Slice(ts, func(a, b int) bool { return orderBefore(byID, ts[a], ts[b]) })
 	}
+	// Deliberately not scoped by `milestone`. Promotion is always about
+	// the current one, so narrowing the report does not narrow the fact —
+	// asking what is in a milestone does not stop the pipeline from being
+	// about to move something.
+	o.Next = NextPromotion(s)
 	return o
+}
+
+// allOnMain reports blockers that are all outstanding and all merged: the
+// case where a design pass can start although the layering has the ticket
+// waiting. Empty is false — a ticket with nothing outstanding is simply
+// ready, and saying "design can start" on it would be noise on every
+// ticket in *ready now*.
+func allOnMain(open []*Ticket) bool {
+	if len(open) == 0 {
+		return false
+	}
+	for _, b := range open {
+		if !onMain(b) {
+			return false
+		}
+	}
+	return true
 }
 
 // isStarted reports a ticket the pipeline is already working. Blocked

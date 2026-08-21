@@ -89,6 +89,16 @@ func printOrder(w io.Writer, o *core.Order, milestone string) {
 	}
 	fmt.Fprintf(w, "Ordering %s. Derived from the ticket graph as it stands now — nothing here is stored, so re-run it after anything moves.\n", scope)
 
+	// Above the layers, because it is the answer to the question the
+	// report is opened to ask, and the layers cannot give it: "ready now"
+	// is about blockers, "next" is about the whole rule (DESIGN §8).
+	if t := o.Next.Ticket; t != nil {
+		fmt.Fprintf(w, "\nNext into the design queue: %s  %s\n", t.Key, t.Title)
+		fmt.Fprintf(w, "  %s\n", t.URL)
+	} else {
+		fmt.Fprintf(w, "\nNothing enters the design queue: %s\n", o.Next.Why)
+	}
+
 	for _, l := range o.Layers {
 		fmt.Fprintf(w, "\n%s — %s\n", l.Name, l.Why)
 		if len(l.Tickets) == 0 {
@@ -114,6 +124,12 @@ func printOrder(w io.Writer, o *core.Order, milestone string) {
 			}
 			if len(t.Blocks) > 0 {
 				fmt.Fprintf(w, "    blocks:     %s\n", neighbours(t.Blocks))
+			}
+			if t.DesignCanStart {
+				// Printed under the blockers it qualifies, because on its
+				// own the line above reads as "held up" and this is the
+				// half of the pipeline it is not held up for.
+				fmt.Fprintln(w, "    design:     every blocker has reached Merged, so a design pass can start on this — only dev waits for the deploy")
 			}
 			for _, m := range t.MutexHeldBy {
 				// Not a blocker, and saying so matters: design can run on
@@ -141,6 +157,12 @@ func printOrderMarkdown(w io.Writer, o *core.Order, milestone string) {
 	fmt.Fprintf(w, "## Ordering — %s\n\n", scope)
 	fmt.Fprintf(w, "Derived from the ticket graph as it stands now — nothing here is stored, so re-run it after anything moves.\n")
 
+	if t := o.Next.Ticket; t != nil {
+		fmt.Fprintf(w, "\n**Next into the design queue:** [%s · %s](%s)\n", t.Key, t.Title, t.URL)
+	} else {
+		fmt.Fprintf(w, "\n**Nothing enters the design queue:** %s\n", o.Next.Why)
+	}
+
 	for _, l := range o.Layers {
 		fmt.Fprintf(w, "\n### %s\n\n%s\n\n", l.Name, upperFirst(l.Why))
 		if len(l.Tickets) == 0 {
@@ -164,6 +186,9 @@ func printOrderMarkdown(w io.Writer, o *core.Order, milestone string) {
 			}
 			for _, n := range t.Blocks {
 				fmt.Fprintf(w, "- blocks `%s` %s _(%s)_\n", n.Key, n.Title, n.State)
+			}
+			if t.DesignCanStart {
+				fmt.Fprintln(w, "- design: every blocker has reached `Merged`, so a design pass can start on this — only dev waits for the deploy")
 			}
 			for _, m := range t.MutexHeldBy {
 				fmt.Fprintf(w, "- mutex: `%s` is in flight and holds `%s` — designing this now is legal, but it cannot be promoted until that lands\n", m.Key, m.Label)

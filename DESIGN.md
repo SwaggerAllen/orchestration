@@ -131,7 +131,7 @@ and the drift shows up as agents disagreeing about what a state means.
 |---|---|---|
 | `Backlog` | Nobody. Not committed to. | author, grooming pass |
 | `Todo` | Nobody. Committed, not started. | author, milestone pull |
-| `Ready for design` | The queue. Scope is the **description**. | author |
+| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8) |
 | `Designing` | Design agent, now. | design (claim) |
 | `Design review` | **Author.** Artifacts ready, not yet approved. | design |
 | `Ready for dev` | The queue. Scope is the **description**. | author (sign-off) |
@@ -839,6 +839,70 @@ It answers a question that gets asked between sessions, away from a keyboard, so
 also carries a dispatch-only `pipeline-order` workflow that runs it and renders the layers to
 the run summary with every key linked. Same computation, same lack of storage: the run is a
 snapshot of a moment, and the log of past runs is a log of past moments, not a plan.
+
+### Promoting into the design queue
+
+The report says what to start next; the control plane starts it. The sweep moves a ticket from
+`Todo` to `Ready for design` when all of the following hold.
+
+- **`Ready for design` is empty.** One at a time, so that promotion order *is* execution order.
+  The design agent is singular (§6), so a deeper queue buys no throughput — what it costs is the
+  ordering. Two tickets sitting in that queue are separated by the precedence rule alone, which
+  at equal state falls through to age, and age is not the layering: a ticket freed later by a
+  merge can be older than one that has been startable all along, and would go first. A queue one
+  deep cannot disagree with the report.
+
+  `Designing` is not the queue: a ticket the design agent has claimed has left it, and the next
+  may take its place. And an `author-only` ticket parked in the queue does not count as occupying
+  it, because the dispatcher skips those too (§5) — it would sit there for as long as the author
+  left it, and counting it would stop every promotion on the project for that whole time.
+- **It carries the current milestone.** Not another milestone — §2.9 works them in sequence — and
+  not none. A milestone-less ticket in `Todo` is startable but uncommitted, and assigning the
+  milestone is the commitment (§10), so promoting one commits work as a side effect. It does that
+  at the exact moment the two cases are indistinguishable: a proposal accepted out of Triage with
+  the assignment still lagging sits in `Todo` with no milestone, and so does a ticket left
+  uncommitted on purpose. The report names both and says it cannot tell them apart; the
+  automation moves neither.
+- **Every blocker has reached `Merged`.** `Merged`, `Done` and `Canceled` all satisfy it; nothing
+  else does, `Blocked` included — a ticket that merged and then failed its post-deploy check has
+  its work on `main` and a human owing a judgment on it, and one of the judgments available is a
+  revert. `Merged` rather than `Done` because a design pass reads `main`, and a merged blocker's
+  work is on `main` — what remains of that ticket's life is the deploy and the post-deploy check,
+  neither of which changes anything the pass would read. **The relaxation is design's alone.** Dev
+  pickup keeps `Resolved`, because code built on top of a blocker that fails its check would have
+  to be re-examined; a design that described it would only have to be re-read.
+- **The queue is not paused.** Nothing promotes while a boundary ticket is open, `Urgent`
+  included. The pause exists so a milestone's scope stops changing while it is being audited, and
+  a design pass is the one thing that adds to that scope: new artifacts, new mutex labels, in the
+  middle of the archive and the debt scan. This is stricter than dev pickup, where `Urgent` does
+  override the pause — that is finishing work already designed, and this would be starting work
+  that is not.
+- **It is not the boundary ticket and not `author-only`.** Neither is the pipeline's to move at
+  all (§8, §10).
+
+Among the tickets that qualify, the sweep takes the first the ordering gives: the precedence rule,
+which is what the report sorts each layer by. Promotion is a control-plane write like any other —
+recorded, attributed, and therefore not judged as an author move by §9.
+
+**The report changes with it.** `pipeline order` was advisory: it derived the next move and a
+human made it, so a reader who disagreed simply did something else. Once the sweep acts on the
+same derivation the report stops being advice and becomes a prediction, and a prediction that
+omits the rule it is predicting is worse than none. Three things it owes.
+
+- **It names the ticket the sweep will promote next**, or says why it will promote nothing: the
+  design queue is occupied, the queue is paused, the head of *ready now* carries no milestone.
+  *Ready now* is a fact about blockers; *next* is a fact about all five conditions above, and
+  those are not the same set. A reader looking at three unblocked tickets while the pipeline
+  promotes none of them has been told the truth and misled by it.
+- **A ticket whose blockers have all reached `Merged` says design can start on it.** It stays in
+  *freed by what is in flight* rather than moving to *ready now*, because the layering answers
+  for the whole pipeline and promoting it into `Ready for dev` would still be wrong. The note is
+  what carries the difference, and without it the report and the sweep disagree on the one case
+  where their thresholds do.
+- **The layer prose stops addressing the reader as the one who acts.** *Ready now* means "the
+  candidates the control plane draws from", not "the candidates to start"; and the
+  milestone-less note gains its consequence — the automation will not move this, so it waits for
+  the author whether the missing milestone was an oversight or a choice.
 
 **Priority is the tracker's built-in field, not a label** — it's ordered, and an ordered field
 is what both the queue and the debt-fill rule need.
@@ -1592,6 +1656,7 @@ invariant is only as strong as one-dispatcher.
 
 | Condition | Action |
 |---|---|
+| Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused | State → `Ready for design`, first by the precedence rule (§8) |
 | State → `Ready for design` | Design agent run; its claim writes `Designing` |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
