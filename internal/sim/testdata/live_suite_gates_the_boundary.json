@@ -117,7 +117,9 @@
     {
       "kind": "expect",
       "key": "B-M1",
-      "state": "in_progress"
+      "state": "in_progress",
+      "runKind": "boundary",
+      "runLive": true
     }
   ]
 }

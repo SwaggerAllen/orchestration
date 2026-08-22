@@ -1112,6 +1112,16 @@ signal that was missing.
    and nothing dispatches from `Blocked` — so a suite failing for an environmental reason
    cannot loop through the milestone's budget on its own. The author decides each time.
 
+   **This is the one state that feeds two agents, and dispatch readiness has to be asked per
+   agent because of it.** Everywhere else a state feeds exactly one, so "has anything been
+   dispatched since this ticket arrived" is the same question as "has *this* agent been
+   dispatched". Here it is not: the live suite re-runs in `In progress` and then the boundary
+   agent runs in the same `In progress`, so the suite's own run answers the boundary agent's
+   question with a spurious yes. Measured on Catapult's ORC-99 — entered `In progress` at
+   19:23:37, the re-run passed at 19:26:09, and nothing dispatched after it. The ticket sat
+   until the stale-claim rule parked it, reporting accurately that no boundary run had ever been
+   dispatched: the symptom named correctly by a rule that was not the cause.
+
    **A verdict already reported is not reported twice.** The block fires on a live-suite marker
    with no live-suite `blocked` marker after it, not on "the newest verdict is `fail`". Keyed
    the second way, an author moving `Blocked` → `Todo` — the natural gesture, meaning "seen it,
