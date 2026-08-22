@@ -1087,6 +1087,40 @@ signal that was missing.
    project's `:live`-tagged tests — real network, real providers, the one deliberately
    non-deterministic check, once per milestone. The run posts a result marker on the ticket;
    the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
+
+   **A failure parks the ticket in `Blocked`, and the verdict gates the boundary agent.** The
+   marker used to be the whole of it, on the reasoning that it "lands on the boundary ticket
+   where the author is already looking". That assumption did not hold. A boundary ticket in
+   `Todo` looks identical whether the suite passed, failed, ran no tests, or has not run at all
+   — four situations, one appearance — and on Catapult's ORC-99 a real failure sat unnoticed
+   until somebody went and read the marker deliberately. State is what every listing shows.
+
+   What makes `Blocked` safe here, rather than a state that swallows the manual pass, is the
+   gate: **the boundary agent does not start until the newest verdict is `pass` or `no-tests`,
+   and a boundary ticket entering `In progress` with the suite unproven re-runs the suite
+   first.** So the two ways out of `Blocked` both work and mean different things — `Todo`
+   resumes the manual pass, `In progress` says the pass is done and re-runs the suite before
+   the agent. Without the gate, clearing the block the obvious way would skip the pass
+   entirely.
+
+   `no-tests` satisfies the gate. A project with no `:live` tests yet is not broken, and
+   whether the milestone can close without live coverage is the author's call — blocking on it
+   would make the first boundary of every new project red for a structural reason, which is how
+   a gate becomes one people learn to click past.
+
+   **Each retry costs a deliberate move.** A re-run that fails again parks the ticket again,
+   and nothing dispatches from `Blocked` — so a suite failing for an environmental reason
+   cannot loop through the milestone's budget on its own. The author decides each time.
+
+   **A verdict already reported is not reported twice.** The block fires on a live-suite marker
+   with no live-suite `blocked` marker after it, not on "the newest verdict is `fail`". Keyed
+   the second way, an author moving `Blocked` → `Todo` — the natural gesture, meaning "seen it,
+   back to my pass" — would land on a ticket whose verdict is still `fail` and be parked again
+   on the next sweep, and every sweep after it. The author could never reach the state their
+   own pass happens in.
+
+   Note what that is not: each sweep still settles, so the convergence check every simulated
+   scenario runs would pass it. The failure is that the pass converges on undoing the author.
    Per-ticket CI stays deterministic and merges never gate on this — the live suite gates the
    milestone, not the ticket, because a live check on every ticket would put network flake
    inside the escalation rules (§12), and a live check that never runs is how "merged and
@@ -1121,7 +1155,10 @@ signal that was missing.
    testing across the milestone, plus every `Blocked` ticket carrying `needs-review`, each of
    which the author closes or sends to `Ready for rework`. Blockers filed during the pass run
    the normal design and dev loop.
-5. Author moves the boundary ticket to `In progress`. **This is the signal.**
+5. Author moves the boundary ticket to `In progress`. **This is the signal.** If the live suite
+   has not passed by then — it failed, or its run died without posting a verdict — the suite
+   re-runs before the boundary agent starts, and a second failure returns the ticket to
+   `Blocked`.
 6. **Archive pass.** The milestone's `Done` issues are archived — which reclaims tracker
    headroom but makes them invisible to the "is this already filed?" check. So the archive pass
    **emits a retro note into the repo**: issue keys, titles and merge shas, one line each.
@@ -1275,6 +1312,13 @@ The boundary agent does not begin while a blocker is open.
 The boundary agent has a lot to do and can fail partway. Recovery is `Blocked` → `In progress`
 or `Boundary review` → `In progress`, possibly more than once, and neither is useful if
 re-entry means starting over.
+
+**`Blocked` on a boundary ticket has two causes, and re-entry handles both the same way.** The
+agent's own run died, or the live suite failed (§10 step 2). Entering `In progress` re-runs the
+live suite when its newest verdict is not `pass` or `no-tests`, and dispatches the agent when
+it is — so an author who cannot tell which of the two parked it does not have to: the same
+gesture does the right thing either way, and the flavor on the `blocked` marker says which it
+was for anyone who wants to know.
 
 **Each step posts a completion comment on the boundary ticket.** On entry to `In progress` the
 agent reads its own comments and resumes at the first step without one. That is the whole
@@ -1717,8 +1761,10 @@ invariant is only as strong as one-dispatcher.
 | Reconcile fail | State → `Ready for rework` |
 | Deployment active, SHA ≥ merge SHA | Post-deploy check → `Done`, or `Blocked` if it failed or carries `needs-review` |
 | Last milestone ticket resolves | Pause queue; create the boundary ticket (§10) |
-| Boundary ticket in `Todo`, no live-suite result | Dispatch the live-suite run, once; its result marker ends the loop (§10) |
-| Boundary ticket → `In progress` | Boundary agent run: archive, debt scan, grooming |
+| Boundary ticket in `Todo`, no live-suite result | Dispatch the live-suite run, once (§10) |
+| Live-suite verdict `fail`, run finished, not already reported | Boundary ticket → `Blocked`, marker flavor `live-suite` (§10) |
+| Boundary ticket → `In progress`, newest verdict not `pass`/`no-tests` | Re-dispatch the live suite; the boundary agent waits (§10) |
+| Boundary ticket → `In progress`, live suite satisfied | Boundary agent run: archive, debt scan, grooming |
 | Boundary ticket → `Done` | Resume queue |
 | Agent-owned state, dispatched run dead past grace period | State → `Blocked`, comment naming the dead run (§12) |
 | Guarded transition violated (§9) | Revert to prior state, comment naming the rule |
@@ -1892,6 +1938,9 @@ without passing through `Design review`.
 | boundary | kind `design` | Triage | **`design-inbox`** | triage-proposal |
 | boundary | kind `harness` | Triage | `harness` | triage-proposal |
 | boundary | kind `bug` | Triage | `bug` | triage-proposal |
+| live suite | `pass` | unchanged | — | live-suite |
+| live suite | `fail` | **`Blocked`** | — | live-suite, then blocked `live-suite=1` |
+| live suite | `no-tests` | unchanged | — | live-suite |
 <!-- /pipeline:list -->
 
 `failed` is the only abort reason that takes no label, and that is the rule rather than an

@@ -1,0 +1,123 @@
+{
+  "name": "a failing live suite parks the boundary ticket and gates the agent until it passes (DESIGN 10)",
+  "steps": [
+    {
+      "kind": "milestone",
+      "name": "M1"
+    },
+    {
+      "kind": "seed",
+      "key": "T1",
+      "state": "done",
+      "milestone": "M1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "todo"
+    },
+    {
+      "kind": "comment",
+      "key": "B-M1",
+      "actor": "controlplane",
+      "marker": "live-suite",
+      "fields": {
+        "result": "fail",
+        "run": "https://ci/1"
+      }
+    },
+    {
+      "kind": "run-end",
+      "key": "B-M1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "blocked"
+    },
+    {
+      "kind": "transition",
+      "key": "B-M1",
+      "to": "todo",
+      "actor": "author"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "todo"
+    },
+    {
+      "kind": "transition",
+      "key": "B-M1",
+      "to": "in_progress",
+      "actor": "author"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "in_progress"
+    },
+    {
+      "kind": "comment",
+      "key": "B-M1",
+      "actor": "controlplane",
+      "marker": "live-suite",
+      "fields": {
+        "result": "fail",
+        "run": "https://ci/2"
+      }
+    },
+    {
+      "kind": "run-end",
+      "key": "B-M1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "blocked"
+    },
+    {
+      "kind": "transition",
+      "key": "B-M1",
+      "to": "in_progress",
+      "actor": "author"
+    },
+    {
+      "kind": "comment",
+      "key": "B-M1",
+      "actor": "controlplane",
+      "marker": "live-suite",
+      "fields": {
+        "result": "pass",
+        "run": "https://ci/3"
+      }
+    },
+    {
+      "kind": "run-end",
+      "key": "B-M1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "B-M1",
+      "state": "in_progress"
+    }
+  ]
+}

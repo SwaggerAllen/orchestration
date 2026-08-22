@@ -3,11 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 // LiveSuiteReport posts the live-suite result marker on the boundary
@@ -16,10 +18,9 @@ import (
 // by a model (§9) — and the marker is what stops the sweep dispatching
 // the suite again this milestone.
 func LiveSuiteReport(ctx context.Context, p *plane.Plane, ticketKey, result, runURL string, now time.Time) error {
-	switch result {
-	case "pass", "fail", "no-tests":
-	default:
-		return fmt.Errorf("live-suite report: result must be pass, fail or no-tests, got %q", result)
+	if !protocol.Known(protocol.LiveSuiteResults, result) {
+		return fmt.Errorf("live-suite report: result must be one of %s, got %q",
+			strings.Join(protocol.LiveSuiteResults, ", "), result)
 	}
 	snap, err := p.Build(ctx, now, false)
 	if err != nil {

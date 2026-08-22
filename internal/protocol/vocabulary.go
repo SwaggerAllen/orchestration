@@ -54,6 +54,14 @@ var (
 	// CollisionVerdicts answer whether a re-evaluate collision
 	// invalidates the work in flight (DESIGN §7).
 	CollisionVerdicts = []string{CollisionHolds, CollisionBites}
+
+	// LiveSuiteResults are the milestone live suite's three verdicts
+	// (DESIGN §10). Three rather than two because a runner handed a tag
+	// filter matching nothing exits non-zero, so a project that has not
+	// written its first `:live` test reported a *failing* suite at every
+	// boundary — and a gate red for structural reasons is one the author
+	// learns to click past.
+	LiveSuiteResults = []string{"pass", "fail", "no-tests"}
 )
 
 // ProposalLabels maps a proposal kind to the label it is filed under.

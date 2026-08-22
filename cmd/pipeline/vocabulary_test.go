@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
@@ -92,7 +91,11 @@ func TestDesignOutcomeTableMatchesTheVocabularies(t *testing.T) {
 		t.Fatal("DESIGN.md has no agent-outcomes list — §13's table moved or lost its anchor")
 	}
 
-	rows := map[string]string{} // value -> label cell
+	// Keyed by emitter as well as value, because `pass` and `fail` are
+	// each shared between reconcile and the live suite. Keyed on the
+	// value alone, a missing live-suite row would hide behind a
+	// reconcile row that happens to spell the same word.
+	rows := map[string]map[string]string{} // emitter -> value -> label cell
 	cell := regexp.MustCompile("`([a-z-]+)`")
 	for _, line := range strings.Split(table.Body, "\n") {
 		cols := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), "|")
@@ -104,36 +107,46 @@ func TestDesignOutcomeTableMatchesTheVocabularies(t *testing.T) {
 			t.Errorf("row has no value in backticks: %s", line)
 			continue
 		}
-		rows[m[1]] = cols[3]
+		emitter := strings.TrimSpace(cols[0])
+		if rows[emitter] == nil {
+			rows[emitter] = map[string]string{}
+		}
+		rows[emitter][m[1]] = cols[3]
+	}
+	if len(rows) == 0 {
+		t.Fatal("parsed no rows out of the table — the format changed under the parser")
 	}
 
-	all := append(append(append(append(append([]string{},
-		protocol.ProposalKinds...), protocol.AbortReasons...),
-		protocol.DesignOutcomes...), protocol.ReconcileOutcomes...),
-		protocol.CollisionVerdicts...)
-	for _, v := range all {
-		if _, ok := rows[v]; !ok {
-			t.Errorf("the code accepts %q and §13's table never lists it", v)
+	vocab := map[string][]string{
+		"boundary":   protocol.ProposalKinds,
+		"abort":      protocol.AbortReasons,
+		"design":     protocol.DesignOutcomes,
+		"reconcile":  append(append([]string{}, protocol.ReconcileOutcomes...), protocol.CollisionVerdicts...),
+		"live suite": protocol.LiveSuiteResults,
+	}
+	for emitter, values := range vocab {
+		for _, v := range values {
+			if _, ok := rows[emitter][v]; !ok {
+				t.Errorf("the code accepts %q from %s and §13's table never lists it", v, emitter)
+			}
+		}
+		for v := range rows[emitter] {
+			if !protocol.Known(values, v) {
+				t.Errorf("§13's table lists %q under %s and no vocabulary accepts it", v, emitter)
+			}
 		}
 	}
-	var listed []string
-	for v := range rows {
-		listed = append(listed, v)
-		if !inAny(v, protocol.ProposalKinds, protocol.AbortReasons,
-			protocol.DesignOutcomes, protocol.ReconcileOutcomes, protocol.CollisionVerdicts) {
-			t.Errorf("§13's table lists %q and no vocabulary in protocol accepts it", v)
+	for emitter := range rows {
+		if _, ok := vocab[emitter]; !ok {
+			t.Errorf("§13's table has an emitter %q with no vocabulary behind it", emitter)
 		}
-	}
-	sort.Strings(listed)
-	if len(listed) == 0 {
-		t.Fatal("parsed no rows out of the table — the format changed under the parser")
 	}
 
 	// The label column, for the rows where the mapping is a lookup
 	// rather than control flow. Three of the four are not the identity,
 	// which is the whole reason the column is worth checking.
 	for kind, label := range protocol.ProposalLabels {
-		if got := rows[kind]; !strings.Contains(got, "`"+label+"`") {
+		if got := rows["boundary"][kind]; !strings.Contains(got, "`"+label+"`") {
 			t.Errorf("kind %q files under %q, and §13's table says %q", kind, label, strings.TrimSpace(got))
 		}
 	}
@@ -165,13 +178,4 @@ func TestEachRolePromptNamesItsWholeVocabulary(t *testing.T) {
 			}
 		}
 	}
-}
-
-func inAny(v string, sets ...[]string) bool {
-	for _, s := range sets {
-		if protocol.Known(s, v) {
-			return true
-		}
-	}
-	return false
 }

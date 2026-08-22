@@ -96,6 +96,9 @@ func Sweep(s *Snapshot) []Action {
 	unmoved(ciFor)
 	unmoved(escalationsFor)
 	unmoved(staleClaimFor)
+	// After the resolutions, so a live-suite verdict that arrived on the
+	// same beat as a deploy is judged against the state they leave.
+	unmoved(liveSuiteFor)
 
 	// The boundary ticket is created when the last milestone ticket
 	// resolves, so it runs after the resolutions above rather than
@@ -883,7 +886,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// is the signal, and re-entry after a failure is the resume path — the
 	// agent reads its own step comments and picks up where it stopped.
 	// It does not begin while a blocker is open (DESIGN §10).
-	if boundary != nil && boundary.State == protocol.InProgress &&
+	if boundary != nil && boundary.State == protocol.InProgress && liveSuiteSatisfied(boundary) &&
 		awaitingDispatch(boundary) && !s.agentBusy(AgentBoundary) && !openBlockerFor(s, boundary.ID) {
 		acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentBoundary,
 			Reason: "author signalled the manual pass is done (DESIGN §10)"})
@@ -895,11 +898,28 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// what ends the loop. A dead run without one is the author's to
 	// re-run — the sweep does not resurrect it, for the same reason
 	// stale claims are detected rather than silently retried (§12).
-	if boundary != nil && boundary.State == protocol.Todo &&
-		len(markersOf(boundary, marker.LiveSuite)) == 0 &&
-		awaitingDispatch(boundary) && !s.agentBusy(AgentLiveSuite) {
-		acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentLiveSuite,
-			Reason: "boundary open: live suite before the author's pass (DESIGN §10)"})
+	if boundary != nil && awaitingDispatch(boundary) && !s.agentBusy(AgentLiveSuite) {
+		switch {
+		case boundary.State == protocol.Todo && liveSuiteVerdict(boundary) == "":
+			// The first run, before the author's pass, so the pass reads
+			// a real end-to-end result.
+			acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentLiveSuite,
+				Reason: "boundary open: live suite before the author's pass (DESIGN §10)"})
+		case boundary.State == protocol.InProgress && !liveSuiteSatisfied(boundary):
+			// The retry, and the reason entering In progress is safe to
+			// use as the retry trigger: the boundary agent is gated on
+			// the same verdict, so this and that dispatch are mutually
+			// exclusive and the agent cannot start on an unproven tree.
+			//
+			// Bounded by the author rather than by a counter. A failed
+			// re-run parks the ticket in Blocked, and nothing dispatches
+			// from there — so each retry costs one deliberate move back
+			// to In progress. That is what keeps a suite failing for an
+			// environmental reason from burning the milestone's budget
+			// in a loop nobody asked for.
+			acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentLiveSuite,
+				Reason: "boundary re-entered In progress with the live suite unsatisfied (DESIGN §10)"})
+		}
 	}
 	return acts
 }
@@ -1020,4 +1040,111 @@ func queueFeeding(st protocol.State) (protocol.State, bool) {
 		return protocol.ReadyForRework, true
 	}
 	return "", false
+}
+
+// liveSuiteVerdict is the newest live-suite result on a boundary ticket,
+// or "" when none has been posted. Comments arrive oldest first, so the
+// last marker is the newest run's.
+func liveSuiteVerdict(t *Ticket) string {
+	ms := markersOf(t, marker.LiveSuite)
+	if len(ms) == 0 {
+		return ""
+	}
+	return ms[len(ms)-1].Fields["result"]
+}
+
+// liveSuiteSatisfied reports whether the boundary agent may start.
+//
+// `no-tests` satisfies it, and that is the protocol rather than
+// leniency: a project with no `:live` tests yet is not broken, and
+// whether the milestone can close without live coverage is the author's
+// call during their pass (DESIGN §10). Blocking on it would make the
+// first boundary of every new project red for a structural reason, which
+// is how a gate becomes one people learn to click past.
+func liveSuiteSatisfied(t *Ticket) bool {
+	switch liveSuiteVerdict(t) {
+	case "pass", "no-tests":
+		return true
+	}
+	return false
+}
+
+// liveSuiteUnreported reports a failing live suite this ticket has not
+// already been sent to Blocked for.
+//
+// Positional, walking the comments once: a live-suite marker with no
+// live-suite `blocked` marker after it is a verdict nobody has been told
+// about.
+//
+// The alternative — block whenever the newest verdict is `fail` — takes
+// the ticket away from the author. Their move out of Blocked is theirs
+// to choose (DESIGN §12) and `Blocked` → `Todo` is the natural one, "seen
+// it, back to my pass". That lands on a ticket whose newest verdict is
+// still `fail`, so the next sweep parks it again, and again, and the
+// author can never reach the state their own pass happens in.
+//
+// Not an oscillation in the sense the sim harness checks for, which is
+// worth saying because that harness is what a reader would expect to
+// catch this: each sweep settles, it just settles on undoing the author.
+// Measured by removing this check — the scenario failed on a state
+// assertion, "state = blocked, want todo", not on non-convergence.
+//
+// A re-run posts a new marker, which puts the newest verdict after the
+// report again — so a second failure blocks a second time, which is the
+// point.
+func liveSuiteUnreported(t *Ticket) bool {
+	verdict, reported := -1, -1
+	for i, c := range t.Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok {
+			continue
+		}
+		switch {
+		case m.Kind == marker.LiveSuite:
+			verdict = i
+		case m.Kind == marker.Blocked && m.Fields["live-suite"] != "":
+			reported = i
+		}
+	}
+	return verdict >= 0 && reported < verdict
+}
+
+// liveSuiteFor parks the boundary ticket when the live suite fails.
+//
+// The failure used to be a comment and nothing else. A boundary ticket
+// in `Todo` looked identical whether the suite had passed, failed, run
+// no tests, or not run at all — four situations, one appearance — and
+// §10's own reasoning for not surfacing it elsewhere was that the marker
+// "lands on the boundary ticket where the author is already looking".
+// That assumption did not hold: on Catapult's ORC-99 the failure sat
+// unnoticed until somebody went and read the marker deliberately.
+//
+// `Blocked` rather than a label, because the state is the thing every
+// listing shows and the thing the author already scans for. What makes
+// it safe is that the boundary agent is gated on the verdict below, so
+// clearing this the obvious way does not skip the manual pass: entering
+// `In progress` re-runs the suite first.
+func liveSuiteFor(s *Snapshot, t *Ticket) []Action {
+	if !t.IsBoundary() || t.Resolved() {
+		return nil
+	}
+	if t.State != protocol.Todo && t.State != protocol.InProgress {
+		return nil
+	}
+	if liveSuiteVerdict(t) != "fail" || !liveSuiteUnreported(t) {
+		return nil
+	}
+	// Only once the run has stopped. A re-run in flight is about to
+	// replace this verdict, and parking the ticket underneath it would
+	// tell the author to look at a result the pipeline is already
+	// redoing.
+	if t.LiveRun("") {
+		return nil
+	}
+	return block(t,
+		&marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"live-suite": "1"}},
+		"The live suite failed and the run has finished. Read it, then either fix what it found and come back, "+
+			"or accept it and move on — moving this ticket to **Todo** resumes your manual pass, and moving it to "+
+			"**In progress** re-runs the suite before the boundary agent starts (DESIGN §10).",
+		"live suite failed (DESIGN §10)")
 }
