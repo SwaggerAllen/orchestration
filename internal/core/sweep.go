@@ -887,7 +887,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// agent reads its own step comments and picks up where it stopped.
 	// It does not begin while a blocker is open (DESIGN §10).
 	if boundary != nil && boundary.State == protocol.InProgress && liveSuiteSatisfied(boundary) &&
-		awaitingDispatch(boundary) && !s.agentBusy(AgentBoundary) && !openBlockerFor(s, boundary.ID) {
+		awaitingDispatchOf(boundary, AgentBoundary) && !s.agentBusy(AgentBoundary) && !openBlockerFor(s, boundary.ID) {
 		acts = append(acts, Action{Kind: ActDispatch, TicketID: boundary.ID, Agent: AgentBoundary,
 			Reason: "author signalled the manual pass is done (DESIGN §10)"})
 	}
@@ -898,7 +898,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// what ends the loop. A dead run without one is the author's to
 	// re-run — the sweep does not resurrect it, for the same reason
 	// stale claims are detected rather than silently retried (§12).
-	if boundary != nil && awaitingDispatch(boundary) && !s.agentBusy(AgentLiveSuite) {
+	if boundary != nil && awaitingDispatchOf(boundary, AgentLiveSuite) && !s.agentBusy(AgentLiveSuite) {
 		switch {
 		case boundary.State == protocol.Todo && liveSuiteVerdict(boundary) == "":
 			// The first run, before the author's pass, so the pass reads
@@ -973,6 +973,38 @@ func awaitingDispatch(t *Ticket) bool {
 		return true
 	}
 	return !t.Run.Live && t.StateSince.After(t.Run.EndedAt)
+}
+
+// awaitingDispatchOf answers awaitingDispatch for one agent kind.
+//
+// The plain form asks "has any run been dispatched since this ticket
+// entered its state", and that is exactly right wherever one state feeds
+// one agent — which is everywhere except one place. The boundary
+// ticket's `In progress` feeds two: the live suite re-runs there when
+// its verdict is unproven, and the boundary agent runs there when it is
+// (DESIGN §10).
+//
+// So a live-suite run that ended *after* the ticket arrived answered the
+// boundary agent's question with "something already ran here", and the
+// boundary agent never dispatched — on a green suite. Measured on
+// Catapult's ORC-99: entered `In progress` at 19:23:37, the live suite
+// passed at 19:26:09, and nothing dispatched afterwards. The ticket then
+// sat until the stale-claim rule parked it, correctly reporting that no
+// boundary run had ever been dispatched — the symptom named accurately
+// by a rule that was not the cause.
+//
+// `Run` collapses to one run per ticket, so the kind on it is the whole
+// of what can be asked. A run of another kind that is still live means
+// the ticket is busy; one that has ended means this kind has still never
+// been dispatched for this arrival.
+func awaitingDispatchOf(t *Ticket, kind AgentKind) bool {
+	if t.Run == nil {
+		return true
+	}
+	if t.Run.Kind != kind {
+		return !t.Run.Live
+	}
+	return awaitingDispatch(t)
 }
 
 // devBusy: the dev agent is singular — busy if any ticket holds a live dev

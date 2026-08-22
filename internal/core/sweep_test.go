@@ -1485,3 +1485,48 @@ func TestALiveRunHoldsTheBlockBack(t *testing.T) {
 		t.Fatalf("blocked while the suite was still running, got %v", a)
 	}
 }
+
+// The boundary agent must dispatch after the live suite it just waited
+// for, and the run that satisfied it must not be read as its own.
+//
+// Measured on Catapult's ORC-99. The ticket entered In progress at
+// 19:23:37, the re-run live suite passed at 19:26:09, and nothing
+// dispatched afterwards: awaitingDispatch asks "has any run ended since
+// this ticket arrived", the live-suite run had, and the boundary agent's
+// turn never came. The ticket then sat until the stale-claim rule parked
+// it — reporting accurately that no boundary run had ever been
+// dispatched, which was the symptom rather than the cause.
+//
+// Every other state feeds exactly one agent, so the plain form is right
+// everywhere else. The boundary ticket's In progress feeds two.
+func TestBoundaryAgentDispatchesAfterTheLiveSuiteThatSatisfiedIt(t *testing.T) {
+	b := tk("B1", protocol.InProgress,
+		func(t *Ticket) {
+			t.Labels = []string{LabelBoundary}
+			// Entered In progress, then the suite ran and passed: the
+			// run ends *after* the arrival, which is the whole bug.
+			t.StateSince = t0.Add(-3 * time.Minute)
+			t.Run = &Run{ID: "ls1", Kind: AgentLiveSuite, Live: false, EndedAt: t0.Add(-time.Minute)}
+		},
+		withComment(marker.LiveSuite, map[string]string{"result": "pass"}),
+		arrived(protocol.Todo, RoleAuthor))
+	a := find(Sweep(snap(b)), ActDispatch, "B1")
+	if a == nil || a.Agent != AgentBoundary {
+		t.Fatalf("dispatched %v, want the boundary agent", a)
+	}
+}
+
+// And the converse still holds: another kind's run that is still live
+// means the ticket is busy, so nothing else starts on top of it.
+func TestALiveRunOfAnotherKindStillHoldsTheBoundaryAgent(t *testing.T) {
+	b := tk("B1", protocol.InProgress,
+		func(t *Ticket) {
+			t.Labels = []string{LabelBoundary}
+			t.Run = &Run{ID: "ls1", Kind: AgentLiveSuite, Live: true}
+		},
+		withComment(marker.LiveSuite, map[string]string{"result": "pass"}),
+		arrived(protocol.Todo, RoleAuthor))
+	if a := find(Sweep(snap(b)), ActDispatch, "B1"); a != nil {
+		t.Fatalf("dispatched over a live run, got %v", a)
+	}
+}
