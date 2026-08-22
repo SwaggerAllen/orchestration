@@ -112,8 +112,8 @@ type Verdict struct {
 
 // Collision verdicts.
 const (
-	CollisionHolds = "holds"
-	CollisionBites = "bites"
+	CollisionHolds = protocol.CollisionHolds
+	CollisionBites = protocol.CollisionBites
 )
 
 // LoadVerdict reads and validates a verdict file.
@@ -126,10 +126,8 @@ func LoadVerdict(path string) (*Verdict, error) {
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return nil, fmt.Errorf("verdict %s: %w", path, err)
 	}
-	switch v.Collision {
-	case "", CollisionHolds, CollisionBites:
-	default:
-		return nil, fmt.Errorf("verdict: collision %q is not %q or %q", v.Collision, CollisionHolds, CollisionBites)
+	if v.Collision != "" && !protocol.Known(protocol.CollisionVerdicts, v.Collision) {
+		return nil, fmt.Errorf("verdict: collision %q is not one of %s", v.Collision, strings.Join(protocol.CollisionVerdicts, ", "))
 	}
 	switch v.Outcome {
 	case "pass":
@@ -138,7 +136,7 @@ func LoadVerdict(path string) (*Verdict, error) {
 			return nil, fmt.Errorf("verdict: outcome %q requires a report — on a fail it is the rework scope, on cannot-tell it is what a human must look at (DESIGN §11)", v.Outcome)
 		}
 	default:
-		return nil, fmt.Errorf("verdict: outcome %q is not pass, fail, or cannot-tell", v.Outcome)
+		return nil, fmt.Errorf("verdict: outcome %q is not one of %s", v.Outcome, strings.Join(protocol.ReconcileOutcomes, ", "))
 	}
 	return &v, nil
 }

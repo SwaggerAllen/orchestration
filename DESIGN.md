@@ -242,12 +242,17 @@ looks like housekeeping.
 
 Per screen, in the project repo:
 
-- **A stateless function component** — presentational, hardcoded assigns, daisyUI classes.
-- **A `.story.exs`** with one variation per state, each carrying its description.
+<!-- pipeline:list id=design-artifacts -->
+- **A stateless function component** — presentational, hardcoded assigns, daisyUI classes. No
+  socket, no live data.
+- **A `.story.exs`** with one variation per state, each carrying its description. A state name
+  IS a storybook variation name — name it as one (`cap_reached`, not "the cap-reached state").
 - **A narrative doc** (`screens/<name>.md`) for rules, standing decisions and the argument,
   with **no state sections at all**, and a front-matter **file map** naming the screen's
   component module and story file — the map is what lets CI audit per screen rather than per
-  "some design path" (§9).
+  "some design path" (§9). The state list lives in exactly one place, the stories, so nothing
+  can drift.
+<!-- /pipeline:list -->
 
 The state list lives in exactly one place. Splitting it across a prose spec and a set of
 rendered states creates a gap nothing can test, and that gap is where undesigned work hides —
@@ -746,16 +751,16 @@ failures to land one scope is a sequencing problem for the author whichever half
 | Label | Meaning |
 |---|---|
 | `frontend` / `backend` | Where the work happens. Not a scoping constraint — one ticket may contain both. |
-| `tech-debt` | Work on the shape of the code rather than what it does. Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
+| `tech-debt` | Work on the shape of the code rather than what it does. A boundary proposal of kind `debt` files under it (§13). Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
 | `bug` | Defect: something that does not do what it says, as against `tech-debt`'s shape of the code. Runs the normal pipeline; `Urgent` is what makes it preempt. Filed by the author, or proposed by the boundary (§10). |
-| `design-inbox` | Provenance: this came from the design agent. The question you'll want answered later when something looks odd. |
+| `design-inbox` | Provenance: this came from the design agent, or from a boundary proposal of kind `design` (§13). The question you'll want answered later when something looks odd. |
 | `screen:<name>` | The design half of the mutex (§6). |
 | `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
 | `re-evaluate` | Unresolved collision (§7). |
-| `needs-review` | Reconciliation couldn't tell. Deployed, clean, awaiting the author's eye (§11). |
-| `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
-| `scope-satisfied` | The run found the whole scope already on `main` and changed nothing (§12). Almost always a duplicate to cancel. |
-| `pushback` | The design can't be built as drawn (§2.7). Parked for the author to redesign or rescope. |
+| `needs-review` | Reconciliation couldn't tell — the `cannot-tell` verdict (§11, §13). Deployed, clean, awaiting the author's eye. |
+| `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
+| `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
+| `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
@@ -1082,6 +1087,40 @@ signal that was missing.
    project's `:live`-tagged tests — real network, real providers, the one deliberately
    non-deterministic check, once per milestone. The run posts a result marker on the ticket;
    the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
+
+   **A failure parks the ticket in `Blocked`, and the verdict gates the boundary agent.** The
+   marker used to be the whole of it, on the reasoning that it "lands on the boundary ticket
+   where the author is already looking". That assumption did not hold. A boundary ticket in
+   `Todo` looks identical whether the suite passed, failed, ran no tests, or has not run at all
+   — four situations, one appearance — and on Catapult's ORC-99 a real failure sat unnoticed
+   until somebody went and read the marker deliberately. State is what every listing shows.
+
+   What makes `Blocked` safe here, rather than a state that swallows the manual pass, is the
+   gate: **the boundary agent does not start until the newest verdict is `pass` or `no-tests`,
+   and a boundary ticket entering `In progress` with the suite unproven re-runs the suite
+   first.** So the two ways out of `Blocked` both work and mean different things — `Todo`
+   resumes the manual pass, `In progress` says the pass is done and re-runs the suite before
+   the agent. Without the gate, clearing the block the obvious way would skip the pass
+   entirely.
+
+   `no-tests` satisfies the gate. A project with no `:live` tests yet is not broken, and
+   whether the milestone can close without live coverage is the author's call — blocking on it
+   would make the first boundary of every new project red for a structural reason, which is how
+   a gate becomes one people learn to click past.
+
+   **Each retry costs a deliberate move.** A re-run that fails again parks the ticket again,
+   and nothing dispatches from `Blocked` — so a suite failing for an environmental reason
+   cannot loop through the milestone's budget on its own. The author decides each time.
+
+   **A verdict already reported is not reported twice.** The block fires on a live-suite marker
+   with no live-suite `blocked` marker after it, not on "the newest verdict is `fail`". Keyed
+   the second way, an author moving `Blocked` → `Todo` — the natural gesture, meaning "seen it,
+   back to my pass" — would land on a ticket whose verdict is still `fail` and be parked again
+   on the next sweep, and every sweep after it. The author could never reach the state their
+   own pass happens in.
+
+   Note what that is not: each sweep still settles, so the convergence check every simulated
+   scenario runs would pass it. The failure is that the pass converges on undoing the author.
    Per-ticket CI stays deterministic and merges never gate on this — the live suite gates the
    milestone, not the ticket, because a live check on every ticket would put network flake
    inside the escalation rules (§12), and a live check that never runs is how "merged and
@@ -1116,7 +1155,10 @@ signal that was missing.
    testing across the milestone, plus every `Blocked` ticket carrying `needs-review`, each of
    which the author closes or sends to `Ready for rework`. Blockers filed during the pass run
    the normal design and dev loop.
-5. Author moves the boundary ticket to `In progress`. **This is the signal.**
+5. Author moves the boundary ticket to `In progress`. **This is the signal.** If the live suite
+   has not passed by then — it failed, or its run died without posting a verdict — the suite
+   re-runs before the boundary agent starts, and a second failure returns the ticket to
+   `Blocked`.
 6. **Archive pass.** The milestone's `Done` issues are archived — which reclaims tracker
    headroom but makes them invisible to the "is this already filed?" check. So the archive pass
    **emits a retro note into the repo**: issue keys, titles and merge shas, one line each.
@@ -1133,10 +1175,54 @@ signal that was missing.
    The general rule, which this section now instances twice: **information that exists at
    exactly one moment is owned by the step that ends that moment.** Anything a later pass needs
    about archived work has to be in the note, because the note is the only thing that survives.
-7. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
-   skipped or deleted tests, dependency and advisory drift, and **the harness findings agents
-   recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
-   invented findings.
+7. **Debt scan**, bounded inputs only. Bounded because "did we take on debt?" asked openly
+   produces invented findings.
+
+   <!-- pipeline:list id=debt-scan-inputs -->
+   - Diffs merged since the last boundary (the previous retro note under `docs/retros/` marks
+     where that was; `git log` from there).
+   - New `TODO` / `FIXME` markers.
+   - Skipped or deleted tests.
+   - Dependency and advisory drift. **Both halves of an acknowledged advisory, not just the
+     version.** An `ignore_advisories` entry (or its equivalent) usually rests on two
+     independent justifications: that there is nothing newer to move to, and that no path to
+     the flaw is reachable from this project's own code. The first self-expires — the audit
+     tool flags a listed ID matching nothing, so a bump makes it fall out on its own. The
+     second is prose, and nothing derives it, tests it or notices when it stops being true. So
+     re-read each reachability claim against the code as it stands now, and treat one the diff
+     has falsified as a finding.
+   <!-- /pipeline:list -->
+
+   **The harness findings agents recorded this milestone are a sixth input, and deliberately
+   not in that list.** The list is what a pass goes and looks for; the findings are handed to
+   it, rendered into the prompt by the harness. Saying "go and find the harness findings"
+   would describe work nobody does. This is the difference the two copies of this list used to
+   leave unexplained — DESIGN counted five where the prompt counted four, and nothing recorded
+   whether that was a decision.
+
+   **Advisory drift means both halves of an acknowledged advisory.** An ignore entry usually
+   rests on two independent justifications, and only one of them can expire by itself. "There is
+   nothing newer to move to" self-expires: the audit tool flags a listed ID that matches nothing,
+   so a dependency bump makes the acknowledgement fall out. "No path to the flaw is reachable
+   from our own code" is prose — nothing derives it, nothing tests it, and no gate notices when a
+   new listener makes it false. So the scan re-reads each reachability claim against the code as
+   it stands, and a claim the diff has falsified is a finding.
+
+   Measured on Catapult: the cowlib entry said "the plane serves `/health` only", ORC-9's
+   `DispatchPlug` gave that listener `/dispatch/*` and updated the README and `SETUP.md` in the
+   same commit, and `mix.exs` was the one place the sentence did not get updated. It stayed stale
+   for a full milestone with every gate green, and what caught it was a debt scan reading the
+   diff rather than any check.
+
+   **Once per milestone rather than once per ticket**, which is why it is here and not a project
+   convention. A convention is read by every pass, so it would put a recurring audit into the
+   standing cost of every piece of work, for a class of rot that only moves when a listener
+   changes. Catching one early is a bonus, not the mechanism.
+
+   The general form is worth stating, because it outlives advisories: the bounded-input list is
+   what stops the scan inventing findings, and it is equally what decides which kinds of rot are
+   visible at all. **A justification that cannot expire on its own needs a pass that re-reads it,
+   or it is permanent by construction.**
 
    **The archive step carries the findings out.** They live in comments on the milestone's
    tickets, and step 6 archives exactly those tickets — an archived issue vanishes from
@@ -1226,6 +1312,13 @@ The boundary agent does not begin while a blocker is open.
 The boundary agent has a lot to do and can fail partway. Recovery is `Blocked` → `In progress`
 or `Boundary review` → `In progress`, possibly more than once, and neither is useful if
 re-entry means starting over.
+
+**`Blocked` on a boundary ticket has two causes, and re-entry handles both the same way.** The
+agent's own run died, or the live suite failed (§10 step 2). Entering `In progress` re-runs the
+live suite when its newest verdict is not `pass` or `no-tests`, and dispatches the agent when
+it is — so an author who cannot tell which of the two parked it does not have to: the same
+gesture does the right thing either way, and the flavor on the `blocked` marker says which it
+was for anyone who wants to know.
 
 **Each step posts a completion comment on the boundary ticket.** On entry to `In progress` the
 agent reads its own comments and resumes at the first step without one. That is the whole
@@ -1668,8 +1761,10 @@ invariant is only as strong as one-dispatcher.
 | Reconcile fail | State → `Ready for rework` |
 | Deployment active, SHA ≥ merge SHA | Post-deploy check → `Done`, or `Blocked` if it failed or carries `needs-review` |
 | Last milestone ticket resolves | Pause queue; create the boundary ticket (§10) |
-| Boundary ticket in `Todo`, no live-suite result | Dispatch the live-suite run, once; its result marker ends the loop (§10) |
-| Boundary ticket → `In progress` | Boundary agent run: archive, debt scan, grooming |
+| Boundary ticket in `Todo`, no live-suite result | Dispatch the live-suite run, once (§10) |
+| Live-suite verdict `fail`, run finished, not already reported | Boundary ticket → `Blocked`, marker flavor `live-suite` (§10) |
+| Boundary ticket → `In progress`, newest verdict not `pass`/`no-tests` | Re-dispatch the live suite; the boundary agent waits (§10) |
+| Boundary ticket → `In progress`, live suite satisfied | Boundary agent run: archive, debt scan, grooming |
 | Boundary ticket → `Done` | Resume queue |
 | Agent-owned state, dispatched run dead past grace period | State → `Blocked`, comment naming the dead run (§12) |
 | Guarded transition violated (§9) | Revert to prior state, comment naming the rule |
@@ -1801,6 +1896,64 @@ start workflows in every project repo.
 Durable Object per project *is* the single-dev-agent mutex, serialized by construction. Watch the
 free-plan cap of three cron triggers per Worker, and the absence of retries or failure alerting on
 them.
+
+---
+
+### What an agent's outcome does
+
+The trigger table above is *condition → action* for the control plane. This is the other half:
+*outcome → action* for the agents. Every value a pass may emit, and what the harness does with
+it.
+
+The edges are the part that was written nowhere. §8's table says what each label means; the
+prompts say which value to emit; the code maps one to the other in five separate `switch`
+statements. Nothing said which value produced which label.
+
+**Four values do not name what they produce**, and they are bolded below: `needs-setup` writes
+a marker field called `setup`, `cannot-tell` sets `needs-review`, `debt` files under
+`tech-debt`, `design` under `design-inbox`. A reader who assumes the value *is* the label is
+right about `pushback` and `bug` and wrong about those — which is the shape of thing worth
+writing down once rather than inferring at each call site. `decisionless` is bolded for a
+different reason: it is the one outcome that skips a state, going straight to `Ready for dev`
+without passing through `Design review`.
+
+<!-- pipeline:list id=agent-outcomes for=tests -->
+| emitter | value | → state | → label | → marker |
+|---|---|---|---|---|
+| abort | `pushback` | `Blocked` | `pushback` | blocked, `pushback=1` |
+| abort | `failed` | `Blocked` | — | blocked, no flavor |
+| abort | `needs-setup` | `Blocked` | `needs-setup` | blocked, **`setup=1`** |
+| abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
+| abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
+| design | `artifacts` | `Design review` | the pass's mutex labels | — |
+| design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
+| design | `clear` | unchanged | removes `re-evaluate` | — |
+| design | `demote` | `Ready for design` | — | — |
+| reconcile | `pass` | `Merged` | — | merged |
+| reconcile | `fail` | `Ready for rework` | — | reconcile-bounce |
+| reconcile | `cannot-tell` | `Merged` | **`needs-review`** | merged |
+| reconcile | collision `holds` | unchanged | — | — |
+| reconcile | collision `bites` | `Ready for rework` | — | reconcile-bounce |
+| boundary | kind `debt` | Triage | **`tech-debt`** | triage-proposal |
+| boundary | kind `design` | Triage | **`design-inbox`** | triage-proposal |
+| boundary | kind `harness` | Triage | `harness` | triage-proposal |
+| boundary | kind `bug` | Triage | `bug` | triage-proposal |
+| live suite | `pass` | unchanged | — | live-suite |
+| live suite | `fail` | **`Blocked`** | — | live-suite, then blocked `live-suite=1` |
+| live suite | `no-tests` | unchanged | — | live-suite |
+<!-- /pipeline:list -->
+
+`failed` is the only abort reason that takes no label, and that is the rule rather than an
+omission: it means the harness broke, which is not a fact about the ticket.
+
+**What is held to the code and what is not.** The **value** column is asserted against
+`protocol`'s vocabularies in both directions, so a value added to one and not the other fails
+CI naming the document it is missing from. The **label** column is asserted for the boundary
+rows, which are a lookup rather than control flow. State and marker are documentation:
+accurate when written, not derived. Encoding them would mean rewriting five `switch`
+statements into data-driven dispatch, and those switches validate arguments and call helpers
+as well as mapping — the rewrite would risk more than the drift it prevents. Saying which is
+which beats implying the whole table is machine-checked.
 
 ---
 

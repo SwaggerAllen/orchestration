@@ -354,9 +354,13 @@ func TestBoundaryCreationPauseAndDrain(t *testing.T) {
 }
 
 func TestBoundaryAgentDispatchedOnAuthorSignal(t *testing.T) {
+	// Carrying a passing verdict, because the agent is gated on one: a
+	// boundary re-entering In progress with the suite unproven re-runs
+	// the suite first (DESIGN §10).
 	boundary := tk("B1", protocol.InProgress, func(t *Ticket) {
 		t.Labels = []string{LabelBoundary}
-	}, arrived(protocol.Todo, RoleAuthor))
+	}, withComment(marker.LiveSuite, map[string]string{"result": "pass"}),
+		arrived(protocol.Todo, RoleAuthor))
 	acts := Sweep(snap(boundary))
 	if a := find(acts, ActDispatch, "B1"); a == nil || a.Agent != AgentBoundary {
 		t.Errorf("want boundary agent dispatch, got %v", acts)
@@ -418,7 +422,7 @@ func TestLiveSuiteNotRedispatchedAfterResult(t *testing.T) {
 		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
 		withComment(marker.LiveSuite, map[string]string{"result": "fail", "run": "https://ci/1"}))
 	if a := find(Sweep(snap(b)), ActDispatch, "B1"); a != nil {
-		t.Fatalf("the result marker ends the loop — no dispatch wanted, got %v", a)
+		t.Fatalf("a verdict ends the first-run loop — no dispatch wanted, got %v", a)
 	}
 }
 
@@ -442,14 +446,40 @@ func TestLiveSuiteNotRedispatchedWhileRunningOrAfterDeadRun(t *testing.T) {
 	}
 }
 
-func TestLiveSuiteNotDispatchedPastTodo(t *testing.T) {
-	b := tk("B1", protocol.InProgress,
-		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
-		arrived(protocol.Todo, RoleAuthor))
-	acts := Sweep(snap(b))
-	for _, a := range acts {
-		if a.Kind == ActDispatch && a.Agent == AgentLiveSuite {
-			t.Fatalf("live suite dispatches only in Todo, got %v", a)
+// Entering In progress with the suite unproven re-runs it, and the
+// boundary agent waits. The two dispatches are mutually exclusive by
+// construction — one fires when the verdict is satisfied, the other when
+// it is not — so the agent can never start against an unproven tree.
+//
+// This replaces a test asserting the live suite dispatches only from
+// Todo. That was true and is the thing that changed: a suite that failed
+// or never ran left the boundary agent free to run anyway, and the only
+// record was a comment nobody was looking at.
+func TestLiveSuiteRerunsWhenTheBoundaryReentersInProgress(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		verdict string
+		want    AgentKind
+	}{
+		{"never ran", "", AgentLiveSuite},
+		{"failed", "fail", AgentLiveSuite},
+		{"passed", "pass", AgentBoundary},
+		// Neither verdict, and the author's call — not a barrier to it.
+		{"no tests", "no-tests", AgentBoundary},
+	} {
+		muts := []func(*Ticket){func(t *Ticket) { t.Labels = []string{LabelBoundary} }}
+		if c.verdict != "" {
+			muts = append(muts, withComment(marker.LiveSuite, map[string]string{"result": c.verdict}))
+		}
+		// Already reported, so the block rule is not what is under test.
+		if c.verdict == "fail" {
+			muts = append(muts, withComment(marker.Blocked, map[string]string{"live-suite": "1"}))
+		}
+		muts = append(muts, arrived(protocol.Todo, RoleAuthor))
+		b := tk("B1", protocol.InProgress, muts...)
+		a := find(Sweep(snap(b)), ActDispatch, "B1")
+		if a == nil || a.Agent != c.want {
+			t.Errorf("%s: dispatched %v, want %s", c.name, a, c.want)
 		}
 	}
 }
@@ -1364,5 +1394,94 @@ func TestTheFlagTravelsIntoReconciling(t *testing.T) {
 	}
 	if !flagged.HasLabel(LabelReEvaluate) {
 		t.Error("the flag did not survive the pass")
+	}
+}
+
+// A failing live suite parks the boundary ticket, because a comment was
+// not a signal.
+//
+// Measured on Catapult's ORC-99: the run failed, posted its marker, and
+// the ticket sat in Todo looking exactly as it would have looked on a
+// pass, on a no-tests, or before the suite ran at all. Four situations,
+// one appearance — and §10's reason for not surfacing it anywhere else
+// was that the marker "lands on the boundary ticket where the author is
+// already looking".
+func TestFailingLiveSuiteBlocksTheBoundaryTicket(t *testing.T) {
+	b := tk("B1", protocol.Todo,
+		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+		withComment(marker.LiveSuite, map[string]string{"result": "fail", "run": "https://ci/1"}))
+	a := find(Sweep(snap(b)), ActTransition, "B1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want the boundary parked in Blocked, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Fields["live-suite"] == "" {
+		t.Errorf("the block must say which flavor it is, got %v", a.Marker)
+	}
+	// The origin, so the author knows what they are returning to.
+	if a.Marker.Fields["from"] != string(protocol.Todo) {
+		t.Errorf("from = %q, want todo", a.Marker.Fields["from"])
+	}
+}
+
+// Neither of the other two verdicts parks anything. `no-tests` is
+// deliberately neither a pass nor a failure (DESIGN §10) and the author's
+// pass decides whether the milestone closes without live coverage —
+// blocking on it would make the first boundary of every new project red
+// for a structural reason.
+func TestOnlyAFailingLiveSuiteBlocks(t *testing.T) {
+	for _, verdict := range []string{"pass", "no-tests"} {
+		b := tk("B1", protocol.Todo,
+			func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+			withComment(marker.LiveSuite, map[string]string{"result": verdict}))
+		if a := find(Sweep(snap(b)), ActTransition, "B1"); a != nil {
+			t.Errorf("%s: moved the ticket, got %v", verdict, a)
+		}
+	}
+}
+
+// The oscillation this rule has to survive. The author's move out of
+// Blocked is theirs to choose (DESIGN §12), and Blocked -> Todo is the
+// natural one: it says "seen it, back to my pass". The verdict is still
+// `fail` at that moment, so a rule keyed on the verdict alone would park
+// the ticket again on the very next sweep, forever, with the author
+// unable to do anything about it.
+func TestABlockedLiveSuiteIsNotReportedTwice(t *testing.T) {
+	b := tk("B1", protocol.Todo,
+		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+		withComment(marker.LiveSuite, map[string]string{"result": "fail"}),
+		withComment(marker.Blocked, map[string]string{"live-suite": "1", "from": "todo"}),
+		arrived(protocol.Blocked, RoleAuthor))
+	if a := find(Sweep(snap(b)), ActTransition, "B1"); a != nil {
+		t.Fatalf("re-blocked a verdict already reported, got %v", a)
+	}
+}
+
+// But a second failure is a second thing to say. A re-run posts a new
+// marker, which puts the newest verdict after the report again.
+func TestASecondLiveSuiteFailureBlocksAgain(t *testing.T) {
+	b := tk("B1", protocol.InProgress,
+		func(t *Ticket) { t.Labels = []string{LabelBoundary} },
+		withComment(marker.LiveSuite, map[string]string{"result": "fail"}),
+		withComment(marker.Blocked, map[string]string{"live-suite": "1", "from": "todo"}),
+		withComment(marker.LiveSuite, map[string]string{"result": "fail", "run": "https://ci/2"}),
+		arrived(protocol.Todo, RoleAuthor))
+	a := find(Sweep(snap(b)), ActTransition, "B1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want the re-run's failure parked too, got %v", a)
+	}
+}
+
+// Not while the re-run is still going. Parking the ticket underneath a
+// live run tells the author to look at a result the pipeline is already
+// redoing.
+func TestALiveRunHoldsTheBlockBack(t *testing.T) {
+	b := tk("B1", protocol.InProgress,
+		func(t *Ticket) {
+			t.Labels = []string{LabelBoundary}
+			t.Run = &Run{ID: "r2", Kind: AgentLiveSuite, Live: true}
+		},
+		withComment(marker.LiveSuite, map[string]string{"result": "fail"}))
+	if a := find(Sweep(snap(b)), ActTransition, "B1"); a != nil {
+		t.Fatalf("blocked while the suite was still running, got %v", a)
 	}
 }

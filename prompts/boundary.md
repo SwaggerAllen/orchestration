@@ -10,11 +10,7 @@ the **grooming pass**, producing proposals the harness files into Triage.
 Examine exactly these, and nothing else — "did we take on debt?" asked
 openly produces invented findings:
 
-- Diffs merged since the last boundary (the previous retro note under
-  `docs/retros/` marks where that was; `git log` from there).
-- New `TODO` / `FIXME` markers.
-- Skipped or deleted tests.
-- Dependency and advisory drift.
+<!-- pipeline:include debt-scan-inputs (DESIGN §10 step 7) -->
 
 For each finding, apply the **gating test**: does the next product
 milestone get materially harder without this? The milestone list below

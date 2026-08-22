@@ -127,33 +127,22 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 	if err != nil {
 		return err
 	}
-	label := "tech-debt"
-	switch kind {
-	case "design":
-		label = "design-inbox"
-	case "harness":
-		// The pipeline's own problems, filed where the author triages
-		// everything else but labelled apart: "is the harness costing
-		// us tickets" is a different question from "is this codebase
-		// accruing debt", and one list cannot answer both.
-		label = "harness"
-	case "bug":
-		// A defect, and this label is the whole of what naming one
-		// buys. DebtBacklog draws `tech-debt`, so a bug left on the
-		// default label is scheduled by the debt milestone's
-		// composition instead of running as soon as the author accepts
-		// it out of Triage (DESIGN §8) — which is the rescheduling the
-		// old never-bugs rule was written to prevent and, filed as
-		// debt, produced.
-		//
-		// No provisioning risk: `bug` entered protocol.Labels on
-		// 2026-08-11, three days before `harness` did, so setup has
-		// been creating it on every team since. Worth stating because
-		// `harness` above shipped without that property — the filer
-		// learned to emit it in the same commit that added it, nothing
-		// re-runs setup after an upgrade, and ORC-45 died twice at
-		// eleven minutes of spend on `no label "harness" in team`.
-		label = "bug"
+	// One lookup, no switch. The mapping is protocol (DESIGN §13) and
+	// three of the four entries are not the identity, so a reader who
+	// assumes kind equals label is right about `harness` and `bug` and
+	// wrong about the other two — which is exactly the shape of thing
+	// that belongs written down once rather than inferred at each call.
+	//
+	// Refused rather than defaulted. This used to start at `tech-debt`
+	// and switch away from it, so a kind nobody had mapped filed itself
+	// as debt: that is how a bug proposal landed in the debt backlog and
+	// waited for a debt milestone, the failure the never-bugs reversal
+	// was about. ParseProposals rejects an unknown kind before this
+	// runs, so reaching here means the two vocabularies disagree, and
+	// filing under a guess would hide it.
+	label, ok := protocol.ProposalLabels[kind]
+	if !ok {
+		return fmt.Errorf("proposal kind %q has no label in protocol.ProposalLabels — filing it would have to guess (DESIGN §13)", kind)
 	}
 	m := marker.Marker{Kind: marker.TriageProposal, Fields: map[string]string{
 		"dedupe": dedupe,
