@@ -1138,6 +1138,30 @@ signal that was missing.
    recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
    invented findings.
 
+   **Advisory drift means both halves of an acknowledged advisory.** An ignore entry usually
+   rests on two independent justifications, and only one of them can expire by itself. "There is
+   nothing newer to move to" self-expires: the audit tool flags a listed ID that matches nothing,
+   so a dependency bump makes the acknowledgement fall out. "No path to the flaw is reachable
+   from our own code" is prose — nothing derives it, nothing tests it, and no gate notices when a
+   new listener makes it false. So the scan re-reads each reachability claim against the code as
+   it stands, and a claim the diff has falsified is a finding.
+
+   Measured on Catapult: the cowlib entry said "the plane serves `/health` only", ORC-9's
+   `DispatchPlug` gave that listener `/dispatch/*` and updated the README and `SETUP.md` in the
+   same commit, and `mix.exs` was the one place the sentence did not get updated. It stayed stale
+   for a full milestone with every gate green, and what caught it was a debt scan reading the
+   diff rather than any check.
+
+   **Once per milestone rather than once per ticket**, which is why it is here and not a project
+   convention. A convention is read by every pass, so it would put a recurring audit into the
+   standing cost of every piece of work, for a class of rot that only moves when a listener
+   changes. Catching one early is a bonus, not the mechanism.
+
+   The general form is worth stating, because it outlives advisories: the bounded-input list is
+   what stops the scan inventing findings, and it is equally what decides which kinds of rot are
+   visible at all. **A justification that cannot expire on its own needs a pass that re-reads it,
+   or it is permanent by construction.**
+
    **The archive step carries the findings out.** They live in comments on the milestone's
    tickets, and step 6 archives exactly those tickets — an archived issue vanishes from
    listings, so a boundary that dies between archiving and scanning resumes into a claim that

@@ -14,7 +14,21 @@ openly produces invented findings:
   `docs/retros/` marks where that was; `git log` from there).
 - New `TODO` / `FIXME` markers.
 - Skipped or deleted tests.
-- Dependency and advisory drift.
+- Dependency and advisory drift. **Both halves of an acknowledged
+  advisory, not just the version.** An `ignore_advisories` entry (or its
+  equivalent) usually rests on two independent justifications: that
+  there is nothing newer to move to, and that no path to the flaw is
+  reachable from this project's own code. The first self-expires — the
+  audit tool flags a listed ID matching nothing, so a bump makes it fall
+  out on its own. The second is prose, and nothing derives it, tests it
+  or notices when it stops being true.
+
+  So re-read each reachability claim against the code as it stands now,
+  and treat one the diff has falsified as a finding. Catapult's cowlib
+  entry said "the plane serves /health only"; ORC-9 gave that listener
+  `/dispatch/*` and updated the README and SETUP.md in the same commit,
+  and `mix.exs` was the one place the sentence did not get updated. It
+  stayed stale for a milestone with every gate green.
 
 For each finding, apply the **gating test**: does the next product
 milestone get materially harder without this? The milestone list below
