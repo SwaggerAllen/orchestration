@@ -18,6 +18,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/promptdoc"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
@@ -104,17 +105,17 @@ func cmdAgentReprompt(args []string) error {
 	// The one thing that changed: the tree under our feet.
 	before := res.NonAsks
 	res.NonAsks = agent.ClaimNonAsks(cfg)
-	tpl, err := os.ReadFile(*promptTemplate)
+	tpl, err := loadPromptFile(*promptTemplate)
 	if err != nil {
 		return err
 	}
-	var rc []byte
+	var rc string
 	if *repoContext != "" {
-		if rc, err = os.ReadFile(*repoContext); err != nil {
+		if rc, err = loadPromptFile(*repoContext); err != nil {
 			return err
 		}
 	}
-	prompt := assembleDesignPrompt(composeBase(string(tpl), string(rc)), &res, *outcomePath)
+	prompt := assembleDesignPrompt(composeBase(tpl, rc), &res, *outcomePath)
 	prompt += harnessFindingsSection(*findingsPath)
 	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return err
@@ -246,18 +247,18 @@ func cmdAgentClaim(args []string) error {
 		return err
 	}
 	if *promptTemplate != "" {
-		tpl, err := os.ReadFile(*promptTemplate)
+		tpl, err := loadPromptFile(*promptTemplate)
 		if err != nil {
 			return err
 		}
-		var ctx []byte
+		var ctx string
 		if *repoContext != "" {
-			ctx, err = os.ReadFile(*repoContext)
+			ctx, err = loadPromptFile(*repoContext)
 			if err != nil {
 				return err
 			}
 		}
-		base := composeBase(string(tpl), string(ctx))
+		base := composeBase(tpl, ctx)
 		var prompt string
 		switch *kind {
 		case "reconcile":
@@ -303,6 +304,47 @@ func cmdAgentClaim(args []string) error {
 // Order is the point: role prompt first, orientation second, ticket
 // last. The orientation says where you are, not what to do, and a run
 // that reads them in the wrong order weighs them in the wrong order.
+// loadPromptFile reads a prompt template and resolves its DESIGN
+// includes (DESIGN §13).
+//
+// The path to DESIGN is derived, not passed, and that is a constraint
+// rather than a convenience: `.github/workflows/**` is author-owned in
+// every project (DESIGN §5), so a new `--design` input would not reach a
+// single project until a separate author-owned change landed in each of
+// them first. Prompts already load from `$GITHUB_WORKSPACE/.pipeline/
+// prompts/`, so DESIGN.md is the sibling of the directory they sit in,
+// and nothing about the call has to change.
+//
+// A template with no includes never looks for DESIGN at all — that keeps
+// a bare prompt working anywhere. A template WITH an include and no
+// DESIGN beside it is a hard error, because the alternative is a prompt
+// silently short a section, and a pass missing a rule does not report
+// that it is missing one. It does the wrong thing and says it went fine.
+func loadPromptFile(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	body := string(raw)
+	if len(promptdoc.Includes(body)) == 0 {
+		return body, nil
+	}
+	design := filepath.Join(filepath.Dir(path), "..", "DESIGN.md")
+	doc, err := os.ReadFile(design)
+	if err != nil {
+		return "", fmt.Errorf("%s includes a DESIGN list but %s is unreadable: %w", path, design, err)
+	}
+	blocks, err := promptdoc.Blocks(string(doc))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", design, err)
+	}
+	out, err := promptdoc.Expand(body, blocks)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	return out, nil
+}
+
 func composeBase(rolePrompt, repoContext string) string {
 	if repoContext == "" {
 		return rolePrompt

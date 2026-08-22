@@ -8,14 +8,7 @@ everything you need is in this prompt and the repository in front of you.
 
 Per screen touched:
 
-- **A stateless function component** — presentational, hardcoded assigns,
-  daisyUI classes. No socket, no live data.
-- **A `.story.exs`** with one variation per state, each carrying its
-  description. A state name IS a storybook variation name — name it as
-  one (`cap_reached`, not "the cap-reached state").
-- **A narrative doc** (`screens/<name>.md`) for rules, standing decisions
-  and the argument, with **no state sections at all**. The state list
-  lives in exactly one place — the stories — so nothing can drift.
+<!-- pipeline:include design-artifacts (DESIGN §4) -->
 
 Per ticket, when structure changes — **the sketch** (DESIGN §4): a diff
 against `systems/<name>.md`. A new system is a new doc (with a

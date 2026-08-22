@@ -622,7 +622,7 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"scope-satisfied": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelScopeSatisfied)
 	default:
-		return fmt.Errorf("abort: reason must be pushback, failed, needs-setup, scope-satisfied or author-only, got %q", reason)
+		return fmt.Errorf("abort: reason must be one of %s, got %q", strings.Join(protocol.AbortReasons, ", "), reason)
 	}
 	if m != nil {
 		m.Fields["from"] = string(res.State)

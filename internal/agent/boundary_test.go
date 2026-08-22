@@ -590,7 +590,13 @@ func TestBoundaryPromptSchemaNamesEveryKindTheParserAccepts(t *testing.T) {
 	}
 	// And every kind the parser accepts must be offered, or a boundary
 	// reading the schema never learns the channel exists.
-	for _, kind := range []string{"debt", "design", "harness"} {
+	//
+	// Read from protocol, not restated. This loop used to hold its own
+	// `{"debt", "design", "harness"}` — a fourth copy of the vocabulary,
+	// in the test whose own comment says not to make one — and it was
+	// not updated when `bug` was added. Dropping `bug` from the schema,
+	// which would mean no boundary pass ever files one, left this green.
+	for _, kind := range protocol.ProposalKinds {
 		if !offered[kind] {
 			t.Errorf("the parser accepts kind %q and the schema never names it: %s", kind, strings.TrimSpace(schema))
 		}

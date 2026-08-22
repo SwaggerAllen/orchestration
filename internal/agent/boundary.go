@@ -406,10 +406,9 @@ func ParseProposals(raw []byte) (*Proposals, error) {
 		if pr.Title == "" || pr.Dedupe == "" {
 			return nil, fmt.Errorf("proposal %d: title and dedupe are required — without the key a re-run files it twice (DESIGN §10)", i)
 		}
-		switch pr.Kind {
-		case "debt", "design", "harness", "bug":
-		default:
-			return nil, fmt.Errorf("proposal %d (%s): kind %q — one of debt, design, harness, bug (DESIGN §10)", i, pr.Title, pr.Kind)
+		if !protocol.Known(protocol.ProposalKinds, pr.Kind) {
+			return nil, fmt.Errorf("proposal %d (%s): kind %q — one of %s (DESIGN §10)",
+				i, pr.Title, pr.Kind, strings.Join(protocol.ProposalKinds, ", "))
 		}
 	}
 	for i, r := range ps.Ranking {

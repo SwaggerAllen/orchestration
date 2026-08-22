@@ -242,12 +242,17 @@ looks like housekeeping.
 
 Per screen, in the project repo:
 
-- **A stateless function component** — presentational, hardcoded assigns, daisyUI classes.
-- **A `.story.exs`** with one variation per state, each carrying its description.
+<!-- pipeline:list id=design-artifacts -->
+- **A stateless function component** — presentational, hardcoded assigns, daisyUI classes. No
+  socket, no live data.
+- **A `.story.exs`** with one variation per state, each carrying its description. A state name
+  IS a storybook variation name — name it as one (`cap_reached`, not "the cap-reached state").
 - **A narrative doc** (`screens/<name>.md`) for rules, standing decisions and the argument,
   with **no state sections at all**, and a front-matter **file map** naming the screen's
   component module and story file — the map is what lets CI audit per screen rather than per
-  "some design path" (§9).
+  "some design path" (§9). The state list lives in exactly one place, the stories, so nothing
+  can drift.
+<!-- /pipeline:list -->
 
 The state list lives in exactly one place. Splitting it across a prose spec and a set of
 rendered states creates a gap nothing can test, and that gap is where undesigned work hides —
@@ -746,16 +751,16 @@ failures to land one scope is a sequencing problem for the author whichever half
 | Label | Meaning |
 |---|---|
 | `frontend` / `backend` | Where the work happens. Not a scoping constraint — one ticket may contain both. |
-| `tech-debt` | Work on the shape of the code rather than what it does. Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
+| `tech-debt` | Work on the shape of the code rather than what it does. A boundary proposal of kind `debt` files under it (§13). Survives the label admission test because debt doesn't stop being debt when it changes hands; it gets paid. |
 | `bug` | Defect: something that does not do what it says, as against `tech-debt`'s shape of the code. Runs the normal pipeline; `Urgent` is what makes it preempt. Filed by the author, or proposed by the boundary (§10). |
-| `design-inbox` | Provenance: this came from the design agent. The question you'll want answered later when something looks odd. |
+| `design-inbox` | Provenance: this came from the design agent, or from a boundary proposal of kind `design` (§13). The question you'll want answered later when something looks odd. |
 | `screen:<name>` | The design half of the mutex (§6). |
 | `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
 | `re-evaluate` | Unresolved collision (§7). |
-| `needs-review` | Reconciliation couldn't tell. Deployed, clean, awaiting the author's eye (§11). |
-| `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account (§12). Blocked, but not broken. |
-| `scope-satisfied` | The run found the whole scope already on `main` and changed nothing (§12). Almost always a duplicate to cancel. |
-| `pushback` | The design can't be built as drawn (§2.7). Parked for the author to redesign or rescope. |
+| `needs-review` | Reconciliation couldn't tell — the `cannot-tell` verdict (§11, §13). Deployed, clean, awaiting the author's eye. |
+| `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
+| `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
+| `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
@@ -1133,10 +1138,30 @@ signal that was missing.
    The general rule, which this section now instances twice: **information that exists at
    exactly one moment is owned by the step that ends that moment.** Anything a later pass needs
    about archived work has to be in the note, because the note is the only thing that survives.
-7. **Debt scan**, bounded inputs only: diffs merged since the last boundary, new `TODO`/`FIXME`,
-   skipped or deleted tests, dependency and advisory drift, and **the harness findings agents
-   recorded this milestone**. Bounded because "did we take on debt?" asked openly produces
-   invented findings.
+7. **Debt scan**, bounded inputs only. Bounded because "did we take on debt?" asked openly
+   produces invented findings.
+
+   <!-- pipeline:list id=debt-scan-inputs -->
+   - Diffs merged since the last boundary (the previous retro note under `docs/retros/` marks
+     where that was; `git log` from there).
+   - New `TODO` / `FIXME` markers.
+   - Skipped or deleted tests.
+   - Dependency and advisory drift. **Both halves of an acknowledged advisory, not just the
+     version.** An `ignore_advisories` entry (or its equivalent) usually rests on two
+     independent justifications: that there is nothing newer to move to, and that no path to
+     the flaw is reachable from this project's own code. The first self-expires — the audit
+     tool flags a listed ID matching nothing, so a bump makes it fall out on its own. The
+     second is prose, and nothing derives it, tests it or notices when it stops being true. So
+     re-read each reachability claim against the code as it stands now, and treat one the diff
+     has falsified as a finding.
+   <!-- /pipeline:list -->
+
+   **The harness findings agents recorded this milestone are a sixth input, and deliberately
+   not in that list.** The list is what a pass goes and looks for; the findings are handed to
+   it, rendered into the prompt by the harness. Saying "go and find the harness findings"
+   would describe work nobody does. This is the difference the two copies of this list used to
+   leave unexplained — DESIGN counted five where the prompt counted four, and nothing recorded
+   whether that was a decision.
 
    **Advisory drift means both halves of an acknowledged advisory.** An ignore entry usually
    rests on two independent justifications, and only one of them can expire by itself. "There is
@@ -1825,6 +1850,61 @@ start workflows in every project repo.
 Durable Object per project *is* the single-dev-agent mutex, serialized by construction. Watch the
 free-plan cap of three cron triggers per Worker, and the absence of retries or failure alerting on
 them.
+
+---
+
+### What an agent's outcome does
+
+The trigger table above is *condition → action* for the control plane. This is the other half:
+*outcome → action* for the agents. Every value a pass may emit, and what the harness does with
+it.
+
+The edges are the part that was written nowhere. §8's table says what each label means; the
+prompts say which value to emit; the code maps one to the other in five separate `switch`
+statements. Nothing said which value produced which label.
+
+**Four values do not name what they produce**, and they are bolded below: `needs-setup` writes
+a marker field called `setup`, `cannot-tell` sets `needs-review`, `debt` files under
+`tech-debt`, `design` under `design-inbox`. A reader who assumes the value *is* the label is
+right about `pushback` and `bug` and wrong about those — which is the shape of thing worth
+writing down once rather than inferring at each call site. `decisionless` is bolded for a
+different reason: it is the one outcome that skips a state, going straight to `Ready for dev`
+without passing through `Design review`.
+
+<!-- pipeline:list id=agent-outcomes for=tests -->
+| emitter | value | → state | → label | → marker |
+|---|---|---|---|---|
+| abort | `pushback` | `Blocked` | `pushback` | blocked, `pushback=1` |
+| abort | `failed` | `Blocked` | — | blocked, no flavor |
+| abort | `needs-setup` | `Blocked` | `needs-setup` | blocked, **`setup=1`** |
+| abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
+| abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
+| design | `artifacts` | `Design review` | the pass's mutex labels | — |
+| design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
+| design | `clear` | unchanged | removes `re-evaluate` | — |
+| design | `demote` | `Ready for design` | — | — |
+| reconcile | `pass` | `Merged` | — | merged |
+| reconcile | `fail` | `Ready for rework` | — | reconcile-bounce |
+| reconcile | `cannot-tell` | `Merged` | **`needs-review`** | merged |
+| reconcile | collision `holds` | unchanged | — | — |
+| reconcile | collision `bites` | `Ready for rework` | — | reconcile-bounce |
+| boundary | kind `debt` | Triage | **`tech-debt`** | triage-proposal |
+| boundary | kind `design` | Triage | **`design-inbox`** | triage-proposal |
+| boundary | kind `harness` | Triage | `harness` | triage-proposal |
+| boundary | kind `bug` | Triage | `bug` | triage-proposal |
+<!-- /pipeline:list -->
+
+`failed` is the only abort reason that takes no label, and that is the rule rather than an
+omission: it means the harness broke, which is not a fact about the ticket.
+
+**What is held to the code and what is not.** The **value** column is asserted against
+`protocol`'s vocabularies in both directions, so a value added to one and not the other fails
+CI naming the document it is missing from. The **label** column is asserted for the boundary
+rows, which are a lookup rather than control flow. State and marker are documentation:
+accurate when written, not derived. Encoding them would mean rewriting five `switch`
+statements into data-driven dispatch, and those switches validate arguments and call helpers
+as well as mapping — the rewrite would risk more than the drift it prevents. Saying which is
+which beats implying the whole table is machine-checked.
 
 ---
 
