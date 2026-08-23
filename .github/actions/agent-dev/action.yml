@@ -140,6 +140,41 @@ runs:
         # two different facts that the commit count against main cannot
         # separate, because it counts every pass's work.
         echo "head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # What this branch already carries, for the prompt. A pass that
+        # failed *after* pushing leaves complete work here and nothing in
+        # the prompt saying so, and the role prompt tells the agent it is
+        # re-instantiated with no memory and that everything it needs is
+        # in the prompt and the repository — so an agent following it
+        # literally starts fresh and re-does what is already committed.
+        #
+        # Read off the branch rather than from a record of the push: a
+        # run can die without ever reaching its abort step, and the
+        # branch is true either way. Empty on a first pass, which the
+        # prompt states rather than omits.
+        git log --oneline origin/main..HEAD > "$RUNNER_TEMP/pipeline/prior-work.txt" 2>/dev/null || : > "$RUNNER_TEMP/pipeline/prior-work.txt"
+        cat "$RUNNER_TEMP/pipeline/prior-work.txt"
+
+    # Same reason the design action rebuilds: the claim assembles the
+    # prompt one step too early, because the branch to check out is an
+    # output of the claim, so the tree was still on main. That costs dev
+    # the branch's non-asks as well as its log — a dev pass on a branch a
+    # design pass has already written to was shown main's copy of a
+    # document the design pass had just added entries to.
+    # No tracker credential: the claim is already made and on disk, so
+    # this reads claim.json and the working tree and talks to nothing.
+    - name: rebuild the prompt against the branch
+      shell: bash
+      run: |
+        pipeline agent reprompt \
+          --kind dev \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/dev.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt"
 
     - name: run the dev agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
@@ -267,6 +302,12 @@ runs:
             -m "The verdict on this sha predates the pass, and the audit reads the ticket's labels as well as the diff — so it is not an answer to the question being asked now."
         fi
         git push -u origin "${{ steps.claim.outputs.branch }}"
+        # Written only once the push has actually landed, and read by the
+        # abort step below. Without it a failed run's comment says only
+        # "Dev agent run failed: <url>" — the same sentence whether it
+        # left finished work on the branch or nothing at all, and those
+        # want different decisions from the author.
+        git rev-parse HEAD > "$RUNNER_TEMP/pipeline/pushed.txt"
 
     # The branch preview, published by the harness rather than by a
     # workflow watching for a push. That watcher could never fire for
@@ -378,4 +419,5 @@ runs:
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
+          --pushed-file "$RUNNER_TEMP/pipeline/pushed.txt" \
           --message "Dev agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

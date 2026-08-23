@@ -276,7 +276,7 @@ func cmdSweep(args []string) error {
 	// snapshot gains run and CI facts and dispatches become real.
 	repo, token := os.Getenv("GITHUB_REPOSITORY"), os.Getenv("GITHUB_TOKEN")
 	if repo != "" && token != "" {
-		h, err := github.New(repo, token)
+		h, err := github.New(repo, token, github.WithAgentWorkflows(cfg.AgentWorkflows()))
 		if err != nil {
 			return err
 		}

@@ -123,13 +123,20 @@ func cmdPreflight(args []string) error {
 	if repo == "" || token == "" {
 		fmt.Println("GITHUB_REPOSITORY/GITHUB_TOKEN not set — host and deploy checks skipped.")
 	} else {
-		gh, err := github.New(repo, token)
+		gh, err := github.New(repo, token, github.WithAgentWorkflows(cfg.AgentWorkflows()))
 		if err != nil {
 			return err
 		}
 		p.WithHost(gh)
 		checks = append(checks,
-			check{"the agent run list", "actions: read", func(ctx context.Context) error {
+			// Reads one listing per wired agent workflow, so it now
+			// checks the `agents` map as well as the scope: a renamed
+			// or mistyped filename 404s here, named, instead of
+			// surfacing later as an agent kind that looks permanently
+			// idle. Preflight is the one workflow the author can run
+			// from a phone, which is where a config typo is worth
+			// costing a line rather than a run.
+			check{"the agent run list, per wired workflow", "actions: read", func(ctx context.Context) error {
 				_, err := gh.ListAgentRuns(ctx)
 				return err
 			}},

@@ -107,6 +107,22 @@ type Config struct {
 // (DESIGN §10) — but it dispatches through the same machinery.
 var AgentKinds = []string{"design", "dev", "reconcile", "boundary", "live-suite"}
 
+// AgentWorkflows are the workflow files agent runs come from, in
+// AgentKinds order so the list is stable across loads. Unwired kinds
+// contribute an empty entry, which the host skips — the caller passing
+// this does not have to know which kinds a project has got to yet.
+//
+// It exists so the host can list agent runs per workflow rather than
+// reading the repository's runs unfiltered; the reasoning is at
+// github.Client.ListAgentRuns.
+func (c *Config) AgentWorkflows() []string {
+	out := make([]string, 0, len(AgentKinds))
+	for _, k := range AgentKinds {
+		out = append(out, c.Agents[k])
+	}
+	return out
+}
+
 // ActorRoles are the legal keys of Actors.
 var ActorRoles = []string{"author", "controlplane", "design", "dev", "reconcile", "boundary"}
 

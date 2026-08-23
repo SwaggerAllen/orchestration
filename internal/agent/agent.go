@@ -331,7 +331,9 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 		if commits > 0 {
 			summary += fmt.Sprintf("\n\n---\n\n_The run reported `%s` but left %d commit(s) on `%s`. Nothing was opened for review; the branch is there if they matter._", o.Outcome, commits, res.Branch)
 		}
-		return Abort(ctx, p, res, reason, summary)
+		// No pushed-branch note: this run did not fail, and the
+		// summary above already says what it left on the branch.
+		return Abort(ctx, p, res, reason, summary, "")
 	}
 	// Nothing to open a PR with, and no account of why. Filed as
 	// scope-satisfied like a run that said so itself: it is the same
@@ -340,7 +342,7 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	// tried and dropped — two labels the author triages identically are
 	// two labels they have to learn the difference between for nothing.
 	if res.PRNumber == 0 && commits == 0 {
-		return Abort(ctx, p, res, "scope-satisfied", unexplainedMessage)
+		return Abort(ctx, p, res, "scope-satisfied", unexplainedMessage, "")
 	}
 	// Before the PR and the transition: the label is what the CI audit
 	// on the other side of that transition reads, so attaching it after
@@ -574,7 +576,9 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 // (DESIGN §12); a ticket parked mid-flight for a secret has no obvious
 // destination the way a needs-review ticket does, so the origin is
 // recorded rather than left to the tracker's history.
-func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, message string) error {
+// pushedSHA is the branch head the run had already pushed, or "".
+// See the note it renders below.
+func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, message, pushedSHA string) error {
 	var to protocol.State
 	var m *marker.Marker
 	switch reason {
@@ -626,6 +630,22 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 	}
 	if m != nil {
 		m.Fields["from"] = string(res.State)
+		if pushedSHA != "" {
+			// Recorded on the marker so a tool can read it, and said in
+			// prose because the reader who needs it most is the author
+			// deciding what to do with a blocked ticket. Before this the
+			// comment said only "Agent run failed: <url>", which is the
+			// same sentence whether the run left a complete pass on the
+			// branch or nothing at all — and those want different
+			// decisions.
+			//
+			// First, not last: the abort message often carries a tail of
+			// the run's own output, and a fact appended under that is a
+			// fact below a log.
+			m.Fields["pushed"] = pushedSHA
+			message = fmt.Sprintf("**The branch has work on it.** This run pushed `%s` to `%s` before it failed, so what it produced is not lost. A retry is handed that branch's log and told it is resuming rather than starting fresh.\n\n%s",
+				pushedSHA, res.Branch, message)
+		}
 		message = m.Comment(message)
 	}
 	if res.Role == "" {

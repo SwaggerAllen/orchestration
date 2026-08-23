@@ -416,3 +416,119 @@ func TestNonAsksSectionDistinguishesAllThreeEmptyStates(t *testing.T) {
 		t.Errorf("an absent file reads as something else: %s", noFile)
 	}
 }
+
+// The retry has to be told the branch already carries work, and the two
+// non-answers have to be distinguishable: "nothing is here" is a fact,
+// "the harness did not tell me" is a bug (ORC-73).
+func TestPriorWorkSectionSaysWhichOfTheThreeHappened(t *testing.T) {
+	dir := t.TempDir()
+
+	if got, err := priorWorkSection(""); err != nil || got != "" {
+		t.Errorf("no --prior-work: got %q, %v — want the section omitted, as at claim time", got, err)
+	}
+
+	empty := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := priorWorkSection(empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "first pass") {
+		t.Errorf("empty log rendered %q, want it to state that the branch carries nothing", got)
+	}
+
+	full := filepath.Join(dir, "log.txt")
+	if err := os.WriteFile(full, []byte("209fc9d design: home screen states\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = priorWorkSection(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"209fc9d", "resuming", "non-asks"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("populated log rendered %q, want it to mention %q", got, want)
+		}
+	}
+
+	// Loud, not absent: the action writes this file in the same job
+	// immediately before reprompt reads it, so unreadable means the
+	// harness is broken — and the failure it would otherwise cause is
+	// the one this section exists to prevent, arriving silently.
+	if _, err := priorWorkSection(filepath.Join(dir, "not-there.txt")); err == nil {
+		t.Error("an unreadable --prior-work file returned no error")
+	}
+}
+
+// The Go half of ORC-73 is inert unless the action writes the files and
+// passes them, and neither half fails visibly on its own: a prompt with
+// no branch section looks exactly like a first pass, which is the failure
+// being fixed.
+//
+// Both agents, because both claim before their checkout. Dev was left out
+// of the first cut and put back in the same milestone; a test that names
+// only the action that happened to be filed about is how the second one
+// gets forgotten again.
+func TestBothWorkingAgentsRecordAndPassWhatTheBranchAlreadyCarries(t *testing.T) {
+	for _, action := range []string{"agent-design", "agent-dev"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", action, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		yml := string(body)
+		for _, want := range []struct{ what, why string }{
+			{"prior-work.txt", "the branch's log has to be written somewhere the prompt step can read"},
+			{"--prior-work", "reprompt renders the section only when it is handed the file"},
+			{"agent reprompt", "a prompt assembled at claim was assembled against main, not the branch"},
+			{"pushed.txt", "the push step has to record the head it left behind"},
+			{"--pushed-file", "abort puts the pushed head on the blocked marker only when it is handed the file"},
+		} {
+			if !strings.Contains(yml, want.what) {
+				t.Errorf("%s does not mention %s — %s", action, want.what, want.why)
+			}
+		}
+		// Order is the whole of the second half: written after the push
+		// has landed, so a run that died before it pushed records nothing
+		// rather than a head that never reached origin.
+		push, rev := strings.Index(yml, "git push -u origin"), strings.Index(yml, "git rev-parse HEAD > ")
+		if rev < 0 || push < 0 || rev < push {
+			t.Errorf("%s writes pushed.txt at %d and pushes at %d — it must be written after the push lands", action, rev, push)
+		}
+		// And the rebuild has to run after the checkout that produces the
+		// branch, or it rebuilds against the same tree the claim saw.
+		checkout, rebuild := strings.Index(yml, "check out the ticket branch"), strings.Index(yml, "agent reprompt")
+		if rebuild < checkout {
+			t.Errorf("%s rebuilds the prompt at %d, before the checkout at %d", action, rebuild, checkout)
+		}
+	}
+}
+
+// The guard that used to admit design alone. Its stated reason — that
+// every other kind "assembles its prompt against a tree that is already
+// right" — was never measured and was false for dev, whose claim runs at
+// the same point in its action, ahead of the checkout.
+func TestRepromptAdmitsTheTwoKindsThatClaimBeforeTheirCheckout(t *testing.T) {
+	dir := t.TempDir()
+	tpl := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(tpl, []byte("role"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const refusal = "does not read the ticket branch"
+
+	for _, kind := range []string{"design", "dev"} {
+		err := cmdAgentReprompt([]string{"--kind", kind, "--out", dir, "--prompt-template", tpl})
+		// It still fails — there is no config here — but it must fail
+		// past the guard rather than at it.
+		if err != nil && strings.Contains(err.Error(), refusal) {
+			t.Errorf("%s was refused: %v", kind, err)
+		}
+	}
+	for _, kind := range []string{"reconcile", "boundary"} {
+		err := cmdAgentReprompt([]string{"--kind", kind, "--out", dir, "--prompt-template", tpl})
+		if err == nil || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("%s: err = %v, want the refusal naming why this kind needs no rebuild", kind, err)
+		}
+	}
+}

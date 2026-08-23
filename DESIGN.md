@@ -1614,6 +1614,36 @@ Evidence is cleared when the run recovers. The model pass fails over from the su
 credential to the API key, and a first attempt's death left behind is a cause of death attached
 to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
 
+**A failed run says whether its work survived, and the retry is told what is on the branch.** A
+pass that dies *after* pushing leaves a complete piece of work on the ticket branch, and the
+comment recording the failure used to read the same either way — "Agent run failed: <url>",
+whether the branch carried a finished design or nothing at all. Those want different decisions
+from the author, so the `blocked` marker carries `pushed=<sha>` when the run had already
+pushed. Written by the push step once the push has landed, rather than inferred afterwards from
+a branch that may have moved.
+
+The retry is the harder case, because it is not a reader who can go and look. The role prompt
+tells the agent it is re-instantiated with no memory and that everything it needs is in the
+prompt and the repository, and an agent following that literally starts fresh and redraws
+artifacts already committed — or re-litigates a refusal already recorded in the non-asks, the
+one document whose stated reason for existing is that a refusal which quietly disappears gets
+proposed again. So the prompt carries the branch's own log, read after checkout, and says the
+pass is resuming rather than starting. Read off the branch rather than out of the record of the
+push, because a run can die without ever reaching its abort step and the branch is true either
+way.
+
+**Both working agents, because both claim before their checkout.** The branch to check out is
+an output of the claim, so design and dev alike assemble their first prompt against `main` and
+rebuild it once the branch is under them. That rebuild is also what gives each of them the
+branch's copy of the non-asks rather than main's — a pass shown a document its predecessor has
+already added entries to, minus those entries, is the same failure in a different file.
+Reconcile and the boundary need no rebuild: reconcile argues from the ticket and the PR, and the
+boundary reads the pipeline's own repository.
+
+Measured on ORC-69, run 32048439216: it committed a complete design pass, pushed `209fc9d`, and
+then failed. Nothing handed to the retry distinguished that from a first pass — the only signal
+was the branch's own git log, which the agent had to think to look at before it started.
+
 **What the exit code is not.** The harness decodes `129`–`159` as a process killed by signal
 `n-128`, which is the shell's own convention and therefore a fact. Every other code belongs to
 the program that exited, and the pipeline does not guess at another tool's table — inventing a
@@ -1754,6 +1784,18 @@ a metronome that also receives, and keeping it dumb is what keeps the control pl
 false`.** A delayed cron run and the next one can otherwise overlap, and two dispatchers
 running at once quietly defeats every single-agent guarantee downstream — the one-dev-agent
 invariant is only as strong as one-dispatcher.
+
+**Agent runs are read one workflow file at a time.** The run's name — `pipeline: <kind>
+<ticket-key>` — is what correlates a run to a ticket, but the *listing* is per workflow file
+from the config's `agents` map rather than the repository's runs at large. One page of a
+repository is one page of whatever that repository mostly runs, and on a pipeline repo that is
+the metronome: the sweep is itself a workflow run, woken by CI completions as well as hourly, so
+its volume rises with the very activity that produces agent runs. A live agent run crowded out
+of that page reads as no run at all, which is a second agent dispatched onto a ticket that
+already has one. Per file the window is what it claims to be, because the singular agents run
+one at a time. A file the `agents` map names and the host does not have fails the read rather
+than returning nothing: a kind whose runs cannot be listed looks permanently idle, and
+permanently idle is permanently dispatchable.
 
 **Triggers**, in order of the loop:
 
