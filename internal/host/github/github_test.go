@@ -480,3 +480,80 @@ func TestChecksForKeepsTheVerdictWhenJobsCannotBeRead(t *testing.T) {
 		t.Errorf("failed jobs = %v, want the workflow name as the fallback", got.FailedJobs)
 	}
 }
+
+// The window this closes is the reason for the shape: one page of the
+// *repository* is one page of whatever it mostly runs, which on a
+// pipeline repo is the sweep. Asserting the paths rather than the runs
+// is deliberate — the old code returned exactly these runs too, from a
+// listing that a busy repository can push them out of.
+func TestListAgentRunsReadsOnePagePerWiredAgentWorkflow(t *testing.T) {
+	var asked []string
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		asked = append(asked, r.URL.Path)
+		switch r.URL.Path {
+		case "/repos/swaggerallen/dummy/actions/workflows/pipeline-agent-dev.yml/runs":
+			return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+				{"id": 1, "display_title": "pipeline: dev PIPE-12", "status": "in_progress", "updated_at": "2026-01-01T01:00:00Z"},
+			}}
+		case "/repos/swaggerallen/dummy/actions/workflows/pipeline-agent-boundary.yml/runs":
+			return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+				{"id": 2, "display_title": "pipeline: boundary PIPE-30", "status": "completed", "updated_at": "2026-01-01T02:00:00Z"},
+			}}
+		}
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{}}
+	})
+	defer srv.Close()
+
+	c, err := New("swaggerallen/dummy", "gh_test", WithBaseURL(srv.URL),
+		// The middle entry is an unwired kind, passed through as the
+		// config holds it.
+		WithAgentWorkflows([]string{"pipeline-agent-dev.yml", "", "pipeline-agent-boundary.yml"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, err := c.ListAgentRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/repos/swaggerallen/dummy/actions/workflows/pipeline-agent-dev.yml/runs",
+		"/repos/swaggerallen/dummy/actions/workflows/pipeline-agent-boundary.yml/runs",
+	}
+	if len(asked) != len(want) {
+		t.Fatalf("asked %v, want one listing per wired workflow and nothing else", asked)
+	}
+	for i, w := range want {
+		if asked[i] != w {
+			t.Errorf("asked[%d] = %s, want %s", i, asked[i], w)
+		}
+	}
+	if len(runs) != 2 || runs[0].Kind != "dev" || runs[1].Kind != "boundary" {
+		t.Fatalf("runs = %+v, want both workflows' runs concatenated", runs)
+	}
+}
+
+// A kind whose runs cannot be listed reads as a kind that is idle, and an
+// idle kind is an invitation to dispatch a second agent — so a workflow
+// file the config names and GitHub does not have is fatal, not empty.
+func TestListAgentRunsFailsOnAWorkflowFileThatIsNotThere(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if strings.Contains(r.URL.Path, "pipeline-agent-renamed.yml") {
+			return http.StatusNotFound, map[string]any{"message": "Not Found"}
+		}
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{}}
+	})
+	defer srv.Close()
+
+	c, err := New("swaggerallen/dummy", "gh_test", WithBaseURL(srv.URL),
+		WithAgentWorkflows([]string{"pipeline-agent-renamed.yml"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.ListAgentRuns(context.Background())
+	if err == nil {
+		t.Fatal("listing a workflow file that is not there returned no error")
+	}
+	if !strings.Contains(err.Error(), "pipeline-agent-renamed.yml") {
+		t.Errorf("error = %v, want it to name the workflow file the config got wrong", err)
+	}
+}

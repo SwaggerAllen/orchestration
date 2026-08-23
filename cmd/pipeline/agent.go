@@ -176,7 +176,7 @@ func agentDeps(cfgPath string) (*plane.Plane, host.Host, error) {
 	if repo == "" || token == "" {
 		return nil, nil, fmt.Errorf("GITHUB_REPOSITORY and GITHUB_TOKEN are required for agent runs")
 	}
-	h, err := github.New(repo, token)
+	h, err := github.New(repo, token, github.WithAgentWorkflows(cfg.AgentWorkflows()))
 	if err != nil {
 		return nil, nil, err
 	}

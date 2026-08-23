@@ -1755,6 +1755,18 @@ false`.** A delayed cron run and the next one can otherwise overlap, and two dis
 running at once quietly defeats every single-agent guarantee downstream — the one-dev-agent
 invariant is only as strong as one-dispatcher.
 
+**Agent runs are read one workflow file at a time.** The run's name — `pipeline: <kind>
+<ticket-key>` — is what correlates a run to a ticket, but the *listing* is per workflow file
+from the config's `agents` map rather than the repository's runs at large. One page of a
+repository is one page of whatever that repository mostly runs, and on a pipeline repo that is
+the metronome: the sweep is itself a workflow run, woken by CI completions as well as hourly, so
+its volume rises with the very activity that produces agent runs. A live agent run crowded out
+of that page reads as no run at all, which is a second agent dispatched onto a ticket that
+already has one. Per file the window is what it claims to be, because the singular agents run
+one at a time. A file the `agents` map names and the host does not have fails the read rather
+than returning nothing: a kind whose runs cannot be listed looks permanently idle, and
+permanently idle is permanently dispatchable.
+
 **Triggers**, in order of the loop:
 
 | Condition | Action |

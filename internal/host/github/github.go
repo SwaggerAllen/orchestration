@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,7 +38,10 @@ type Client struct {
 	repo    string
 	token   string
 	ref     string // branch agent workflow dispatches target
-	http    *http.Client
+	// agentWorkflows are the workflow files agent runs come from, from
+	// the project config's `agents` map. See ListAgentRuns.
+	agentWorkflows []string
+	http           *http.Client
 }
 
 var _ host.Host = (*Client)(nil)
@@ -50,6 +54,21 @@ func WithBaseURL(u string) Option { return func(c *Client) { c.baseURL = u } }
 
 // WithDispatchRef sets the branch workflow dispatches run on (default main).
 func WithDispatchRef(ref string) Option { return func(c *Client) { c.ref = ref } }
+
+// WithAgentWorkflows names the workflow files agent runs come from —
+// the project config's `agents` map, whose empty entries ("not wired
+// yet") the caller may pass through; they are skipped here. Without it
+// ListAgentRuns reads the repository's runs unfiltered, which is the
+// window this exists to close.
+func WithAgentWorkflows(files []string) Option {
+	return func(c *Client) {
+		for _, f := range files {
+			if f != "" {
+				c.agentWorkflows = append(c.agentWorkflows, f)
+			}
+		}
+	}
+}
 
 // New builds a client for owner/repo ("swaggerallen/orchestration-dummy").
 func New(repository, token string, opts ...Option) (*Client, error) {
@@ -208,10 +227,66 @@ func (c *Client) DispatchWorkflow(ctx context.Context, workflowFile string, inpu
 	return c.rest(ctx, http.MethodPost, path, map[string]any{"ref": c.ref, "inputs": inputs}, nil)
 }
 
+// ListAgentRuns returns the agent runs the repository knows about.
+//
+// **One page per agent workflow, not one page of the repository.** The
+// correlation only needs the latest run per ticket, and the justification
+// this call used to carry — "anything past 100 runs ago is not it" —
+// assumed agent runs are most of what the repository runs. They are not.
+// The sweep is a workflow run too, and it is woken by CI completions as
+// well as by the metronome, so its volume rises with exactly the activity
+// that produces agent runs. Measured on orchestration-dummy, 2026-08-23:
+// the 29 most recent runs are all `pipeline: sweep`, five of them inside
+// fifteen minutes around a single merge.
+//
+// A live agent run crowded off page 1 reads as no run at all, so
+// `awaitingDispatch` answers "never dispatched" and the sweep starts a
+// second one. On Catapult's ORC-45 that was two boundary agents on one
+// ticket, about twenty-two minutes of model spend. `core.VerifyPickup`
+// now aborts the duplicate at claim time, which made this residual rather
+// than urgent — but a window measured in *runs*, on a repository whose run
+// count is dominated by a per-event metronome, has no lower bound in time.
+//
+// Per workflow file the window is what it claims to be: the singular
+// agents run one at a time, so 100 runs of `pipeline-agent-dev.yml` is a
+// long history rather than a few busy minutes. The cost is one API call
+// per wired agent kind per snapshot rather than one per snapshot.
 func (c *Client) ListAgentRuns(ctx context.Context) ([]host.AgentRun, error) {
-	// One page of the most recent runs is enough: correlation only needs
-	// the latest run per ticket, and anything past 100 runs ago is not it.
-	path := fmt.Sprintf("/repos/%s/%s/actions/runs?per_page=100", c.owner, c.repo)
+	if len(c.agentWorkflows) == 0 {
+		// A client built without the list still works, but says so. A
+		// silent fallback would restore the blind spot above for any
+		// caller that forgot the option, and what it produces — a second
+		// agent on one ticket — does not look like a missing option from
+		// anywhere the symptom appears.
+		fmt.Fprintln(os.Stderr, "pipeline: no agent workflow files given, reading the repository's runs unfiltered — "+
+			"a busy repository can crowd a live agent run out of that window (config `agents`)")
+		return c.agentRunsAt(ctx, fmt.Sprintf("/repos/%s/%s/actions/runs?per_page=100", c.owner, c.repo))
+	}
+	var out []host.AgentRun
+	for _, f := range c.agentWorkflows {
+		runs, err := c.agentRunsAt(ctx, fmt.Sprintf("/repos/%s/%s/actions/workflows/%s/runs?per_page=100",
+			c.owner, c.repo, url.PathEscape(f)))
+		if err != nil {
+			// Fatal, and the 404 that means "no such workflow file"
+			// included. This is a project-wide read, which attachHostFacts
+			// takes as fatal for the reason that applies here too: a kind
+			// whose runs cannot be listed reads as a kind that is idle,
+			// and an idle kind is an invitation to dispatch. A renamed or
+			// mistyped `agents` entry is one of the causes the stale-claim
+			// comment already sends the author looking for, and it is
+			// better named here, once, than inferred there.
+			return nil, fmt.Errorf("github: agent workflow %q: %w", f, err)
+		}
+		out = append(out, runs...)
+	}
+	return out, nil
+}
+
+// agentRunsAt reads one runs listing and keeps the runs whose name follows
+// the correlation convention. A workflow file may hold runs that are not
+// agent runs — a manual re-run of the stub, say — so the name filter
+// stays: it is also where the kind and the ticket key come from.
+func (c *Client) agentRunsAt(ctx context.Context, path string) ([]host.AgentRun, error) {
 	var data struct {
 		WorkflowRuns []struct {
 			ID           int64     `json:"id"`
