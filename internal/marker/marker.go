@@ -107,7 +107,10 @@ const (
 	// the origin lived in the tracker's history and nowhere a tool could
 	// read. Carried on whichever marker the transition already posts,
 	// and posted alone when it posts none. Fields: from=<state>, and on
-	// a needs-setup block, setup=<what a human has to do>.
+	// a needs-setup block, setup=<what a human has to do>. Also
+	// pushed=<sha> when the run had already pushed the ticket branch
+	// before it failed, so the ticket says whether the work survived
+	// rather than leaving it to be read off the branch by hand.
 	Blocked Kind = "blocked"
 	// Preview records where this design pass's storybook export was
 	// published. Design review is the author reading the rendered

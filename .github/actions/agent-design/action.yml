@@ -139,6 +139,20 @@ runs:
         # the earlier passes' artifacts and dev's commits — diffing
         # against main would bill this pass for all of them.
         echo "before=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # What this branch already carries, for the prompt. A pass that
+        # failed *after* pushing leaves complete work here and nothing in
+        # the prompt saying so, and the role prompt tells the agent it is
+        # re-instantiated with no memory and that everything it needs is
+        # in the prompt and the repository — so an agent following it
+        # literally starts fresh and redraws what is already committed
+        # (ORC-69, run 32048439216: 209fc9d pushed, then the run failed).
+        #
+        # Read off the branch rather than from a record of the push: a
+        # run can die without ever reaching its abort step, and the
+        # branch is true either way. Empty on a first pass, which the
+        # prompt states rather than omits.
+        git log --oneline origin/main..HEAD > "$RUNNER_TEMP/pipeline/prior-work.txt" 2>/dev/null || : > "$RUNNER_TEMP/pipeline/prior-work.txt"
+        cat "$RUNNER_TEMP/pipeline/prior-work.txt"
 
     # The prompt inlines the confirmed non-asks (DESIGN §4), and claim
     # assembled it one step too early: the branch to check out is an
@@ -159,7 +173,8 @@ runs:
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/design.md" \
           --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
-          --findings-path "$RUNNER_TEMP/pipeline/findings.json"
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt"
 
     # The merge-base the design is drawn against (DESIGN §2.4), read
     # before the model writes anything. Computed here rather than in the
@@ -233,6 +248,12 @@ runs:
         # is a no-op that must not fail the run.
         if [ -n "$(git log origin/main..HEAD --oneline 2>/dev/null)" ]; then
           git push -u origin "${{ steps.claim.outputs.branch }}"
+          # Written only once the push has actually landed, and read by
+          # the abort step below. Without it a failed run's comment says
+          # only "Design agent run failed: <url>" — the same sentence
+          # whether it left a complete pass on the branch or nothing at
+          # all, and those want different decisions from the author.
+          git rev-parse HEAD > "$RUNNER_TEMP/pipeline/pushed.txt"
         fi
         # What this pass wrote, scoped to this pass, for the finish
         # step's ownership audit. Written after the push on purpose: a
@@ -355,4 +376,5 @@ runs:
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
+          --pushed-file "$RUNNER_TEMP/pipeline/pushed.txt" \
           --message "Design agent run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

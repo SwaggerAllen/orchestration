@@ -212,10 +212,10 @@ func TestAbortRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Abort(ctx, p, res, "pushback", ""); err == nil {
+	if err := Abort(ctx, p, res, "pushback", "", ""); err == nil {
 		t.Error("push-back without its argument must be refused")
 	}
-	if err := Abort(ctx, p, res, "pushback", "The design assumes a socket the static export cannot have."); err != nil {
+	if err := Abort(ctx, p, res, "pushback", "The design assumes a socket the static export cannot have.", ""); err != nil {
 		t.Fatal(err)
 	}
 	// Blocked rather than straight back to Designing, and the origin
@@ -235,7 +235,7 @@ func TestAbortRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Abort(ctx, p, res2, "failed", ""); err != nil {
+	if err := Abort(ctx, p, res2, "failed", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, j.ID); got != protocol.Blocked {
@@ -261,10 +261,10 @@ func TestAbortNeedsSetupIsNotAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Abort(ctx, p, res, "needs-setup", ""); err == nil {
+	if err := Abort(ctx, p, res, "needs-setup", "", ""); err == nil {
 		t.Error("needs-setup without saying what to set up must be refused — nobody could unblock it")
 	}
-	if err := Abort(ctx, p, res, "needs-setup", "STRIPE_WEBHOOK_SECRET has to exist in the deploy environment."); err != nil {
+	if err := Abort(ctx, p, res, "needs-setup", "STRIPE_WEBHOOK_SECRET has to exist in the deploy environment.", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
@@ -1097,5 +1097,66 @@ func TestClaimReworkSkipsBookkeepingPostedAfterTheBounce(t *testing.T) {
 	// The marker header goes too — it is an address, not an argument.
 	if strings.Contains(res.Scope, "pipeline:v1") {
 		t.Errorf("scope carries the machine header: %q", res.Scope)
+	}
+}
+
+// A failed run's comment used to read the same whether it left a complete
+// pass on the branch or nothing at all, and those want different decisions
+// from the author (ORC-73).
+func TestAbortRecordsTheBranchHeadAFailedRunAlreadyPushed(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Pushed then died", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Abort(ctx, p, res, "failed", "Design agent run failed: https://gh/run/1", "209fc9d"); err != nil {
+		t.Fatal(err)
+	}
+
+	var blocked string
+	var fields map[string]string
+	for _, c := range findIssue(t, tr, cfg, i.ID).Comments {
+		if m, ok, err := marker.Parse(c.Body); err == nil && ok && m.Kind == marker.Blocked {
+			blocked, fields = c.Body, m.Fields
+		}
+	}
+	if fields["pushed"] != "209fc9d" {
+		t.Errorf("blocked marker fields = %v, want pushed=209fc9d", fields)
+	}
+	if !strings.Contains(blocked, "209fc9d") || !strings.Contains(blocked, res.Branch) {
+		t.Errorf("comment = %q, want the sha and the branch said in prose too", blocked)
+	}
+	// Above the failure line, not below it: the abort message often
+	// carries a tail of the run's own output, and a fact appended under
+	// that is a fact below a log.
+	if strings.Index(blocked, "209fc9d") > strings.Index(blocked, "Design agent run failed") {
+		t.Errorf("comment = %q, want the branch note before the failure line", blocked)
+	}
+}
+
+// An abort with nothing pushed must not invent a branch head: "the run
+// died before it wrote anything" is the other half of the answer.
+func TestAbortSaysNothingAboutTheBranchWhenNothingWasPushed(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Died early", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Abort(ctx, p, res, "failed", "Design agent run failed: https://gh/run/2", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range findIssue(t, tr, cfg, i.ID).Comments {
+		if m, ok, err := marker.Parse(c.Body); err == nil && ok && m.Kind == marker.Blocked {
+			if _, has := m.Fields["pushed"]; has {
+				t.Errorf("blocked marker fields = %v, want no pushed field", m.Fields)
+			}
+			if strings.Contains(c.Body, "branch has work on it") {
+				t.Errorf("comment = %q, want no claim about the branch", c.Body)
+			}
+		}
 	}
 }

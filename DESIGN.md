@@ -1614,6 +1614,28 @@ Evidence is cleared when the run recovers. The model pass fails over from the su
 credential to the API key, and a first attempt's death left behind is a cause of death attached
 to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
 
+**A failed run says whether its work survived, and the retry is told what is on the branch.** A
+pass that dies *after* pushing leaves a complete piece of work on the ticket branch, and the
+comment recording the failure used to read the same either way — "Agent run failed: <url>",
+whether the branch carried a finished design or nothing at all. Those want different decisions
+from the author, so the `blocked` marker carries `pushed=<sha>` when the run had already
+pushed. Written by the push step once the push has landed, rather than inferred afterwards from
+a branch that may have moved.
+
+The retry is the harder case, because it is not a reader who can go and look. The role prompt
+tells the agent it is re-instantiated with no memory and that everything it needs is in the
+prompt and the repository, and an agent following that literally starts fresh and redraws
+artifacts already committed — or re-litigates a refusal already recorded in the non-asks, the
+one document whose stated reason for existing is that a refusal which quietly disappears gets
+proposed again. So the design pass's prompt carries the branch's own log, read after checkout,
+and says the pass is resuming rather than starting. Read off the branch rather than out of the
+record of the push, because a run can die without ever reaching its abort step and the branch
+is true either way.
+
+Measured on ORC-69, run 32048439216: it committed a complete design pass, pushed `209fc9d`, and
+then failed. Nothing handed to the retry distinguished that from a first pass — the only signal
+was the branch's own git log, which the agent had to think to look at before it started.
+
 **What the exit code is not.** The harness decodes `129`–`159` as a process killed by signal
 `n-128`, which is the shell's own convention and therefore a fact. Every other code belongs to
 the program that exited, and the pipeline does not guess at another tool's table — inventing a
@@ -1991,6 +2013,13 @@ which beats implying the whole table is machine-checked.
   claim, the branch context and the reason, to buy a nudge. Until someone is waiting on the
   author who isn't the author, the assumption is that they are prompt. Revisit this at the
   same time as alerting, not before; they are the same feature seen from two ends.
+- **Only the design pass is told what its branch already carries.** The resume signal above is
+  rendered by the step that rebuilds the design prompt against the checked-out branch. The dev
+  pass assembles its prompt at claim, before the checkout, and has no such step — so a dev run
+  that pushes and then fails downstream hands its retry the same blind start the design pass
+  used to get. The `pushed=<sha>` half of the record is agent-agnostic and would carry over
+  unchanged; the prompt half needs dev a post-checkout rebuild of its own, which is the whole
+  of the work and the reason this is written down rather than done alongside.
 - **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
   System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
   what remains uncovered is files owned by no system — the router, the manifests — which are

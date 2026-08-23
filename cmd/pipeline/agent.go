@@ -81,6 +81,7 @@ func cmdAgentReprompt(args []string) error {
 	repoContext := fs.String("repo-context", "", "shared repo orientation (prompts/repo-context.md)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to")
 	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
+	priorWork := fs.String("prior-work", "", "file holding `git log --oneline origin/main..HEAD` for the checked-out branch")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -116,6 +117,11 @@ func cmdAgentReprompt(args []string) error {
 		}
 	}
 	prompt := assembleDesignPrompt(composeBase(tpl, rc), &res, *outcomePath)
+	prior, err := priorWorkSection(*priorWork)
+	if err != nil {
+		return err
+	}
+	prompt += prior
 	prompt += harnessFindingsSection(*findingsPath)
 	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return err
@@ -892,6 +898,7 @@ func cmdAgentAbort(args []string) error {
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
 	errPath := fs.String("error-file", "", "file holding a failed model run's captured output; its tail is appended to the comment")
+	pushedPath := fs.String("pushed-file", "", "file the push step writes the pushed branch head to; absent means this run pushed nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -917,7 +924,17 @@ func cmdAgentAbort(args []string) error {
 	// The claim recorded where the run holds the ticket. Without it the
 	// move is recorded with no origin, and a half-edge is unjudgeable.
 	p.KnownState(res.TicketID, res.State)
-	if err := agent.Abort(context.Background(), p, res, *reason, *message); err != nil {
+	// Absent is the ordinary case and not a failure, the same way the
+	// error file is: the push step writes it only when it actually
+	// pushed, so a run that died before the push says nothing about a
+	// branch head rather than inventing one.
+	var pushed string
+	if *pushedPath != "" {
+		if raw, err := os.ReadFile(*pushedPath); err == nil {
+			pushed = strings.TrimSpace(string(raw))
+		}
+	}
+	if err := agent.Abort(context.Background(), p, res, *reason, *message, pushed); err != nil {
 		return err
 	}
 	if err := postFindings(p, res.TicketID, *findings); err != nil {
@@ -1033,6 +1050,60 @@ func postFindings(p *plane.Plane, ticketID, path string) error {
 // product opinions and the queue stops being read. Harness findings are
 // the exception because the author is the only one who can fix the
 // pipeline and the agent is the only one who watches it fail.
+// priorWorkSection tells a design pass what its branch already carries.
+//
+// The role prompt says the agent is re-instantiated with no memory and
+// that everything it needs is in the prompt and the repository. A pass
+// that failed *after pushing* breaks the second half of that promise
+// quietly: the work is on the branch, nothing in the prompt says so, and
+// an agent following the instruction literally starts fresh and redraws
+// artifacts that already exist.
+//
+// Measured on ORC-69, run 32048439216: a complete design pass committed
+// and pushed 209fc9d, then failed. The harness posted the blocked marker
+// and re-dispatched, and nothing handed to the retry distinguished "no
+// work done yet" from "complete work already committed on your branch".
+// The only signal was the branch's own git log, which the agent had to
+// think to look at before starting.
+//
+// The worst case is non-asks.md: entries a prior pass committed are
+// precisely the refusals a fresh pass is most likely to re-litigate, and
+// the file's stated reason for existing is that a refusal which quietly
+// disappears is one that gets proposed again.
+//
+// Read from the branch rather than from a record of the push, because the
+// branch is the fact. A run can die in ways that never reach the abort
+// step — a cancelled job, a lost runner — and leave a pushed branch
+// behind with nothing recorded anywhere. The blocked marker carries the
+// push too (Abort), but that is for the author reading the ticket; this
+// is what the next pass is told.
+//
+// The empty case is stated rather than skipped, for the reason
+// labelsSection states its own: "nothing is on this branch" and "the
+// harness did not tell me" are different facts to an agent deciding
+// whether to read before it writes, and an absent section reads as the
+// second.
+func priorWorkSection(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	// Loud rather than absent. The action writes this file immediately
+	// before calling reprompt, in the same job, so unreadable here means
+	// the harness is broken — and the failure it would otherwise cause is
+	// the exact one this section exists to prevent, arriving silently.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("agent reprompt: --prior-work %s: %w", path, err)
+	}
+	log := strings.TrimSpace(string(raw))
+	if log == "" {
+		return "\n## Already on your branch\n\nNothing — `git log origin/main..HEAD` is empty, so this branch carries no commits beyond main. You are the first pass on it.\n", nil
+	}
+	return fmt.Sprintf("\n## Already on your branch\n\n`git log --oneline origin/main..HEAD`, read at the start of this run:\n\n```\n%s\n```\n\n"+
+		"You are resuming, not starting fresh. An earlier pass — possibly one that failed *after* pushing — left this. Read it before you write: do not redraw an artifact that is already there, and do not re-litigate a refusal already recorded in the non-asks.\n\n"+
+		"If something on the branch is wrong, change it deliberately and say so in your hand-back. A pass that silently contradicts an earlier one produces a contradiction the author never saw happen.\n", log), nil
+}
+
 func harnessFindingsSection(path string) string {
 	if path == "" {
 		return ""
