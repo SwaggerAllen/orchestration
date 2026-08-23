@@ -1627,10 +1627,18 @@ tells the agent it is re-instantiated with no memory and that everything it need
 prompt and the repository, and an agent following that literally starts fresh and redraws
 artifacts already committed — or re-litigates a refusal already recorded in the non-asks, the
 one document whose stated reason for existing is that a refusal which quietly disappears gets
-proposed again. So the design pass's prompt carries the branch's own log, read after checkout,
-and says the pass is resuming rather than starting. Read off the branch rather than out of the
-record of the push, because a run can die without ever reaching its abort step and the branch
-is true either way.
+proposed again. So the prompt carries the branch's own log, read after checkout, and says the
+pass is resuming rather than starting. Read off the branch rather than out of the record of the
+push, because a run can die without ever reaching its abort step and the branch is true either
+way.
+
+**Both working agents, because both claim before their checkout.** The branch to check out is
+an output of the claim, so design and dev alike assemble their first prompt against `main` and
+rebuild it once the branch is under them. That rebuild is also what gives each of them the
+branch's copy of the non-asks rather than main's — a pass shown a document its predecessor has
+already added entries to, minus those entries, is the same failure in a different file.
+Reconcile and the boundary need no rebuild: reconcile argues from the ticket and the PR, and the
+boundary reads the pipeline's own repository.
 
 Measured on ORC-69, run 32048439216: it committed a complete design pass, pushed `209fc9d`, and
 then failed. Nothing handed to the retry distinguished that from a first pass — the only signal
@@ -2013,13 +2021,6 @@ which beats implying the whole table is machine-checked.
   claim, the branch context and the reason, to buy a nudge. Until someone is waiting on the
   author who isn't the author, the assumption is that they are prompt. Revisit this at the
   same time as alerting, not before; they are the same feature seen from two ends.
-- **Only the design pass is told what its branch already carries.** The resume signal above is
-  rendered by the step that rebuilds the design prompt against the checked-out branch. The dev
-  pass assembles its prompt at claim, before the checkout, and has no such step — so a dev run
-  that pushes and then fails downstream hands its retry the same blind start the design pass
-  used to get. The `pushed=<sha>` half of the record is agent-agnostic and would carry over
-  unchanged; the prompt half needs dev a post-checkout rebuild of its own, which is the whole
-  of the work and the reason this is written down rather than done alongside.
 - **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
   System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
   what remains uncovered is files owned by no system — the router, the manifests — which are

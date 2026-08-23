@@ -81,6 +81,7 @@ func cmdAgentReprompt(args []string) error {
 	repoContext := fs.String("repo-context", "", "shared repo orientation (prompts/repo-context.md)")
 	findingsPath := fs.String("findings-path", "", "path the model may record harness findings to")
 	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
+	handbackPath := fs.String("handback-path", "", "path the model writes its hand-back to (dev)")
 	priorWork := fs.String("prior-work", "", "file holding `git log --oneline origin/main..HEAD` for the checked-out branch")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -88,8 +89,26 @@ func cmdAgentReprompt(args []string) error {
 	if *outDir == "" || *promptTemplate == "" {
 		return fmt.Errorf("agent reprompt: --out and --prompt-template are required")
 	}
-	if *kind != "design" {
-		return fmt.Errorf("agent reprompt: only design needs this; %q assembles its prompt against a tree that is already right", *kind)
+	// Design and dev, because both claim before the checkout and so both
+	// assemble a prompt against main rather than against the branch they
+	// are about to work on.
+	//
+	// This guard used to admit design alone, on the stated grounds that
+	// every other kind "assembles its prompt against a tree that is
+	// already right". That was not measured, and for dev it was false:
+	// its claim step runs at the same point in its action, ahead of the
+	// checkout, so a dev pass on a branch a design pass has already
+	// written to was shown main's non-asks rather than the branch's —
+	// the ORC-16 failure the rebuild exists to prevent, in the other
+	// agent.
+	//
+	// Reconcile and boundary are genuinely excluded: reconcile argues
+	// from the ticket and the PR rather than from a working tree, and
+	// the boundary reads the pipeline's own repo.
+	switch *kind {
+	case "design", "dev":
+	default:
+		return fmt.Errorf("agent reprompt: design and dev claim before their checkout and need this; %q does not read the ticket branch to build its prompt", *kind)
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -116,7 +135,14 @@ func cmdAgentReprompt(args []string) error {
 			return err
 		}
 	}
-	prompt := assembleDesignPrompt(composeBase(tpl, rc), &res, *outcomePath)
+	// The same shapes claim builds, so a rebuilt prompt differs from the
+	// claimed one only in what the branch changed.
+	var prompt string
+	if *kind == "design" {
+		prompt = assembleDesignPrompt(composeBase(tpl, rc), &res, *outcomePath)
+	} else {
+		prompt = assemblePrompt(composeBase(tpl, rc), &res, *handbackPath, *outcomePath)
+	}
 	prior, err := priorWorkSection(*priorWork)
 	if err != nil {
 		return err
@@ -1050,7 +1076,8 @@ func postFindings(p *plane.Plane, ticketID, path string) error {
 // product opinions and the queue stops being read. Harness findings are
 // the exception because the author is the only one who can fix the
 // pipeline and the agent is the only one who watches it fail.
-// priorWorkSection tells a design pass what its branch already carries.
+// priorWorkSection tells a design or dev pass what its branch already
+// carries.
 //
 // The role prompt says the agent is re-instantiated with no memory and
 // that everything it needs is in the prompt and the repository. A pass
@@ -1100,7 +1127,7 @@ func priorWorkSection(path string) (string, error) {
 		return "\n## Already on your branch\n\nNothing — `git log origin/main..HEAD` is empty, so this branch carries no commits beyond main. You are the first pass on it.\n", nil
 	}
 	return fmt.Sprintf("\n## Already on your branch\n\n`git log --oneline origin/main..HEAD`, read at the start of this run:\n\n```\n%s\n```\n\n"+
-		"You are resuming, not starting fresh. An earlier pass — possibly one that failed *after* pushing — left this. Read it before you write: do not redraw an artifact that is already there, and do not re-litigate a refusal already recorded in the non-asks.\n\n"+
+		"You are resuming, not starting fresh. An earlier pass — possibly one that failed *after* pushing — left this. Read it before you write: do not re-do work that is already committed here, and do not re-litigate a refusal already recorded in the non-asks.\n\n"+
 		"If something on the branch is wrong, change it deliberately and say so in your hand-back. A pass that silently contradicts an earlier one produces a contradiction the author never saw happen.\n", log), nil
 }
 

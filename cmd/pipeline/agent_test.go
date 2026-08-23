@@ -462,31 +462,73 @@ func TestPriorWorkSectionSaysWhichOfTheThreeHappened(t *testing.T) {
 	}
 }
 
-// The Go half of ORC-73 is inert unless the action writes the two files
-// and passes them, and neither half fails visibly on its own: a prompt
-// with no branch section looks exactly like a first pass, which is the
-// failure being fixed.
-func TestTheDesignActionRecordsAndPassesWhatTheBranchAlreadyCarries(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "agent-design", "action.yml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	yml := string(body)
-	for _, want := range []struct{ what, why string }{
-		{"prior-work.txt", "the branch's log has to be written somewhere the prompt step can read"},
-		{"--prior-work", "reprompt renders the section only when it is handed the file"},
-		{"pushed.txt", "the push step has to record the head it left behind"},
-		{"--pushed-file", "abort puts the pushed head on the blocked marker only when it is handed the file"},
-	} {
-		if !strings.Contains(yml, want.what) {
-			t.Errorf("agent-design action does not mention %s — %s", want.what, want.why)
+// The Go half of ORC-73 is inert unless the action writes the files and
+// passes them, and neither half fails visibly on its own: a prompt with
+// no branch section looks exactly like a first pass, which is the failure
+// being fixed.
+//
+// Both agents, because both claim before their checkout. Dev was left out
+// of the first cut and put back in the same milestone; a test that names
+// only the action that happened to be filed about is how the second one
+// gets forgotten again.
+func TestBothWorkingAgentsRecordAndPassWhatTheBranchAlreadyCarries(t *testing.T) {
+	for _, action := range []string{"agent-design", "agent-dev"} {
+		body, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", action, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		yml := string(body)
+		for _, want := range []struct{ what, why string }{
+			{"prior-work.txt", "the branch's log has to be written somewhere the prompt step can read"},
+			{"--prior-work", "reprompt renders the section only when it is handed the file"},
+			{"agent reprompt", "a prompt assembled at claim was assembled against main, not the branch"},
+			{"pushed.txt", "the push step has to record the head it left behind"},
+			{"--pushed-file", "abort puts the pushed head on the blocked marker only when it is handed the file"},
+		} {
+			if !strings.Contains(yml, want.what) {
+				t.Errorf("%s does not mention %s — %s", action, want.what, want.why)
+			}
+		}
+		// Order is the whole of the second half: written after the push
+		// has landed, so a run that died before it pushed records nothing
+		// rather than a head that never reached origin.
+		push, rev := strings.Index(yml, "git push -u origin"), strings.Index(yml, "git rev-parse HEAD > ")
+		if rev < 0 || push < 0 || rev < push {
+			t.Errorf("%s writes pushed.txt at %d and pushes at %d — it must be written after the push lands", action, rev, push)
+		}
+		// And the rebuild has to run after the checkout that produces the
+		// branch, or it rebuilds against the same tree the claim saw.
+		checkout, rebuild := strings.Index(yml, "check out the ticket branch"), strings.Index(yml, "agent reprompt")
+		if rebuild < checkout {
+			t.Errorf("%s rebuilds the prompt at %d, before the checkout at %d", action, rebuild, checkout)
 		}
 	}
-	// Order is the whole of the second half: written after the push has
-	// landed, so a run that died before it pushed records nothing rather
-	// than a head that never reached origin.
-	push, rev := strings.Index(yml, "git push -u origin"), strings.Index(yml, "git rev-parse HEAD > ")
-	if rev < 0 || push < 0 || rev < push {
-		t.Errorf("pushed.txt is written at %d and the push happens at %d — it must be written after the push lands", rev, push)
+}
+
+// The guard that used to admit design alone. Its stated reason — that
+// every other kind "assembles its prompt against a tree that is already
+// right" — was never measured and was false for dev, whose claim runs at
+// the same point in its action, ahead of the checkout.
+func TestRepromptAdmitsTheTwoKindsThatClaimBeforeTheirCheckout(t *testing.T) {
+	dir := t.TempDir()
+	tpl := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(tpl, []byte("role"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const refusal = "does not read the ticket branch"
+
+	for _, kind := range []string{"design", "dev"} {
+		err := cmdAgentReprompt([]string{"--kind", kind, "--out", dir, "--prompt-template", tpl})
+		// It still fails — there is no config here — but it must fail
+		// past the guard rather than at it.
+		if err != nil && strings.Contains(err.Error(), refusal) {
+			t.Errorf("%s was refused: %v", kind, err)
+		}
+	}
+	for _, kind := range []string{"reconcile", "boundary"} {
+		err := cmdAgentReprompt([]string{"--kind", kind, "--out", dir, "--prompt-template", tpl})
+		if err == nil || !strings.Contains(err.Error(), refusal) {
+			t.Errorf("%s: err = %v, want the refusal naming why this kind needs no rebuild", kind, err)
+		}
 	}
 }
