@@ -28,6 +28,47 @@ invented once and survived review; it was caught only because somebody
 later measured it. If a number is a guess, say it is a guess, or go and
 measure it.
 
+**That covers what the pipeline says, not only what the source says.** A
+comment the harness posts on a ticket is an assertion made to a reader who
+cannot check it. `staleClaimFor`'s message states that the newest run
+"ended before this state was entered" as fixed text, on a branch chosen
+only by the run's *kind* — so on Catapult's ORC-99 it said exactly that
+about a run which had ended two and a half minutes *after* the state was
+entered, and that recency was the whole cause. It then named three likely
+culprits, none of which was it. Still unfixed at the time of writing, and
+the comment beside that code records an earlier version of the same defect
+being fixed one clause over.
+
+## Verify a guard by breaking it
+
+A passing test says nothing about a guard until you have watched it fail.
+Revert the line the guard lives on, run the test, read the failure, put it
+back. Commit messages here record that probe, and the output it produced.
+
+The reason is not diligence. `awaitingDispatchOf` shipped as a regression
+behind a scenario that ran the whole boundary loop and asserted the
+ticket's *state* at the end — a state the ticket holds whether or not
+anything was dispatched. CI was green, the boundary agent never started on
+a passing live suite, and the ticket sat until the stale-claim rule parked
+it twenty minutes later.
+
+Measured 2026-08-23, because the folk version of this is wrong: the Go
+test cache does **not** serve a stale pass when you edit a file the test
+reads at runtime. Breaking `.github/actions/agent-dev/action.yml` after a
+cached `ok` re-ran the test and failed it. A `(cached)` line is not a
+reason to distrust a result, and `go clean -testcache` between probes is
+insurance, not a requirement.
+
+## The sim asserts what you tell it to assert
+
+`internal/sim` runs a scenario to convergence and checks its `expect`
+steps. `expect` carries `state`, `hasLabels`, `lacksLabels`, `assignee`,
+`markers`, **`runKind`** and **`runLive`** — and only the last two say an
+agent was actually dispatched. Sixteen of the twenty-three scenarios use
+them. The one that did not is the one above.
+
+If what is under test is that something *runs*, assert the run.
+
 ## Adding a protocol state is a two-repo change, and the order matters
 
 `protocol.AllStates` is the canonical set, and every project's
@@ -58,3 +99,22 @@ every project (DESIGN §5): agent push tokens carry no `workflow` scope,
 so a commit touching them is rejected and takes the run down with it.
 When a change here needs one of those files edited, that edit is the
 author's to make and belongs in its own change, ahead of this one.
+
+## The move store has a half that nothing calls
+
+`internal/state` is the pipeline's record of its own writes, and its
+`Store` port holds two pairs. `Record`/`All` are wired and load-bearing:
+on a solo workspace the harness writes as the author, so §9's revert rules
+cannot tell the author's moves from the pipeline's without them.
+
+`Reserve`/`Release` — and the Durable Object's `/reserve` compare-and-set
+behind them — have **no caller outside their own package**. They landed as
+"Reservations: the storage half of closing the dispatch race" (`966b5ae`)
+and the dispatching half was never written, so the race that comment
+describes is still open.
+
+Parked deliberately, not dead code to tidy away. Leave it in place and
+raise it when dispatch or state management is next on the table. Note also
+that DESIGN §1's store table lists Linear, the project repo, the pipeline
+repo and the preview, and does not mention this store at all — its rules
+live in §13 instead.
