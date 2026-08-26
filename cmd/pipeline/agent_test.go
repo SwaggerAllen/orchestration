@@ -202,6 +202,40 @@ func TestBoundaryPromptScopesTheStepFlagsToAnEarlierRun(t *testing.T) {
 	}
 }
 
+// And the same sentence reconciles itself with the file sitting beside
+// it. `claim.json`'s Done map is the live resume record; these flags are
+// frozen at claim, and `cmdBoundaryArchive` rewrites the former between
+// this prompt being written and being read. So on every boundary run the
+// two disagree, and both are right.
+//
+// A model with the run's temp directory in front of it has filed that
+// contradiction as a harness finding twice — the carried
+// `boundary-prompt-step-flags-always-false`, and Catapult's ORC-137,
+// whose first diagnosis was that the two "should agree by construction"
+// and whose proposed test would have passed. Making them agree is the
+// wrong fix: it would set archive=true unconditionally and destroy the
+// fresh-vs-resumed signal the test above covers. Saying so is the fix,
+// and it belongs where the confused reader is reading.
+func TestBoundaryPromptReconcilesItsFlagsWithTheClaimRecord(t *testing.T) {
+	got := assembleBoundaryPrompt("ROLE-PROMPT", &agent.BoundaryPlan{
+		ClaimResult: agent.ClaimResult{TicketKey: "DUM-9", Title: "Milestone boundary"},
+		Milestone:   "Rehearsal 1",
+		Done:        map[string]bool{},
+	}, "/tmp/proposals.json")
+
+	for _, want := range []string{
+		"claim.json",  // names the other artifact
+		"frozen",      // says which of the two is a snapshot
+		"live",        // and which is not
+		"not a fault", // and that the disagreement is expected
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the step-flags header does not mention %q, so a reader comparing it "+
+				"with claim.json sees a bare contradiction:\n%s", want, got)
+		}
+	}
+}
+
 // The agent is judged against its labels and could not see them.
 //
 // CI fails a diff touching a path mapped to a screen or system doc whose

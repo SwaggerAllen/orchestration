@@ -446,18 +446,50 @@ func unadjudicated(carried []HarnessFinding, ps *Proposals) []string {
 	}
 	seen := map[string]bool{}
 	for _, pr := range ps.Proposals {
-		seen[pr.Dedupe] = true
+		seen[findingName(pr.Dedupe)] = true
 	}
 	for _, d := range ps.Declined {
-		seen[d.Dedupe] = true
+		seen[findingName(d.Dedupe)] = true
 	}
 	var out []string
 	for _, f := range carried {
-		if !seen[f.Dedupe] {
+		if !seen[findingName(f.Dedupe)] {
 			out = append(out, fmt.Sprintf("`%s` — %s", f.Dedupe, f.Title))
 		}
 	}
 	return out
+}
+
+// findingName is the bare finding name from either key shape the two
+// producers write. Both are legitimate and neither is going to change:
+// a carried finding takes its key from the `id=` field of a recorded
+// [pipeline:v1:harness-finding] marker, which is the bare name, while a
+// scan proposal is keyed `<milestone-slug>/<name>`. Normalising at the
+// comparison rather than at each producer is what keeps that true.
+//
+// Compared raw, the two namespaces sit in one set and never match
+// across it. Measured on Catapult's ORC-118, second pass: the file step
+// warned that `boundary-prompt-step-flags-always-false` "was neither
+// filed nor declined" and would be lost, one second after the same pass
+// filed it as ORC-137 under
+// `the-authoring-loop/boundary-prompt-step-flags-always-false`.
+//
+// That warning is written to be acted on — it tells the author to carry
+// the finding by hand or lose it — so a false one manufactures a
+// duplicate of a ticket already in Triage. Since proposals are no
+// longer deduplicated (the comment in BoundaryFile says why), nothing
+// downstream catches that duplicate: this defect creates exactly the
+// work that change handed to a human.
+//
+// Both directions are wrong, not just the one observed: a finding
+// carried *with* a prefix would fail to match an unprefixed re-file the
+// same way. Taking the last segment fixes both, and needs no producer
+// to agree with any other.
+func findingName(dedupe string) string {
+	if i := strings.LastIndex(dedupe, "/"); i >= 0 {
+		return strings.TrimSpace(dedupe[i+1:])
+	}
+	return strings.TrimSpace(dedupe)
 }
 
 // RecoverProposals reads the scan step's marker comment back into
@@ -557,8 +589,27 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		if err != nil {
 			return err
 		}
+		// Triage included, and that is the whole of the re-rank working.
+		// `snap.Tickets` excludes triage-category states by
+		// construction; unscheduled debt lives in exactly those until
+		// the author gives it a milestone, which is why `DebtBacklog`
+		// reads the same union rather than `snap.Tickets` alone.
+		//
+		// Resolved against `snap.Tickets` only, this map could not hold
+		// a single key the grooming pass is for. Every ranking landed in
+		// `unknown` and the step reported "re-ranked 0 tickets" as a
+		// success. Measured on Catapult's ORC-118, second pass: both
+		// ORC-135 and ORC-136 asked for priority 2, both had existed for
+		// over an hour, both were skipped as unknown, and the
+		// composition comment nine seconds later showed them still at 0.
+		//
+		// The pass read those keys — the prompt's debt backlog listed
+		// them — so it declined a carried finding about the backlog
+		// being unreadable, as fixed. The reading half worked; this line
+		// is where the writing half went. A finding was closed on the
+		// strength of output the same run contradicted.
 		keyToID := map[string]string{}
-		for _, t := range snap.Tickets {
+		for _, t := range append(append([]*core.Ticket{}, snap.Tickets...), snap.Triage...) {
 			keyToID[t.Key] = t.ID
 		}
 		// **Nothing is deduplicated here, deliberately.** Two attempts

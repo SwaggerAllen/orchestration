@@ -717,7 +717,22 @@ func assembleBoundaryPrompt(template string, plan *agent.BoundaryPlan, outcomePa
 	// window, so a boundary ticket the author sends back for a second
 	// look reports all false and scans again. The steps of the pass
 	// before it are history, not work already done.
-	add(fmt.Sprintf("\nCompleted by an earlier run of THIS pass: archive=%t scan=%t file=%t — all false means nothing has run yet. A previous, completed pass over this milestone does not show here; the retro note under `%s/` is where you see what it archived.\n",
+	//
+	// The last clause reconciles this header with `claim.json`, which
+	// sits beside this file and *will* disagree with it. These flags are
+	// frozen at claim; the claim record is the live one, and the archive
+	// step rewrites it between this file being written and being read.
+	// So on every run `claim.json` shows archive done while this says
+	// archive=false, and both are correct.
+	//
+	// Said here because the reader who hits it is a model with the run's
+	// temp directory in front of it, and it has filed the contradiction
+	// as a harness finding twice — the carried
+	// `boundary-prompt-step-flags-always-false`, and Catapult's ORC-137.
+	// The cost is not a wrong decision downstream; it is a false finding
+	// spending a pass's proposal budget and an author's review, once per
+	// boundary, forever.
+	add(fmt.Sprintf("\nCompleted by an earlier run of THIS pass: archive=%t scan=%t file=%t — all false means nothing has run yet. A previous, completed pass over this milestone does not show here; the retro note under `%s/` is where you see what it archived. These flags are frozen at claim time and are not the same fact as `claim.json`'s `Done` map, which is the live resume record: it will show this run's own archive step as done while the line above still reads archive=false. That is expected, not a fault, and not worth a finding.\n",
 		plan.Done[agent.StepArchive], plan.Done[agent.StepScan], plan.Done[agent.StepFile], retro.Dir))
 	add(fmt.Sprintf("\nThe archive pass has run either way — an earlier run's, or this one's before you started — so the retro notes are in your checkout under `%s/`, this milestone's among them.\n", retro.Dir))
 	if len(plan.Roster) > 0 {
@@ -779,6 +794,19 @@ func cmdBoundaryArchive(args []string) error {
 		return err
 	}
 	// Persist the updated Done set for the later steps of this run.
+	//
+	// `prompt.md` is deliberately NOT regenerated here, and making the
+	// two agree is the wrong edit. Its step-flags header is the model's
+	// fresh-vs-resumed signal (DESIGN §10): read at claim,
+	// archive=false means a fresh pass and archive=true means a boundary
+	// picking itself back up. Re-render it after this line and
+	// archive=true becomes unconditional, so the flag stops
+	// distinguishing anything — the prompt would agree with the claim
+	// record and lose the only thing it was there to say.
+	//
+	// The two artifacts hold different facts on purpose: the prompt's is
+	// frozen at claim, this one is live. What was missing is anyone
+	// saying so, which the prompt header now does (Catapult's ORC-137).
 	raw, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return err
