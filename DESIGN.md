@@ -599,6 +599,33 @@ service container, spent to be told no. Two places asking one question is exactl
 that drifts, so there is one `MutexHolder` and three callers: the promotion revert, the
 pickup assertion, and the dispatcher.
 
+**Agent singularity is enforced twice, at two different moments, and both halves are load
+bearing.** Everything that asks "is this agent kind busy" reads the agent-run list, and a run
+does not appear there the instant it is dispatched — measured on Catapult at about ninety
+seconds between the dispatch and the proof it happened. Any sweep landing inside that window
+saw an idle agent and dispatched again: on `ORC-45` that was two boundary agents running one
+ticket to completion, twenty-two minutes of model spend and four tickets filed for two
+findings.
+
+- **The pickup assertion** refuses the loser at claim, in seconds rather than at completion.
+  It reads a snapshot the run already holds, so it works on any project.
+- **The dispatch reservation** stops the second dispatch being made at all. The sweep claims
+  the agent kind in the move store (§13) *before* it calls the host, so the record exists
+  before the next sweep can read it. It is a compare-and-set on one Durable Object per
+  project, which is serialized by construction.
+
+Neither replaces the other. The reservation is a write to a store a project may not have
+configured and that can be unreachable; losing it costs a duplicate dispatch, which the pickup
+assertion then refuses cheaply. Fail-closed on the write and the dispatch does not happen — the
+sweep is convergent, so declining costs a beat.
+
+**The reservation expires.** A dispatched job can die before it ever claims — a lost runner, a
+workflow that will not parse — and a lock nobody releases is an agent kind that never runs
+again. It is released at claim rather than at the end of the run: claim is unambiguously past
+the window the reservation covers, and holding it for the whole run would force the TTL up,
+which is the one direction that hurts. Release is holder-scoped, so a run that just lost the
+race cannot hand back the winner's lock.
+
 **Files owned by no system** — the router, the mix manifest — are named in the sketch when
 touched and left to git's textual conflict detection. Giving them labels would serialize
 every ticket through them, which is the mutex failing in the other direction.

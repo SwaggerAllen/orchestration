@@ -66,11 +66,17 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 	// twenty-two minutes of model spend, and four tickets filed for two
 	// findings.
 	//
-	// This narrows the window rather than closing it: a second run now
-	// aborts in seconds instead of finishing. Closing it wants a
-	// reservation written by the sweep at dispatch — by the thing that
-	// decides, so the record exists before the next sweep can read it —
-	// which the move record now gives us somewhere to put.
+	// This narrows the window; the dispatch reservation closes it. The
+	// sweep now claims the kind in the move store before it dispatches
+	// (`plane.reserveDispatch`, DESIGN §6), so the record exists before
+	// the next sweep can read it and the duplicate is never dispatched.
+	//
+	// Both halves stay, and neither is redundant. The reservation is a
+	// write to a store that a project may not have configured and that
+	// can be unreachable; this check reads a snapshot the run already
+	// holds. Losing the reservation costs a duplicate dispatch, which
+	// this refuses in seconds — which is the whole reason it was built
+	// first.
 	if other := liveRunOfKind(s, t.ID, kind); other != nil {
 		return refuse("pickup %s: %s agent already running on %s (run %s) — one agent of a kind at a time (DESIGN §6)",
 			t.Key, kind, other.Key, other.Run.ID)

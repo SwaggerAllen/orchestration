@@ -94,7 +94,38 @@ func (p *Plane) Execute(ctx context.Context, acts []core.Action, log io.Writer) 
 			if !ok {
 				return fmt.Errorf("execute: %s: no key for ticket id %s — Execute must follow Build", a, a.TicketID)
 			}
+			// The reservation, taken by the thing that decides, before
+			// it acts (DESIGN §6). Everything else that asks "is this
+			// agent kind busy" reads the run list, and a run does not
+			// appear there the instant it is dispatched — measured on
+			// catapult at about ninety seconds from dispatch to the
+			// proof it happened. Every sweep landing in that window saw
+			// an idle agent and dispatched again, which is how two
+			// boundary agents ran ORC-45 to completion.
+			//
+			// core.VerifyPickup already aborts the loser in seconds
+			// rather than letting it finish. This is the other half: the
+			// record exists before the next sweep can read it, so the
+			// duplicate is never dispatched at all.
+			held, err := p.reserveDispatch(ctx, a.Agent, a.TicketID)
+			if err != nil {
+				// Fail closed, exactly as the move record does: a
+				// dispatch we cannot record the intent of is one we
+				// cannot tell apart from a duplicate next beat. The
+				// sweep is convergent, so declining costs a beat.
+				return fmt.Errorf("execute: %s: reserving the %s agent before dispatching it: %w", a, a.Agent, err)
+			}
+			if held != "" {
+				fmt.Fprintf(log, "    (dispatch skipped: the %s agent is reserved by %s — one agent of a kind at a time)\n", a.Agent, p.keyOf(held))
+				continue
+			}
 			if err := p.Host.DispatchWorkflow(ctx, workflow, map[string]string{"ticket": key}); err != nil {
+				// Hand the reservation back. A dispatch that never
+				// happened must not hold the kind for the whole TTL —
+				// the next beat should be free to try again, and a
+				// transient host error is exactly the case that would
+				// otherwise idle an agent for five minutes.
+				p.releaseDispatch(ctx, a.Agent, a.TicketID)
 				return fmt.Errorf("execute: %s: %w", a, err)
 			}
 		case core.ActCreateBoundary:

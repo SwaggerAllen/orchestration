@@ -48,6 +48,13 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	if err := core.VerifyPickup(snap, t.ID, core.AgentDesign, dispatchID); err != nil {
 		return nil, err
 	}
+	// Past the window the dispatch reservation covers (DESIGN §6): this
+	// run is claiming, so it is visible in the run list and the ordinary
+	// singularity guard has it from here. Held any longer it only idles
+	// the kind. After VerifyPickup, never before — a run that just lost
+	// the race must not hand back the winner's lock, and the store's
+	// release is holder-scoped so this one cannot.
+	p.ReleaseDispatchReservation(ctx, core.AgentDesign, t.ID)
 
 	mode := "design"
 	if t.State != protocol.ReadyForDesign {
