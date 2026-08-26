@@ -1698,6 +1698,22 @@ Evidence is cleared when the run recovers. The model pass fails over from the su
 credential to the API key, and a first attempt's death left behind is a cause of death attached
 to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
 
+**And it brings the argument the run had already written, when there is one.** A run that fails
+*validation* — the outcome parsed and the harness refused its shape — has done the thinking the
+ticket needs before it died. That reasoning lives in the outcome file and used to go to the
+floor with the rejected outcome, so the ticket returned carrying a stack trace and nothing else
+and the next pass began from the description again. Measured on Catapult's ORC-133: a design
+pass answered `decisionless` with a screen in its touch list, which §3 makes a contradiction,
+and its account of why it thought nothing was being decided was discarded.
+
+Read leniently, because by then the outcome has usually already failed its own validation — a
+strict read drops the argument in exactly the case it is most wanted. Not fenced as evidence,
+because unlike the captured output the model *wrote* this: it is prose, arriving on a ticket a
+later design pass reads as input, and §2.3 makes comments the channel accepted deltas travel
+on. So it is posted under a heading that says the outcome carrying it was refused, and states
+that nothing in it has been agreed. A rejected argument offered as context is continuity; the
+same text offered as a decision is a delta nobody accepted.
+
 **A failed run says whether its work survived, and the retry is told what is on the branch.** A
 pass that dies *after* pushing leaves a complete piece of work on the ticket branch, and the
 comment recording the failure used to read the same either way — "Agent run failed: <url>",

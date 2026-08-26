@@ -965,6 +965,74 @@ func WithRunOutput(message, captured string) string {
 		tail(captured, runErrorLines))
 }
 
+// WithPreparedSummary appends the model's own argument to an abort
+// message, when it wrote one before the run died.
+//
+// The summary lives in outcome.json and used to go nowhere. A run that
+// failed *validation* — the outcome parsed, and the harness refused the
+// shape of it — had already done the thinking the ticket needs, in a
+// file, on the runner, and the abort read findings.json and the stderr
+// tail and not that. So the ticket went back carrying a stack trace and
+// no reasoning, and the next design pass started from the description
+// again. Measured on Catapult's ORC-133: a design pass returned
+// `decisionless` with `screens: [my-queue]`, which is the one illegal
+// combination (DESIGN §3), and its account of why it thought nothing
+// was being decided was discarded with the rejected outcome.
+//
+// The boundary agent is deliberately not wired to this. Its model
+// output is proposals.json, which carries no single prepared argument —
+// its reasoning is per-proposal and per-decline, and its steps already
+// comment as they complete. There is nothing here for it to rescue, and
+// pointing it at a file it never writes would look like coverage.
+//
+// Read leniently and deliberately so. By the time this runs the outcome
+// has usually already failed its own validation — that is why we are
+// aborting — so it cannot go back through LoadDesignOutcome, and a
+// stricter read would drop the summary in exactly the case it is most
+// wanted. Anything that is not JSON, or carries no summary, appends
+// nothing rather than a guess.
+//
+// The framing is the careful part, and it is not the same as
+// WithRunOutput's. That output is machine-captured and labelled
+// evidence. This is prose the model wrote, landing on a ticket that a
+// later design pass reads as input — and since DESIGN §2.3, comments
+// are where accepted deltas live. A summary attached to a *rejected*
+// outcome is not an accepted delta and must not read as one, so the
+// heading says the outcome was refused before the reader reaches the
+// argument.
+func WithPreparedSummary(message, outcomeJSON string) string {
+	// Two field names, because two schemas already exist and neither is
+	// wrong: design and dev write `summary` (DesignOutcome, DevOutcome),
+	// reconcile writes `report`. Reading both here keeps the caller from
+	// having to know which kind it is aborting — the CLI passes a path
+	// and nothing else.
+	var o struct {
+		Summary string `json:"summary"`
+		Report  string `json:"report"`
+	}
+	if err := json.Unmarshal([]byte(outcomeJSON), &o); err != nil {
+		return message
+	}
+	summary := strings.TrimSpace(o.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(o.Report)
+	}
+	if summary == "" {
+		return message
+	}
+	return message + "\n\n**The argument this run had prepared, from an outcome the harness refused:**\n\n" +
+		tail(summary, preparedSummaryLines) +
+		"\n\nWritten by the model, not accepted by anyone. It is here so the next pass starts from " +
+		"this pass's thinking rather than from the description again — it is context, not a decision, " +
+		"and nothing in it has been agreed (DESIGN §2.3)."
+}
+
+// preparedSummaryLines bounds the paste, like runErrorLines. A design
+// summary is prose rather than a stack, so this is larger — and it is a
+// guess, not a measurement. If a real summary is trimmed here, raise it
+// rather than treating the number as considered.
+const preparedSummaryLines = 80
+
 // runErrorLines bounds that paste. Larger than claimErrorLines because
 // a CLI's exit is noisier than a Go error, and no more measured than
 // that — 40 is a guess. If a real failure turns out to be trimmed here,
