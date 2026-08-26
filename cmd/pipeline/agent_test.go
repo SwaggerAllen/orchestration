@@ -606,3 +606,44 @@ func TestRepromptRewritesTheClaimRecordAndNotJustThePrompt(t *testing.T) {
 		t.Error("prompt.md lost the branch's non-asks")
 	}
 }
+
+// Design is the pass that can fold an accepted delta into the sketch, so
+// it is the one that has to be told the thread carries them.
+//
+// The asymmetry this covers: assembleReconcilePrompt already says the
+// comments carry the accepted deltas, and reconcile only judges against
+// them. Design's header was bare, and a pass read the thread as history
+// — declining to widen on scope its own comments had already accepted.
+func TestDesignPromptSaysTheCommentsCarryDeltasThatMayWiden(t *testing.T) {
+	got := assembleDesignPrompt("ROLE", &agent.ClaimResult{
+		TicketKey: "PIPE-1", Title: "A ticket", Mode: "design",
+		Description: "the original argument",
+		Comments:    []string{"the author accepted more scope here"},
+	}, "")
+
+	if !strings.Contains(got, "the author accepted more scope here") {
+		t.Fatal("the thread never reached the prompt at all")
+	}
+	head := got[strings.Index(got, "## Comments"):]
+	head = head[:strings.Index(head, "\n")]
+	for _, want := range []string{"deltas", "widen"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("the comments header is missing %q — without it a pass reads the thread as history:\n  %s", want, head)
+		}
+	}
+}
+
+// And the role prompt carries the rule, including the half that stops it
+// becoming licence to widen on the pass's own reading.
+func TestDesignRolePromptBoundsWhoMayWidenTheTicket(t *testing.T) {
+	body := repoFile(t, "prompts/design.md")
+	for _, want := range []string{
+		"comments carry deltas", // the rule
+		"immutable",             // why the thread is the only channel
+		"push-back",             // scope nobody agreed stays one
+	} {
+		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+			t.Errorf("prompts/design.md does not mention %q", want)
+		}
+	}
+}

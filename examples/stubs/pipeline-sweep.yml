@@ -1,29 +1,45 @@
 # Project stub: control-plane sweep. Copy into the project repo's
 # .github/workflows/.
 #
-# Two triggers, per DESIGN §13:
-#   - workflow_dispatch: the metronome. It fires on a Linear webhook the
-#     moment the tracker changes, and hourly regardless for the
-#     elapsed-time conditions nothing announces — stale claims, deploy
-#     timeouts. GitHub's own `schedule:` is deliberately not used: its
-#     5-15 minute jitter compounds across every hop of a ticket's life.
-#   - workflow_run: the CI hops. When the project's CI completes, a sweep
-#     runs immediately, so Checks -> Reconciling and CI-red -> rework
-#     never wait for the poll.
-#   - deployment_status: the post-deploy check, which is the last hop of
-#     a ticket's life and otherwise the one most likely to sit waiting
-#     on the clock. Only fires where the platform records GitHub
-#     Deployments; a DO-hosted project drops this trigger and lets the
-#     hourly beat find it.
+# One trigger, per DESIGN §13: workflow_dispatch, from the metronome.
+# It fires on a Linear webhook the moment the tracker changes, on a
+# GitHub webhook for the CI and deploy hops, and hourly regardless for
+# the elapsed-time conditions nothing announces — stale claims, deploy
+# timeouts. GitHub's own `schedule:` is deliberately not used: its 5-15
+# minute jitter compounds across every hop of a ticket's life.
+#
+# This file used to carry `workflow_run` and `deployment_status` as
+# well, and removing them is the point rather than a tidy-up.
+#
+# The care needed here: they are NOT dead triggers. They were dead when
+# the metronome's GitHub route was written — GitHub does not start a
+# workflow run from an event created with GITHUB_TOKEN, so a dev agent's
+# CI completion woke nothing (measured on ORC-1, worker/index.ts). But
+# SETUP 2 has every project check out with AGENT_GITHUB_TOKEN since,
+# exactly so that CI runs and deploys record. Under that token these
+# triggers fire normally.
+#
+# Which makes them a duplicate of a route that is strictly better. The
+# metronome coalesces a burst of webhooks into one dispatch in a five
+# second window (worker/debounce.ts); a trigger declared here is
+# scheduled by GitHub and never reaches it. So one CI completion started
+# two sweeps — one at once from here, one debounced from the Worker —
+# and `concurrency` then evicted the pending one. That is coalescing
+# done late and billed by the minute: measured on Catapult, seven sweeps
+# in 107 seconds, two of them cancelled.
+#
+# The Worker route covers both token configurations and both events
+# (`workflow_run` filtered to the project's CI workflow by name,
+# `deployment_status` to `success`), so nothing here is load-bearing.
+# The backstop argument does not survive either: the hourly cron is the
+# floor under all of it, and it is direct rather than debounced, so a
+# Worker outage is already covered by something that works for agent
+# events too.
 name: pipeline-sweep
 run-name: "pipeline: sweep"
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: [ci]
-    types: [completed]
-  deployment_status:
 
 # Declaring this block at all drops every permission not listed to
 # none, so it has to name everything the snapshot reads, not just the

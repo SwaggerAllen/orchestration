@@ -239,6 +239,33 @@ test("a deployment status wakes the sweep", () => {
   );
 });
 
+// Only `success` can advance anything: the deploy check reads the newest
+// successful deployment and compares its commit against the merge commit,
+// and a failed deploy is caught by the deploy timeout rather than by an
+// event. One deployment walking queued -> in_progress -> success is three
+// webhooks minutes apart, which is three sweeps no five-second window can
+// coalesce.
+test("only a successful deployment status wakes the sweep", () => {
+  const at = (state: string) => ({
+    action: "created",
+    repository: { full_name: "acme/app" },
+    deployment_status: { state },
+  });
+  for (const state of ["queued", "in_progress", "failure", "error", "inactive"]) {
+    assert.deepEqual(githubTargets(GH_PROJECTS, "deployment_status", at(state)), [], state);
+  }
+  assert.deepEqual(
+    githubTargets(GH_PROJECTS, "deployment_status", at("success")).map((p) => p.repository),
+    ["acme/app"],
+  );
+});
+
+// A payload with no deployment_status at all must not be read as success.
+test("a deployment_status event with no state dispatches nothing", () => {
+  const payload = { action: "created", repository: { full_name: "acme/app" } };
+  assert.deepEqual(githubTargets(GH_PROJECTS, "deployment_status", payload), []);
+});
+
 test("ping and unknown events are accepted but dispatch nothing", () => {
   const payload = { zen: "Keep it logically awesome.", repository: { full_name: "acme/app" } };
   assert.deepEqual(githubTargets(GH_PROJECTS, "ping", payload), []);

@@ -85,6 +85,19 @@ and the drift shows up as agents disagreeing about what a state means.
    argument and the measuring stick reconciliation verifies against, so nobody edits it after
    the fact. On a returned ticket the **newest comment is the scope** — re-implementing the
    description re-lands work that already merged and conflicts with itself.
+
+   **A delta may widen the ticket, and the design pass acts on it.** Immutability is what makes
+   the thread the only channel an amendment has: an author who accepts new scope has nowhere to
+   put it but a comment. A pass that reads the description as the whole scope is therefore a
+   pass that cannot be amended, and the ticket comes back a second time for work agreed the
+   first. Design is where this lands, because design is the pass that can fold a delta into the
+   sketch — dev implements the sketch, and reconciliation only judges against the thread it is
+   already given.
+
+   The distinction is *who decided*, not *where it is written*. A delta the **author** accepted
+   in the thread is scope. Scope a pass believes the work needs, that nobody has agreed, is a
+   push-back (§2.7) and stays one — the comment channel widens what the author has widened, and
+   confers nothing on an agent's own reading.
 4. **Base-rev is optimistic concurrency control, checked at pickup.** Not provenance. Git
    surfaces conflict at merge, which is after the implementation exists, and only textual
    conflict at that. The resolution rule is semantic and has no git equivalent: the repo moved
@@ -1986,14 +1999,39 @@ human's approval, a touchpoint §0 does not budget for. Four symptoms, one cause
 like its own bug. So the project stubs hand the agents a scoped user token instead, and the
 harness warns when they are running without one.
 
-**The GitHub-side hops arrive by webhook too, and are a backstop rather than the mechanism.** CI green and
-deploy detection were originally left to `workflow_run` and `deployment_status` triggers on the
-project stub. Those do not fire for the pipeline: GitHub will not start a workflow run from an
-event created with `GITHUB_TOKEN` — `workflow_dispatch` and `repository_dispatch` are the only
-exceptions — and every agent pushes, merges and records deploys with exactly that token. The
-triggers work for a human's commits and never for an agent's, which is the only case they exist
-for, so the gap reads as a pipeline that has merely gone slow. Webhook *delivery* is not workflow
-triggering, so the same Worker receives them, verified against GitHub's own signature.
+**The GitHub-side hops arrive by webhook, and the project stub no longer triggers on them at
+all.** CI green and deploy detection were originally left to `workflow_run` and
+`deployment_status` triggers on the stub. Those did not fire for the pipeline: GitHub will not
+start a workflow run from an event created with `GITHUB_TOKEN` — `workflow_dispatch` and
+`repository_dispatch` are the only exceptions — and an agent that pushes, merges and records
+deploys with that token starts nothing. The triggers worked for a human's commits and never for
+an agent's, which is the only case they existed for, so the gap read as a pipeline that had
+merely gone slow. Webhook *delivery* is not workflow triggering, so the same Worker receives
+them, verified against GitHub's own signature.
+
+**That is why the Worker route exists; it is not why the triggers were removed, and the two are
+worth keeping apart.** SETUP 2 has every project check out with a scoped user token (see just
+above), precisely so that an agent's push does start CI and does record deploys. Under that
+token the stub triggers fire perfectly well. What they fire is a *second* sweep.
+
+**They were kept as a backstop, and the backstop cost more than it covered.** A trigger declared
+in the stub is scheduled by GitHub and never reaches the Worker, so it bypasses the debounce
+(below): one CI completion started two sweeps — one immediately from the stub, one debounced
+from the metronome — and `concurrency` then evicted the pending one. That is coalescing done
+late, after dispatch, on a platform that bills each job rounded up to the minute. Measured on
+Catapult: seven sweeps in 107 seconds, two of them cancelled that way.
+
+What made removal safe is that the Worker route is the one correct under *both* token
+configurations, and that the backstop was never the floor. **The hourly cron is**, and it
+dispatches directly rather than through the debounce — so a Worker outage is already covered by
+something that works for agent-created events too, which the stub triggers never did.
+
+**Only a successful deployment wakes a sweep.** `deployment_status` fires on every state
+transition, and one deployment walking `queued` → `in_progress` → `success` is three webhooks
+minutes apart — far outside a five-second window, so three dispatches. The deploy check reads the
+newest *successful* deployment and compares its commit against the merge commit, and a failed
+deploy is caught by the deploy timeout (§12) rather than by an event, so the other states can
+advance nothing and are dropped at the Worker.
 
 One filter there is load-bearing rather than an optimisation: only the project's CI workflow
 completing may wake a sweep. A sweep run completing is itself a `workflow_run` event, so waking on
