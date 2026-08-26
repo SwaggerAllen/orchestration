@@ -197,4 +197,5 @@ runs:
           --reason failed \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
           --error-file "$RUNNER_TEMP/pipeline/run-error.txt" \
+          --outcome "$RUNNER_TEMP/pipeline/verdict.json" \
           --message "Reconcile run failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

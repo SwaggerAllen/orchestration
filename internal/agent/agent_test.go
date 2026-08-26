@@ -1160,3 +1160,50 @@ func TestAbortSaysNothingAboutTheBranchWhenNothingWasPushed(t *testing.T) {
 		}
 	}
 }
+
+// A run that failed validation had already done the thinking. Losing it
+// sends the ticket back to a pass that starts from the description
+// again — measured on Catapult's ORC-133, where a design pass returned
+// decisionless with screens (illegal, DESIGN §3) and its account of why
+// went to the floor with the rejected outcome.
+func TestWithPreparedSummaryCarriesTheModelsArgument(t *testing.T) {
+	got := WithPreparedSummary("Design agent run failed: <url>",
+		`{"outcome":"decisionless","screens":["my-queue"],"summary":"Nothing here decides anything: the kind is unreachable until a machinery-filed type exists."}`)
+
+	if !strings.Contains(got, "machinery-filed type exists") {
+		t.Fatalf("the prepared argument did not survive the abort:\n%s", got)
+	}
+	// Framing, not decoration. Since DESIGN §2.3 a later design pass
+	// reads comments as where accepted deltas live, and this one is
+	// attached to an outcome the harness refused — so it has to arrive
+	// as context. Losing any of these puts a rejected argument in front
+	// of the next pass looking like an agreed one.
+	for _, want := range []string{"refused", "not accepted by anyone", "context, not a decision"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the summary is posted without %q, so a rejected argument reads as an accepted delta", want)
+		}
+	}
+}
+
+// reconcile calls its prose `report`, design and dev call it `summary`.
+// Both are already in use and neither is wrong, so the reader takes
+// either — the CLI passes a path and does not know which kind it holds.
+func TestWithPreparedSummaryReadsReconcilesReportToo(t *testing.T) {
+	got := WithPreparedSummary("Reconcile run failed: <url>",
+		`{"outcome":"cannot-tell","report":"The diff and the sketch disagree about ordering."}`)
+	if !strings.Contains(got, "disagree about ordering") {
+		t.Errorf("reconcile's report did not survive the abort:\n%s", got)
+	}
+}
+
+// Absent, unparseable and empty are all ordinary — a run that died
+// before writing anything must append nothing rather than a cause it
+// invented. This is the direction that must not fail: the message still
+// has to carry the run URL.
+func TestWithPreparedSummaryAppendsNothingWhenThereIsNoArgument(t *testing.T) {
+	for _, in := range []string{"", "not json at all", `{"outcome":"artifacts"}`, `{"summary":"   "}`} {
+		if got := WithPreparedSummary("base", in); got != "base" {
+			t.Errorf("WithPreparedSummary(%q) appended %q", in, got)
+		}
+	}
+}

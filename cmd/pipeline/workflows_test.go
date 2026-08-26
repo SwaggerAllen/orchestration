@@ -195,6 +195,51 @@ func TestSetupStubsGrantDeploymentsRead(t *testing.T) {
 // it was being discarded. A fifth agent action added without this line
 // would quietly reintroduce that, since the abort still works — it just
 // says nothing.
+// The abort carries the model's own argument, and points at the file
+// that agent's model actually writes.
+//
+// Both halves are load-bearing and the second is the one that bites. The
+// outcome file is not uniform: design and dev write outcome.json,
+// reconcile writes verdict.json, and boundary writes proposals.json,
+// which carries no single prepared argument and so is deliberately not
+// wired. A first pass at this pointed all four at outcome.json — which
+// fails silently, because an absent file is the ordinary case and
+// appends nothing. It would have looked wired and rescued nothing on
+// two of the four.
+func TestAgentActionsHandTheModelsPreparedArgumentToTheAbort(t *testing.T) {
+	// The file each kind's model run is told to write, and therefore the
+	// only file its abort may name.
+	for _, c := range []struct{ kind, writer, outcome string }{
+		{"design", "outcome-path", "outcome.json"},
+		{"dev", "outcome-path", "outcome.json"},
+		// reconcile names its own: --verdict-path to write, --verdict to
+		// read back. Spelled out rather than assumed — assuming
+		// outcome-path here is what this test caught on its first run.
+		{"reconcile", "verdict-path", "verdict.json"},
+	} {
+		body := repoFile(t, filepath.Join(".github", "actions", "agent-"+c.kind, "action.yml"))
+		abort := body[strings.Index(body, "agent abort"):]
+		want := `--outcome "$RUNNER_TEMP/pipeline/` + c.outcome + `"`
+		if !strings.Contains(abort, want) {
+			t.Errorf("agent-%s's abort does not carry %s — a run that failed validation loses the "+
+				"reasoning it had already written, and the ticket goes back with a stack trace and "+
+				"no argument", c.kind, want)
+		}
+		if !strings.Contains(body, "--"+c.writer+` "$RUNNER_TEMP/pipeline/`+c.outcome+`"`) {
+			t.Errorf("agent-%s's abort names %s but its model run is not told to write it; the abort "+
+				"would read a file nobody produces and append nothing, silently", c.kind, c.outcome)
+		}
+	}
+	// Boundary is the deliberate omission. Asserted so it stays a
+	// decision rather than becoming an oversight somebody "fixes" by
+	// pointing it at a file it never writes.
+	boundary := repoFile(t, filepath.Join(".github", "actions", "agent-boundary", "action.yml"))
+	if strings.Contains(boundary[strings.Index(boundary, "agent abort"):], "--outcome ") {
+		t.Error("agent-boundary's abort names an outcome file; its model writes proposals.json, " +
+			"which carries no single prepared argument (see WithPreparedSummary)")
+	}
+}
+
 func TestAgentActionsHandTheModelRunsOutputToTheAbort(t *testing.T) {
 	dirs, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
 	if err != nil {

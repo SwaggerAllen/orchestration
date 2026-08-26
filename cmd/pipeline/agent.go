@@ -993,6 +993,11 @@ func cmdAgentAbort(args []string) error {
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
 	errPath := fs.String("error-file", "", "file holding a failed model run's captured output; its tail is appended to the comment")
+	// Named for what it rescues rather than for the file, because the
+	// same word already means the opposite two functions up: claim's
+	// --outcome-path is where the model is told to *write*. This is the
+	// abort reading that file back.
+	preparedPath := fs.String("outcome", "", "the outcome file the model wrote, if it got that far; its argument is appended so a rejected outcome's reasoning survives")
 	pushedPath := fs.String("pushed-file", "", "file the push step writes the pushed branch head to; absent means this run pushed nothing")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1006,6 +1011,16 @@ func cmdAgentAbort(args []string) error {
 	if *errPath != "" {
 		if raw, err := os.ReadFile(*errPath); err == nil {
 			*message = agent.WithRunOutput(*message, string(raw))
+		}
+	}
+	// Absent is ordinary here too: a run that died before the model
+	// wrote anything has no outcome. What this rescues is the other
+	// case — the outcome was written and the harness refused its shape —
+	// where the pass's reasoning existed and was thrown away with the
+	// outcome that carried it (Catapult's ORC-133).
+	if *preparedPath != "" {
+		if raw, err := os.ReadFile(*preparedPath); err == nil {
+			*message = agent.WithPreparedSummary(*message, string(raw))
 		}
 	}
 	p, _, err := agentDeps(*cfgPath)
