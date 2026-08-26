@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
+	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 )
@@ -530,5 +532,77 @@ func TestRepromptAdmitsTheTwoKindsThatClaimBeforeTheirCheckout(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), refusal) {
 			t.Errorf("%s: err = %v, want the refusal naming why this kind needs no rebuild", kind, err)
 		}
+	}
+}
+
+// claim.json and prompt.md are two artifacts of one claim, and they have
+// to agree about what the branch says.
+//
+// The rebuild used to correct NonAsks in memory, render the prompt from
+// it, print what changed, and leave claim.json holding the base commit's
+// copy. ORC-73 measured exactly that and said the prompt "was correct in
+// the place that mattered" while the claim data "reflects the base
+// rather than the branch's actual state".
+func TestRepromptRewritesTheClaimRecordAndNotJustThePrompt(t *testing.T) {
+	const onTheBranch = "# Confirmed non-asks\n\n## No dark mode\nscope: universal\n\nTwo palettes, one designer.\n"
+	cfgPath := nonAsksProject(t, onTheBranch)
+	out := t.TempDir()
+
+	tpl := filepath.Join(out, "template.md")
+	if err := os.WriteFile(tpl, []byte("role"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The claim, as it was written before the branch checkout: the base
+	// commit's copy of the file, which is the whole defect.
+	claimed := agent.ClaimResult{
+		TicketID: "iss_1", TicketKey: "PIPE-1", Title: "A ticket",
+		Mode: "design", Scope: "do the thing",
+		NonAsks: &agent.NonAsks{
+			Path: config.DefaultNonAsksPath, Found: true,
+			Body: "# Confirmed non-asks\n\n(the base commit's copy, one entry short)\n",
+		},
+	}
+	raw, err := json.MarshalIndent(&claimed, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "claim.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmdAgentReprompt([]string{
+		"--kind", "design", "--config", cfgPath, "--out", out, "--prompt-template", tpl,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := os.ReadFile(filepath.Join(out, "claim.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rebuilt agent.ClaimResult
+	if err := json.Unmarshal(after, &rebuilt); err != nil {
+		t.Fatal(err)
+	}
+	if rebuilt.NonAsks == nil || rebuilt.NonAsks.Body != onTheBranch {
+		got := "<nil>"
+		if rebuilt.NonAsks != nil {
+			got = rebuilt.NonAsks.Body
+		}
+		t.Errorf("claim.json still carries the base commit's non-asks:\n got %q\nwant %q", got, onTheBranch)
+	}
+	// The rest of the claim has to survive the round trip — this rewrites
+	// the record, it does not replace it.
+	if rebuilt.TicketKey != claimed.TicketKey || rebuilt.Scope != claimed.Scope || rebuilt.Mode != claimed.Mode {
+		t.Errorf("the rewrite lost part of the claim: %+v", rebuilt)
+	}
+	// And the prompt still carries it, which is the half that was already
+	// right and must stay right.
+	prompt, err := os.ReadFile(filepath.Join(out, "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prompt), "No dark mode") {
+		t.Error("prompt.md lost the branch's non-asks")
 	}
 }
