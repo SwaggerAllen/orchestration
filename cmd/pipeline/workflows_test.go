@@ -79,6 +79,45 @@ func stripComments(body string) string {
 // destroy the answer on exactly the run that needed it twice. They also
 // have to be cleared before the push, or the commit never leaves the
 // runner and the next boundary skips its note again.
+// The worker suite gates the merge, not only the deploy.
+//
+// `worker-deploy.yml` runs it and always has, under a comment saying the
+// signature check "is not deployed untested" — but that workflow fires
+// on `push: branches: [main]` and never on a pull request. So a PR
+// breaking a worker test used to pass CI, merge, and fail the deploy.
+//
+// That is the worst place for it to land. A red deploy leaves the
+// metronome serving the previous version: no project visibly loses its
+// beat and nothing reports it, which is the failure worker-deploy.yml's
+// own header says the automatic deploy exists to prevent. The test
+// caught the bug in the one place where failing looks identical to the
+// thing it was protecting against.
+//
+// Asserted here because a step nobody checks is a step a later cleanup
+// deletes as duplication — it does duplicate worker-deploy.yml, and the
+// duplication is the point.
+func TestCIRunsTheWorkerSuiteOnPullRequests(t *testing.T) {
+	ci := repoFile(t, filepath.Join(".github", "workflows", "ci.yml"))
+
+	if !strings.Contains(ci, "pull_request") {
+		t.Fatal("ci.yml no longer runs on pull requests; nothing below gates a merge")
+	}
+	if !strings.Contains(ci, "index.test.ts") {
+		t.Error("ci.yml does not run worker/index.test.ts, so the worker suite gates the " +
+			"deploy and not the merge — a PR breaking it merges clean and fails the deploy, " +
+			"where a failure is indistinguishable from a metronome nobody redeployed")
+	}
+	// Same runtime as the deploy gate, or the two can disagree: the
+	// merge gate passes and the deploy gate still fails after it.
+	deploy := repoFile(t, filepath.Join(".github", "workflows", "worker-deploy.yml"))
+	for _, w := range []struct{ name, body string }{{"ci.yml", ci}, {"worker-deploy.yml", deploy}} {
+		if !strings.Contains(w.body, `node-version: "22"`) {
+			t.Errorf("%s does not pin node 22; the merge gate and the deploy gate would "+
+				"test different runtimes", w.name)
+		}
+	}
+}
+
 func TestRehearsalResetClearsRetroNotesBetweenTheRevertsAndThePush(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "rehearse.yml"))
 	if err != nil {
