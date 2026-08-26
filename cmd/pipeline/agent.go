@@ -525,7 +525,19 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 	}
 	add("\n## The argument\n\n" + res.Description + "\n")
 	if len(res.Comments) > 0 {
-		add("\n## Comments, oldest first\n")
+		// Named, because a bare header let a pass read the thread as
+		// history. Descriptions are immutable (DESIGN §2.3) — nobody
+		// edits the argument after the fact — so a comment is the only
+		// channel an amendment has, and a pass that treats the
+		// description as the whole scope cannot be amended at all.
+		//
+		// The asymmetry this fixes: `assembleReconcilePrompt` already
+		// says these carry the accepted deltas, and reconcile only
+		// *judges* against them. Design is the pass that can fold a
+		// delta into the sketch, and it was the one not told. Measured
+		// on a real ticket, which declined to widen on scope its own
+		// comments had already accepted.
+		add("\n## Comments, oldest first — the accepted deltas, and they may widen this ticket (DESIGN 2.3)\n")
 		for _, c := range res.Comments {
 			add("\n---\n" + c + "\n")
 		}

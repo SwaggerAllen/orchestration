@@ -85,6 +85,19 @@ and the drift shows up as agents disagreeing about what a state means.
    argument and the measuring stick reconciliation verifies against, so nobody edits it after
    the fact. On a returned ticket the **newest comment is the scope** — re-implementing the
    description re-lands work that already merged and conflicts with itself.
+
+   **A delta may widen the ticket, and the design pass acts on it.** Immutability is what makes
+   the thread the only channel an amendment has: an author who accepts new scope has nowhere to
+   put it but a comment. A pass that reads the description as the whole scope is therefore a
+   pass that cannot be amended, and the ticket comes back a second time for work agreed the
+   first. Design is where this lands, because design is the pass that can fold a delta into the
+   sketch — dev implements the sketch, and reconciliation only judges against the thread it is
+   already given.
+
+   The distinction is *who decided*, not *where it is written*. A delta the **author** accepted
+   in the thread is scope. Scope a pass believes the work needs, that nobody has agreed, is a
+   push-back (§2.7) and stays one — the comment channel widens what the author has widened, and
+   confers nothing on an agent's own reading.
 4. **Base-rev is optimistic concurrency control, checked at pickup.** Not provenance. Git
    surfaces conflict at merge, which is after the implementation exists, and only textual
    conflict at that. The resolution rule is semantic and has no git equivalent: the repo moved
