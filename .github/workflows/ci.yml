@@ -38,3 +38,32 @@ jobs:
         run: go build ./...
       - name: test
         run: go test ./...
+
+      # The worker suite runs here as well as in worker-deploy.yml, and
+      # the duplication is the point rather than an oversight.
+      #
+      # worker-deploy.yml triggers on `push: branches: [main]`, never on
+      # `pull_request`, so before this step the worker tests were a
+      # *deploy* gate and not a *merge* gate: a PR breaking one passed
+      # CI, merged, and then failed the deploy. That is the worst place
+      # for it to fail. A red deploy leaves the metronome serving the
+      # previous version — no project visibly loses its beat and nothing
+      # reports it, which is the exact failure worker-deploy.yml's own
+      # header says the automatic deploy exists to prevent.
+      #
+      # Added to this job rather than as a job of its own, deliberately.
+      # A new job is a new check name, and a check name gates nothing
+      # until somebody adds it to branch protection — so it would look
+      # armed and be inert, which is the failure this repo keeps paying
+      # for. Inside `test` it is required from its first run.
+      #
+      # Node pinned to 22 to match worker-deploy.yml. If the two drift,
+      # the merge gate and the deploy gate are testing different
+      # runtimes and the second can still fail after the first passed.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: worker test
+        working-directory: worker
+        run: node --test --experimental-strip-types index.test.ts

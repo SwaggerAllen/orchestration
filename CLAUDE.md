@@ -14,7 +14,16 @@ This file is what only this repo can tell you.
 gofmt -l .          # CI fails on any output; go vet and go test do not catch it
 go vet ./...
 go test ./...
+cd worker && node --test --experimental-strip-types index.test.ts
 ```
+
+The worker line is a gate, not a nicety: `go test ./...` cannot see
+TypeScript, and the suite it skips covers the webhook signature check —
+the only thing between a public URL and a token that starts workflows in
+every project repo. It runs in `ci.yml` on the PR and again in
+`worker-deploy.yml` before a deploy, so a contributor who skips it here
+learns about it from CI rather than from production. Node 22, matching
+both.
 
 ## Comments explain why, including what went wrong before
 
