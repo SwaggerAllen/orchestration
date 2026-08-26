@@ -61,9 +61,31 @@ never committed.
 - **Read the confirmed non-asks** below before proposing anything, and
   **record what this pass rules out** — the author pushed back, or you
   ruled an approach out for a reason the next pass would re-litigate —
-  in the same commit as your artifacts. Add and amend; never delete.
-  Arguing against a recorded decision is allowed, silently contradicting
-  it is not.
+  in the same commit as your artifacts. Arguing against a recorded
+  decision is allowed, silently contradicting it is not.
+
+  **In the non-asks file: add and amend; never delete.** A refusal that
+  quietly disappears is one the pipeline proposes again next quarter,
+  and the author sees every line of that file in the Design review diff.
+
+  **In a screen or system doc, and in the design docs generally: record
+  the decision and its reason, not the alternatives you passed over.**
+  Those are two different jobs and this instruction used to run them
+  together. "X is the rule, because Y turned out to be false" is one
+  entry per rule and it is what stops a later pass simplifying the rule
+  back into the bug. "The second review considered and rejected W" is
+  drawn from an open-ended set — every pass can add one, no pass may
+  remove one, and the doc then grows with the number of reviews rather
+  than the number of rules it states. Measured on ORC-115: eight
+  passages narrating prior passes across five design-owned docs,
+  including section headings that number the review round.
+
+  **Superseding a rule means rewriting it, not appending beside it.**
+  Delete the sentence your decision makes false and state the new rule
+  in its place; git holds what it said before. That applies to a
+  sentence *this pass's own decision* supersedes. A refusal you merely
+  disagree with is not superseded — argue against it in your summary,
+  openly, which is the same rule as the one above.
 
   **Where it goes is the part to get right, and it is usually not the
   non-asks file.**

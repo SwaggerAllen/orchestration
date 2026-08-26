@@ -667,6 +667,56 @@ func TestDesignPromptSaysTheCommentsCarryDeltasThatMayWiden(t *testing.T) {
 	}
 }
 
+// "Never delete" is right about the non-asks file and wrong about every
+// other design doc, and the prompt used to state it before saying which
+// it meant.
+//
+// DESIGN §4 scopes it correctly — the sentence is about the file, and
+// the paragraph after it says most refusals go elsewhere — as does the
+// non-asks section the harness renders, which names the file's own path.
+// The role prompt was the one place it appeared unscoped, ahead of the
+// placement guidance, so a pass reasonably read it as governing the
+// screen and system docs too. Those then grow with the number of
+// reviews rather than the number of rules they state: measured on
+// Catapult's ORC-115, eight passages narrating prior passes across five
+// design-owned docs, two of them headings numbering the review round.
+//
+// Asserted rather than commented because the failure is invisible for a
+// milestone. Nothing is red while a doc bloats; it is only legible when
+// somebody reads the whole file and asks why it is a transcript.
+func TestDesignRolePromptScopesNeverDeleteToTheNonAsksFile(t *testing.T) {
+	// Whitespace collapsed before matching. The prompts are hard-wrapped
+	// markdown, so any multi-word phrase can straddle a line break —
+	// "merely\n  disagree" failed this test on its first run — and a
+	// reflow is not a defect. Matching the prose rather than the layout
+	// is what keeps that true.
+	lower := strings.Join(strings.Fields(strings.ToLower(repoFile(t, "prompts/design.md"))), " ")
+
+	// The rule survives, and says which artifact it governs.
+	i := strings.Index(lower, "never delete")
+	if i < 0 {
+		t.Fatal("prompts/design.md no longer says never delete; a refusal that " +
+			"quietly disappears is one the pipeline proposes again")
+	}
+	// Same sentence, not somewhere else in the file: the whole defect was
+	// the scope being stated too far from the rule to travel with it.
+	sentence := lower[max(0, i-120):min(len(lower), i+40)]
+	if !strings.Contains(sentence, "non-asks file") {
+		t.Errorf("never delete is stated without naming the non-asks file, so it reads as "+
+			"governing every design doc:\n  %s", sentence)
+	}
+
+	for _, want := range []struct{ text, why string }{
+		{"not the alternatives you passed over", "the bounded rule the docs actually need"},
+		{"superseding a rule means rewriting it", "or a correction gets appended beside the stale sentence"},
+		{"merely disagree", "or rewriting becomes licence to delete a refusal the pass dislikes"},
+	} {
+		if !strings.Contains(lower, strings.ToLower(want.text)) {
+			t.Errorf("prompts/design.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+}
+
 // And the role prompt carries the rule, including the half that stops it
 // becoming licence to widen on the pass's own reading.
 func TestDesignRolePromptBoundsWhoMayWidenTheTicket(t *testing.T) {

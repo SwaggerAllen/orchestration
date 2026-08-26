@@ -384,6 +384,17 @@ already reading, and where it cannot drift from the positive rule it qualifies. 
 is placement, not category: this file is inlined into every scoped prompt, while a system doc
 is read on the way to changing that system, which is the cheaper and better-aimed moment.
 
+**And it is written differently there, because "never deleted" does not travel with it.** In
+the file a refusal is an entry, kept because its disappearance is invisible. In an owning doc
+it is the *reason attached to a rule* — "X is the rule, because Y turned out to be false" —
+and superseding that rule means rewriting the sentence, not appending a correction beside it.
+The asymmetry is what keeps the docs bounded: a rule's reason is one entry per rule, while
+alternatives a pass passed over are drawn from an open-ended set, so a doc that records those
+grows with the number of reviews rather than the number of rules it states. Measured on
+Catapult's ORC-115, where the prompt stated "never delete" ahead of the placement guidance and
+a pass reasonably read it as governing both: eight passages narrating prior passes across five
+design-owned docs, two of them section headings numbering the review round.
+
 **Two kinds have no such home, and they are what the file is for.** Refusals every pass must
 see, and refusals spanning systems — which a per-doc home could serve only by copying into each
 one, and a copy is drift with extra steps. The tell for the second kind is two docs citing a
