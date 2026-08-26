@@ -152,6 +152,35 @@ func cmdAgentReprompt(args []string) error {
 	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return err
 	}
+	// And the claim record, so the two artifacts of one claim agree
+	// about what the branch says.
+	//
+	// This rebuild used to correct `res.NonAsks` in memory, render the
+	// prompt from it, print what changed — and leave `claim.json` on
+	// disk holding the base commit's copy. Recorded on ORC-73, which
+	// measured it and said plainly that the prompt "was correct in the
+	// place that mattered" while the claim data "reflects the base
+	// rather than the branch's actual state".
+	//
+	// Nothing reads the field today, and that is the argument for
+	// fixing it rather than against: a file that is right by luck
+	// because nobody looks is the shape that costs a run the first time
+	// somebody does. `claim.json` is the record of a claim, and a
+	// record that quietly disagrees with the prompt built from it is
+	// worse than no record.
+	//
+	// After prompt.md, never before. If this write fails the prompt is
+	// still the branch's — which is what the agent reads — and we are
+	// no worse off than before this existed. The other order would
+	// leave a fresh claim beside a stale prompt, which is the one
+	// combination that misleads the pass itself.
+	updated, err := json.MarshalIndent(&res, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(*outDir, "claim.json"), updated, 0o644); err != nil {
+		return err
+	}
 	// Said out loud, because a silent no-op and a silent correction look
 	// identical in a log and only one of them means the branch had
 	// nothing extra to say.
