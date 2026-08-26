@@ -321,39 +321,36 @@ type Proposal struct {
 	// author reading as such, and failing the parse over a field that
 	// steers nothing would take the file step down for no gain.
 	Gating bool `json:"gating"`
-	// Dedupe is milestone+finding; a re-run files nothing twice because
-	// this key is checked against existing issues (DESIGN §10).
+	// Dedupe names the carried harness finding this proposal answers, so
+	// `unadjudicated` can tell a finding that was filed from one that was
+	// dropped (DESIGN §10). That is now its only job.
+	//
+	// It used to be the filing key as well, and a re-run was supposed to
+	// file nothing twice because of it. It never worked in either
+	// direction — see the file step — and automatic deduplication was
+	// removed rather than given a third key. Adjudication matching is a
+	// different question: it asks whether *this pass* answered a finding
+	// *this pass* was handed, which is one run and one vocabulary.
 	Dedupe string `json:"dedupe"`
 	// Subject is the concrete thing this proposal is about, named as the
 	// repository names it: a file path, a config key, a mix task, a gate
-	// line, a doc section, a module. The key is derived from it.
+	// line, a doc section, a module.
 	//
-	// Dedupe alone was the model's phrasing for one scan, and phrasing is
-	// a choice rather than a fact — so two scans of one tree wrote two
-	// keys for one finding and both filed. Measured on ORC-45: four
-	// tickets for two findings, keyed `declared-gate-set-not-armed-in-ci`
-	// and `arm-the-unarmed-gate-set` for the same gate work.
+	// Two jobs, neither of which is a key any more. It decides whether the
+	// proposal is author-only (a workflow file no agent can push), and it
+	// rides on the filed ticket so a human deduplicating by hand can sort
+	// two similar proposals without reading both descriptions.
 	//
-	// A subject is not immune to rewording, but it is a fact about the
-	// repository rather than a sentence about the finding, and two scans
-	// naming one gate agree far more readily than two scans describing
-	// it. Title similarity was measured as an alternative and rejected:
-	// on the real ORC-45 pairs it scores 0.08 and 0.19 against a maximum
-	// of 0.07 among unrelated proposals from the same scan, which is a
-	// margin of one hundredth on a sample of two — a coincidence rather
-	// than a threshold, and it vanishes entirely under stemming.
+	// It *was* the filing key, derived as `slug(milestone)/slug(subject)`,
+	// on the reasoning that a subject is a fact about the repository
+	// rather than a sentence about the finding. Both halves of that
+	// failed on Catapult's ORC-118: two unrelated defects in
+	// `.github/workflows/ci.yml` collapsed to one ticket, and two
+	// proposals naming `lib/catapult/engine/commands/approve_gate.ex` and
+	// `Catapult.Engine.Commands.ApproveGate` — one thing, two spellings —
+	// did not collapse at all. A subject is a fact; which fact it names
+	// is still a choice.
 	Subject string `json:"subject"`
-}
-
-// dedupeKey is the key a proposal is filed under: derived from the
-// subject when the scan named one, and falling back to the model's own
-// key when it did not, so an older scan replayed by a resume still
-// dedupes against what it filed.
-func dedupeKey(milestone string, p Proposal) string {
-	if strings.TrimSpace(p.Subject) == "" {
-		return p.Dedupe
-	}
-	return slug(milestone) + "/" + slug(p.Subject)
 }
 
 // RankEntry re-ranks one existing ticket (grooming, DESIGN §10 step 7).
@@ -564,35 +561,42 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 		for _, t := range snap.Tickets {
 			keyToID[t.Key] = t.ID
 		}
-		// Read from the tracker, not from the snapshot. Build skips
-		// triage-category states and FileTriageProposal files into
-		// exactly those, so a dedupe set assembled from snap.Tickets
-		// could never contain a filed proposal — the check was inert
-		// rather than weak, and two identical keys would have made two
-		// tickets as readily as two different ones did.
-		filedAlready, err := p.ListTriageProposals(ctx)
-		if err != nil {
-			return fmt.Errorf("boundary file: reading open proposals: %w", err)
-		}
-		existing := map[string]bool{}
-		for _, tp := range filedAlready {
-			if tp.Dedupe != "" {
-				existing[tp.Dedupe] = true
-			}
-		}
-
-		filed, skipped := 0, 0
-		var failures []string
+		// **Nothing is deduplicated here, deliberately.** Two attempts
+		// at an automatic key both failed, in opposite directions, and
+		// the second failed silently.
+		//
+		// The first keyed on the model's own `dedupe` string. Phrasing
+		// is a choice rather than a fact, so two scans of one tree wrote
+		// two keys for one finding and filed it twice.
+		//
+		// The second derived the key from the proposal's `subject` —
+		// `slug(milestone)/slug(subject)` — on the reasoning that a
+		// subject is a repository fact. It is, but it is not a key.
+		// Measured on Catapult's ORC-118: seventeen proposals collapsed
+		// to sixteen because `dashboard-ci-sobelow-config-https-ignore-stale`
+		// and `boundary-compile-cache-hides-preexisting-violations` both
+		// named `.github/workflows/ci.yml`. Two unrelated defects in one
+		// file, and the second was dropped — while a decline note on the
+		// same ticket told the author it had been filed. In the same run
+		// `orc75-no-gate-compare-and-swap` (`lib/catapult/engine/commands
+		// /approve_gate.ex`) and `orc75-no-role-assignment-model`
+		// (`Catapult.Engine.Commands.ApproveGate`) named one thing two
+		// ways and did *not* collide. So the rule both merged what it
+		// should not and missed what it should have caught, and which it
+		// did depended on whether the model wrote a path or a module
+		// name.
+		//
+		// A duplicate ticket is visible at Boundary review and costs a
+		// moment to decline. A dropped finding is invisible and lives
+		// only on the archive step's comment until the next milestone
+		// opens a new boundary ticket. Those costs are not symmetric,
+		// and an automatic key that cannot be made deterministic should
+		// not be the thing choosing between them.
+		filed := 0
+		var failures, gating []string
 		for _, prop := range ps.Proposals {
-			key := dedupeKey(plan.Milestone, prop)
-			if existing[key] {
-				skipped++
-				continue
-			}
-			// Held so the rest of this scan dedupes against it too: two
-			// proposals from one scan can name one subject.
-			existing[key] = true
-			if err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Subject, prop.Gating, key); err != nil {
+			key, err := p.FileTriageProposal(ctx, prop.Title, prop.Description, prop.Kind, prop.Subject, prop.Gating)
+			if err != nil {
 				// Collected, not returned. Returning on the first error
 				// left the tickets already filed in the tracker while the
 				// step comment said the step never ran — the audit trail
@@ -609,6 +613,18 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 				continue
 			}
 			filed++
+			// Gating is collected as it is filed, because this comment
+			// is the only place it is ever reported. The composition
+			// proposal draws `tech-debt` and prints `gating=N` scoped to
+			// that draw, so a gating **bug** — which never enters the
+			// composition, by design, because it needs no milestone to
+			// run — was counted nowhere and named nowhere. On ORC-118
+			// two proposals were marked gating and the author's summary
+			// read `gating=0`; the judgment survived only as a field in
+			// a marker on each individual issue.
+			if prop.Gating {
+				gating = append(gating, fmt.Sprintf("%s — %s (%s)", key, prop.Title, prop.Kind))
+			}
 		}
 		ranked, unknown := 0, []string{}
 		for _, r := range ps.Ranking {
@@ -623,9 +639,13 @@ func BoundaryFile(ctx context.Context, p *plane.Plane, plan *BoundaryPlan, ps *P
 			}
 			ranked++
 		}
-		prose := fmt.Sprintf("Filed %d proposals (%d deduped), re-ranked %d tickets.", filed, skipped, ranked)
+		prose := fmt.Sprintf("Filed %d proposals, re-ranked %d tickets. Nothing is deduplicated automatically — duplicates are yours to decline here (DESIGN §10).", filed, ranked)
 		if len(unknown) > 0 {
 			prose += fmt.Sprintf(" Unknown keys skipped: %v.", unknown)
+		}
+		if len(gating) > 0 {
+			prose += fmt.Sprintf("\n\n**%d of them are gating** — the next product milestone gets materially harder without them (DESIGN §10). A gating `bug` does not appear in the composition proposal below, because a bug needs no milestone to run: accepting it out of Triage is what queues it.\n\n- %s",
+				len(gating), strings.Join(gating, "\n- "))
 		}
 		if len(ps.Declined) > 0 {
 			var lines []string

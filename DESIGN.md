@@ -1313,7 +1313,7 @@ signal that was missing.
    composition — it does not need a slot in one. The boundary still does not assign milestones,
    so a defect it believes blocks the milestone is a proposal whose description says so, and the
    assignment stays the author's.
-   **Every carried finding leaves the pass adjudicated** — filed under its own dedupe key, or
+   **Every carried finding leaves the pass adjudicated** — filed as a proposal naming it, or
    declined with a reason recorded on the ticket. Those findings were carried off tickets the
    archive step deleted, so the boundary that sees them is the last one that can: a finding
    neither filed nor declined is not deferred to the next milestone, it is deleted. Declining is
@@ -1380,9 +1380,9 @@ proposal with an empty one on the way past. Fast and green, which is the worst w
 do nothing.
 
 The window still has one edge: a run that dies between posting `close` and moving the ticket
-leaves a pass that reads as finished, so the next entry redoes it. That costs one debt scan and
-files nothing new — the dedupe keys hold — and it is the trade for having the terminator be the
-last thing written rather than something a crash could skip.
+leaves a pass that reads as finished, so the next entry redoes it. That costs one debt scan and re-files
+whatever it finds again, for a human to decline at `Boundary review`, and it is the trade for
+having the terminator be the last thing written rather than something a crash could skip.
 
 Deliberately not states. `Archiving`, `Scanning` and `Grooming` would all answer *who has the
 ball* identically — the boundary agent — and so fail the state admission test. The problem was
@@ -1397,7 +1397,36 @@ never visibility of the step; it was re-entry.
 | Grooming re-rank | Convergent — the same inputs produce the same order. |
 | Retro note | Writes a file. **Merged by issue key, not written once.** Existing-wins was the first rule and it made the note whatever the first pass knew, permanently: a second pass archived its tickets and their merge shas with nothing recording them, which is the one thing the note exists to prevent. Merging is idempotent for a resumed pass and additive for a new one, and a later entry wins on conflict because a pass that has shas for a ticket knows more than one that had none. |
 | Close comment | Posted last, after the hand-back's composition proposal. It is what makes the steps above belong to a pass rather than to a ticket. |
-| Triage proposals | **The dangerous one.** Each proposal carries a dedupe key of milestone plus finding, or a re-run files it twice. The set it dedupes against is every issue in the project carrying a proposal marker — not just the ones still in Triage. Filtering to Triage meant a proposal left the set the moment the author accepted it, so the next pass that found the same thing filed it again. |
+| Triage proposals | **Not deduplicated, deliberately — see below.** Safe to re-run *within* a pass, because the file step is guarded by its own step marker and that marker is written even when individual proposals failed. A *second* pass over the same tree files its findings again, and that is the accepted cost. |
+
+**Nothing deduplicates a proposal, and that is a decision rather than a gap.** Two automatic
+keys were tried and both failed, in opposite directions.
+
+The first keyed on the model's own `dedupe` string. Phrasing is a choice rather than a fact, so
+two scans of one tree wrote two keys for one finding and filed it twice. The second derived the
+key from the proposal's `subject` — the concrete thing it is about, named as the repository
+names it — on the reasoning that a subject is a repository fact. It is, but it is not a key.
+Measured on Catapult's `ORC-118`: seventeen proposals became sixteen tickets, because a stale
+`sobelow` ignore and a compile-cache gap both named `.github/workflows/ci.yml` and the second
+was dropped — while a decline note on the same ticket told the author it had been filed. In the
+same run, two proposals naming `lib/catapult/engine/commands/approve_gate.ex` and
+`Catapult.Engine.Commands.ApproveGate` — one thing, written two ways — did *not* collide. The
+rule merged what it should not have and missed what it should have caught, and which it did
+depended on whether the model happened to write a path or a module name.
+
+The costs are not symmetric. A duplicate ticket is visible at `Boundary review` and costs a
+sentence to decline. A dropped finding is invisible: it lived on the archive step's comment and
+nowhere else, and it is deleted when the next milestone opens a new boundary ticket. A
+non-deterministic key should not be the thing choosing between those. The subject still rides
+on the filed ticket's marker, because deduplication is now the author's and the subject is what
+they sort by.
+
+**A gating proposal is named in the file step's own comment.** Gating is read by the composition,
+which draws `tech-debt` — so a gating *bug*, which never enters the composition because it needs
+no milestone to run, was recorded in a marker field on one issue and reported nowhere. On
+`ORC-118` two proposals were marked gating and the author's summary read `gating=0`. The count in
+the composition is scoped to what the composition schedules; the file step is where every gating
+judgment is named, whatever its kind.
 
 ### Exclusions
 

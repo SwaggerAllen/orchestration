@@ -320,7 +320,7 @@ func TestFileTriageProposalMarksAuthorOnlySubjects(t *testing.T) {
 	}
 	for _, c := range cases {
 		title := "proposal about " + c.subject
-		if err := p.FileTriageProposal(ctx, title, "why", "debt", c.subject, false, "m/"+c.subject); err != nil {
+		if _, err := p.FileTriageProposal(ctx, title, "why", "debt", c.subject, false); err != nil {
 			t.Fatalf("%q: %v", c.subject, err)
 		}
 		issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -354,7 +354,7 @@ func TestFileTriageProposalSurvivesAMissingAuthorOnlyLabel(t *testing.T) {
 	tr, cfg, p := world(t)
 	tr.DropLabel(cfg.Tracker.TeamID, core.LabelAuthorOnly)
 
-	if err := p.FileTriageProposal(ctx, "Arm the gates", "why", "debt", ".github/workflows/ci.yml", true, "m/gates"); err != nil {
+	if _, err := p.FileTriageProposal(ctx, "Arm the gates", "why", "debt", ".github/workflows/ci.yml", true); err != nil {
 		t.Fatalf("a project without the label lost the proposal: %v", err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -368,57 +368,6 @@ func TestFileTriageProposalSurvivesAMissingAuthorOnlyLabel(t *testing.T) {
 	}
 	if !labelled {
 		t.Error("the label was not provisioned on demand, so the ticket would be dispatched")
-	}
-}
-
-// The dedupe set is "what this project has already filed", not "what is
-// still sitting in Triage". Filtering to triage-category states meant a
-// proposal dropped out of the set the moment the author accepted it and
-// moved it into the queue — so the next scan that found the same thing
-// filed it a second time. Invisible while a milestone had one boundary
-// pass; routine once a second pass over the same milestone became an
-// ordinary thing to ask for.
-func TestFiledProposalsStayDedupedAfterLeavingTriage(t *testing.T) {
-	ctx := context.Background()
-	tr := tracker.NewMemory()
-	cfg := config.Sample()
-	if _, err := setup.Run(ctx, tr, cfg, false); err != nil {
-		t.Fatal(err)
-	}
-	p := New(tr, cfg)
-
-	if err := p.FileTriageProposal(ctx, "Extract the cap module", "why", "debt", "lib/cap.ex", false, "M1/extract-cap"); err != nil {
-		t.Fatal(err)
-	}
-	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The author accepts it: out of intake and into the queue.
-	for _, i := range issues {
-		if strings.Contains(i.Description, "M1/extract-cap") {
-			id, err := p.StateIDFor(ctx, protocol.ReadyForDev)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := tr.UpdateIssueState(ctx, i.ID, id); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-
-	filed, err := p.ListTriageProposals(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found bool
-	for _, f := range filed {
-		if f.Dedupe == "M1/extract-cap" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("an accepted proposal left the dedupe set, so the next scan would file it again: %+v", filed)
 	}
 }
 
