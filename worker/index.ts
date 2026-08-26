@@ -258,6 +258,14 @@ export async function signatureDiagnosis(
  * hourly beat. Webhook delivery is not workflow triggering, so the
  * guard does not reach it.
  *
+ * That measurement is now history, and saying so matters to anyone
+ * deciding whether this route still earns its keep. SETUP 2 has every
+ * project check out with AGENT_GITHUB_TOKEN since, so an agent's push
+ * does start runs and the in-repo triggers do fire. This route is what
+ * stays correct under both token configurations — and, because it is
+ * the only one of the two that reaches the debounce, it is why the
+ * sweep stub declares neither event any more.
+ *
  * THE FILTER IS THE SAFETY PROPERTY, NOT A TUNING CHOICE. A sweep run
  * completing is itself a workflow_run event. Waking a sweep on any
  * completed run would have each sweep dispatch the next one, forever,
@@ -289,8 +297,18 @@ export function githubTargets(projects: Project[], event: string | null, payload
     // is suppressed too. No loop risk here — nothing the pipeline runs
     // creates a deployment except the recorder itself, which is not a
     // sweep.
+    //
+    // Filtered to `success`, which is the only state the pipeline can
+    // act on: the deploy check reads the newest *successful* deployment
+    // and compares its commit against the merge commit
+    // (`internal/deploy/ghdeploy`). A failed deploy is caught by the
+    // deploy timeout (DESIGN §12) rather than by an event, so nothing
+    // is lost by ignoring the other states — and one deployment walking
+    // queued -> in_progress -> success is three webhooks minutes apart,
+    // which is three sweeps the debounce window is far too short to
+    // coalesce.
     case "deployment_status":
-      return mine;
+      return payload?.deployment_status?.state === "success" ? mine : [];
     // ping is what GitHub sends when the webhook is created. Answering
     // it without dispatching is how the setup page shows a green tick.
     default:
