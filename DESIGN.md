@@ -1300,7 +1300,13 @@ signal that was missing.
    accruing debt" nor "is the pipeline costing me tickets".
    *Gating test:* does the next product milestone get materially harder without it? Yes →
    propose for the gating debt milestone. No → backlog.
-8. **Grooming pass.** Re-ranks existing debt as well as proposing additions.
+8. **Grooming pass.** Re-ranks existing debt as well as proposing additions. The re-rank
+   resolves ticket keys against the snapshot's scheduled tickets **and its Triage**, which is
+   not an implementation detail: step 9 files proposals into Triage and unscheduled debt stays
+   there until an author gives it a milestone, so the backlog this step exists to rank lives
+   entirely in the half a scheduled-only lookup cannot see. Resolved against scheduled tickets
+   alone the step is inert for every candidate and reports "re-ranked 0 tickets" as a success —
+   which it did, on every pass, until it was measured.
 9. Proposals land in **Triage**, as `debt`, `design`, `harness` or `bug`.
    **Bugs were refused here until this milestone**, on the argument that a bug parked in a queue
    has been rescheduled rather than repaired. The argument is sound; it is not what that rule
@@ -1333,6 +1339,15 @@ signal that was missing.
    frequently right and costs a sentence; what the author cannot review is a judgment nobody
    wrote down. Measured on Catapult's ORC-90 — twelve findings carried, one unrelated proposal
    filed, no record that any of the twelve had been read.
+   **Adjudication matches on the finding's name, not its whole key**, because the two producers
+   write two key shapes and both are correct: a carried finding takes its key from the recorded
+   marker's `id=`, which is the bare name, and a scan proposal is keyed by milestone and name.
+   Compared whole they never match across that boundary, and the pass reports a finding it filed
+   seconds earlier as about to be lost. That warning exists to be acted on, and acting on a false
+   one means hand-filing a duplicate — of a ticket already in Triage, with nothing downstream to
+   catch it, since proposals are no longer deduplicated (§10's filing step). Normalising belongs
+   at the comparison rather than at either producer: neither shape is wrong, and a rule that
+   makes one of them wrong has to be enforced in two places forever.
    **A finding says what it is about.** An agent records `harness` for the pipeline and
    `project` for the repository it is working in, and the two reach different judgments: the
    first asks whether the pipeline is costing tickets, the second goes through the debt scan's

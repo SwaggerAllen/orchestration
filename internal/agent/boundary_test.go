@@ -765,6 +765,102 @@ func TestUnadjudicatedNamesWhatTheScanPassedOver(t *testing.T) {
 	}
 }
 
+// The grooming re-rank must reach a ticket sitting in Triage, because
+// that is where every ticket it exists to rank actually lives:
+// DebtBacklog draws unscheduled tech-debt, and unscheduled means Triage
+// until an author assigns a milestone.
+//
+// This asserts the applied effect rather than the parsed structure. The
+// bug it covers reported "re-ranked 0 tickets" as a success for the
+// whole class — on Catapult's ORC-118 both ORC-135 and ORC-136 asked
+// for priority 2 and both were skipped as unknown — and the existing
+// coverage could not see it, because nothing checked that a ranking
+// reached UpdateIssuePriority.
+func TestRerankReachesATicketInTriage(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	triage, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{
+		Name: "Triage", Category: protocol.CategoryTriage,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unscheduled debt, in Triage, exactly as FileTriageProposal leaves
+	// it and exactly what DebtBacklog offers the pass to rank.
+	debt, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Unscheduled debt", Description: "d",
+		StateID: triage.ID, Labels: []string{"tech-debt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M: alpha", 1)
+	boundary := seedBoundary(t, tr, cfg)
+	if err := tr.Mutate(boundary.ID, func(i *tracker.Issue) { i.Milestone = "M: alpha" }); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_61", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+		t.Fatal(err)
+	}
+
+	ps := &Proposals{Ranking: []RankEntry{{Key: debt.Key, Priority: 2}}}
+	if err := BoundaryFile(ctx, p, plan, ps, now); err != nil {
+		t.Fatal(err)
+	}
+
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range issues {
+		if i.ID == debt.ID && i.Priority != 2 {
+			t.Fatalf("a triage-resident ticket was not re-ranked: priority = %d, want 2 "+
+				"(keyToID must union snap.Triage, or the grooming pass is inert)", i.Priority)
+		}
+	}
+}
+
+// The two key shapes are both live and neither producer is going to
+// change, so the comparison normalises. Compared raw, a finding refiled
+// under a milestone prefix reports as lost one second after it was
+// filed — which tells the author to hand-carry a duplicate of a ticket
+// already sitting in Triage.
+func TestUnadjudicatedMatchesAcrossTheTwoKeyShapes(t *testing.T) {
+	carried := []HarnessFinding{
+		{Dedupe: "step-flags-always-false", Title: "carried bare, refiled with a prefix"},
+		{Dedupe: "the-loop/output-kind-vocabulary", Title: "carried with a prefix, declined bare"},
+	}
+	ps := &Proposals{
+		Proposals: []Proposal{{Dedupe: "the-authoring-loop/step-flags-always-false"}},
+		Declined:  []Decline{{Dedupe: "output-kind-vocabulary", Why: "fixed"}},
+	}
+	// Both directions: a prefixed re-file of a bare carry, and a bare
+	// decline of a prefixed carry. Only fixing the first would leave the
+	// same defect reachable from the other side.
+	if got := unadjudicated(carried, ps); len(got) != 0 {
+		t.Errorf("unadjudicated = %v, want none — both were adjudicated under the other key shape", got)
+	}
+}
+
+// Normalising must not swallow a genuinely unadjudicated finding: the
+// warning earns its place only if it still fires when it should.
+func TestUnadjudicatedStillNamesAFindingNobodyTouched(t *testing.T) {
+	carried := []HarnessFinding{{Dedupe: "a-loop/dropped-on-the-floor", Title: "dropped"}}
+	ps := &Proposals{Proposals: []Proposal{{Dedupe: "a-loop/something-else"}}}
+	got := unadjudicated(carried, ps)
+	if len(got) != 1 || !strings.Contains(got[0], "dropped-on-the-floor") {
+		t.Errorf("unadjudicated = %v, want the dropped finding", got)
+	}
+}
+
 // A decline with no reason is the silent drop it replaces, one field
 // wider.
 func TestProposalsRefuseADeclineWithoutAReason(t *testing.T) {
