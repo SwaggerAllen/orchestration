@@ -10,9 +10,13 @@ import (
 type Memory struct {
 	mu         sync.Mutex
 	Dispatches []Dispatch
-	Runs       []AgentRun
-	PRs        []PR
-	CheckState map[string]Checks // headSHA -> checks
+	// DispatchErr makes DispatchWorkflow fail, standing in for the host
+	// being briefly unreachable — the case where a reservation was taken
+	// for a run that then never started.
+	DispatchErr error
+	Runs        []AgentRun
+	PRs         []PR
+	CheckState  map[string]Checks // headSHA -> checks
 	// JobLogs scripts FailedJobLogs: headSHA -> failing jobs and their tails.
 	JobLogs map[string][]JobLog
 	// Merged records merged PRs: number -> merge SHA.
@@ -67,6 +71,9 @@ func NewMemory() *Memory {
 func (m *Memory) DispatchWorkflow(_ context.Context, workflowFile string, inputs map[string]string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.DispatchErr != nil {
+		return m.DispatchErr
+	}
 	m.Dispatches = append(m.Dispatches, Dispatch{Workflow: workflowFile, Inputs: inputs})
 	return nil
 }

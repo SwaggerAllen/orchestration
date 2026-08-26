@@ -17,6 +17,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -75,15 +76,39 @@ func cmdPreflight(args []string) error {
 	tr := linear.New(apiKey)
 	p := plane.New(tr, cfg)
 	checks = append(checks,
+		// Diffed against the protocol, like the label check below, and
+		// for the same reason: this one held the configured names and
+		// the live table in one hand each and compared neither. It
+		// asserted the team had *some* states, which is true of every
+		// Linear team ever created.
+		//
+		// The two halves it now checks are not equally novel, and the
+		// difference is worth keeping straight so neither gets
+		// simplified out for the wrong reason.
+		//
+		// The **missing-name** half overlaps `plane.resolveStates`,
+		// which already refuses to build a snapshot without every
+		// mapped state and names the first one it meets. Kept anyway,
+		// because it reports every missing state at once — the posture
+		// the composer and the audit already take — and because it runs
+		// first here while the snapshot check runs last, so "run setup"
+		// arrives before the slow credential checks rather than after
+		// them.
+		//
+		// The **category** half is checked nowhere else at runtime.
+		// `setup` compares it and then deliberately refuses to retype a
+		// live state, so a category that drifted stays drifted and
+		// nothing says so on any later run: the name still resolves, the
+		// pipeline still writes to it, and the category is what decides
+		// which states are triage (`plane.Build`) and how a
+		// resolved-but-unmapped state is rescued. Wrong there is wrong
+		// quietly, which is the shape this check exists to catch.
 		check{"the state table", "LINEAR_API_KEY", func(ctx context.Context) error {
-			states, err := tr.ListStates(ctx, cfg.Tracker.TeamID)
+			live, err := tr.ListStates(ctx, cfg.Tracker.TeamID)
 			if err != nil {
 				return err
 			}
-			if len(states) == 0 {
-				return fmt.Errorf("team has no states — run setup")
-			}
-			return nil
+			return stateTableProblems(cfg, live)
 		}},
 		// Diffed, not merely fetched. This check used to assert only
 		// that the call returned — vacuous with respect to the set, with
@@ -331,4 +356,47 @@ func headSHA(ctx context.Context, h host.Host) (string, error) {
 		return prs[0].HeadSHA, nil
 	}
 	return "HEAD", nil
+}
+
+// stateTableProblems compares the team's states against the protocol.
+//
+// Extracted from the check above so it can be tested against a table
+// rather than a live team: a guard nobody has watched fail is a guard
+// nobody has tested, and the credential-bearing wrapper cannot be run
+// without a tracker.
+//
+// All problems at once, which is the posture the composer and the audit
+// already take for the same reason — a run that fixes the first and
+// re-runs to find the second is a run spent learning what one pass could
+// have said.
+func stateTableProblems(cfg *config.Config, live []tracker.StateInfo) error {
+	if len(live) == 0 {
+		// Short-circuited rather than reported per state: an
+		// unprovisioned team is one fix, and spelling it as sixteen
+		// missing states buries that under a wall.
+		return fmt.Errorf("team has no states at all — run `pipeline setup --apply`")
+	}
+	byName := make(map[string]tracker.StateInfo, len(live))
+	for _, s := range live {
+		byName[s.Name] = s
+	}
+	var problems []string
+	for _, ps := range protocol.AllStates {
+		name := cfg.StateName(ps)
+		have, ok := byName[name]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%q (%s) is missing", name, ps))
+			continue
+		}
+		if want := protocol.Categories[ps]; have.Category != want {
+			problems = append(problems, fmt.Sprintf("%q (%s) has category %q, protocol wants %q", name, ps, have.Category, want))
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("the team's states disagree with the protocol in %d place(s): %s — "+
+			"`pipeline setup --apply` creates a missing state idempotently; it will not retype a live one, "+
+			"so a category mismatch is yours to resolve in Linear",
+			len(problems), strings.Join(problems, "; "))
+	}
+	return nil
 }

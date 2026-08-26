@@ -147,20 +147,29 @@ func TestBoundaryResumeIsIdempotent(t *testing.T) {
 	if err := BoundaryArchive(ctx, p, h, plan2, now); err != nil {
 		t.Fatal(err)
 	}
-	// The new pass scans afresh and proposes the same finding again —
-	// the dedupe key is what keeps that from becoming a second ticket.
+	// The new pass scans afresh, proposes the same finding again, and
+	// files it again. **This is the accepted cost of removing the dedupe
+	// key**, not an oversight: no automatic key could be made
+	// deterministic (see TestTwoProposalsOnOneSubjectBothFile), and a
+	// duplicate the author declines at Boundary review is cheaper than a
+	// finding silently dropped.
+	//
+	// What is still idempotent is the resume *within* a pass: BoundaryFile
+	// is guarded by plan.Done[StepFile], and stepDone writes that marker
+	// even when individual proposals failed. Re-entry after a completed
+	// pass is a different thing — a new pass, by design.
 	if err := BoundaryFile(ctx, p, plan2, ps, now); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
 	proposals := 0
 	for _, i := range issues {
-		if strings.Contains(i.Description, "M: alpha/extract-cap") {
+		if i.Title == "Extract cap module" {
 			proposals++
 		}
 	}
-	if proposals != 1 {
-		t.Errorf("proposal filed %d times across two passes, want exactly 1", proposals)
+	if proposals != 2 {
+		t.Errorf("proposal filed %d times across two passes, want 2 — one per pass, deduplicated by hand", proposals)
 	}
 }
 
@@ -502,51 +511,65 @@ func TestFindingsSurviveTheArchiveOnAResumedBoundary(t *testing.T) {
 	}
 }
 
-// The key is derived from the subject, because the model's own key is
-// its phrasing for one scan and phrasing is a choice. Two scans of one
-// tree wrote two keys for one finding on ORC-45 and both filed: four
-// tickets, two findings.
-func TestTheDedupeKeyComesFromTheSubjectNotThePhrasing(t *testing.T) {
-	first := Proposal{
-		Title:   "Arm the six gate lines the repo declares and CI does not run",
-		Dedupe:  "tech-debt-before-the-engine/declared-gate-set-not-armed-in-ci",
-		Subject: "ci.yml",
+// Two proposals naming one subject both file. This is the behaviour the
+// subject-derived dedupe key removed, and removing that key is what put
+// it back.
+//
+// Measured on Catapult's ORC-118: seventeen proposals, sixteen filed.
+// `dashboard-ci-sobelow-config-https-ignore-stale` and
+// `boundary-compile-cache-hides-preexisting-violations` both named
+// `.github/workflows/ci.yml` — a stale sobelow ignore and a compile-cache
+// gap, sharing nothing but a filename — and the second was dropped while
+// a decline note on the same ticket told the author it had been filed.
+func TestTwoProposalsOnOneSubjectBothFile(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+
+	for _, title := range []string{
+		"ci.yml's sobelow ignore rationale is stale",
+		"mix compile only re-checks boundary compliance when boundary config changes",
+	} {
+		if _, err := p.FileTriageProposal(ctx, title, "why", "debt", ".github/workflows/ci.yml", false); err != nil {
+			t.Fatal(err)
+		}
 	}
-	second := Proposal{
-		Title:   "Arm the gates that are green locally and armed nowhere",
-		Dedupe:  "tech-debt-before-the-engine/arm-the-unarmed-gate-set",
-		Subject: "ci.yml",
+
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	a := dedupeKey("Tech debt · before the engine", first)
-	b := dedupeKey("Tech debt · before the engine", second)
-	if a != b {
-		t.Errorf("two scans of one subject produced two keys:\n  %s\n  %s", a, b)
+	filed := 0
+	for _, i := range issues {
+		if strings.Contains(i.Description, "[pipeline:v1:triage-proposal]") {
+			filed++
+		}
 	}
-	if a == first.Dedupe {
-		t.Error("the key is still the model's own phrasing")
+	if filed != 2 {
+		t.Errorf("filed %d proposals on one subject, want 2 — a dedupe rule is swallowing findings again", filed)
 	}
 }
 
-// A scan that named no subject keeps its own key, so a resume replaying
-// a recorded scan from before this change still dedupes against what
-// that scan filed.
-func TestAProposalWithNoSubjectKeepsItsOwnKey(t *testing.T) {
-	p := Proposal{Title: "Something", Dedupe: "milestone/finding"}
-	if got := dedupeKey("Milestone", p); got != "milestone/finding" {
-		t.Errorf("key = %q, want the model's own", got)
-	}
-	if got := dedupeKey("Milestone", Proposal{Dedupe: "k", Subject: "   "}); got != "k" {
-		t.Errorf("a blank subject was treated as a subject: %q", got)
-	}
-}
+// The subject rides on the ticket, because hand-deduplication is the
+// mechanism now and it is what a human sorts two similar tickets by.
+func TestAFiledProposalCarriesItsSubject(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
 
-// Different subjects stay different, which is the half that matters for
-// not swallowing real work.
-func TestDifferentSubjectsKeepDifferentKeys(t *testing.T) {
-	a := dedupeKey("M", Proposal{Subject: "ci.yml", Dedupe: "x"})
-	b := dedupeKey("M", Proposal{Subject: "pipeline.config.json", Dedupe: "x"})
-	if a == b {
-		t.Errorf("two subjects collapsed to one key: %s", a)
+	if _, err := p.FileTriageProposal(ctx, "Something", "why", "debt", "lib/cap.ex", false); err != nil {
+		t.Fatal(err)
+	}
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, i := range issues {
+		if strings.Contains(i.Description, `subject="lib/cap.ex"`) || strings.Contains(i.Description, "subject=lib/cap.ex") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no subject on the filed proposal — nothing to deduplicate by hand against")
 	}
 }
 
@@ -770,10 +793,10 @@ func TestAFiledBugStaysOutOfTheDebtBacklog(t *testing.T) {
 	tr, _, cfg, p := world(t)
 	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
 
-	if err := p.FileTriageProposal(ctx, "Extract the cap module", "why", "debt", "lib/cap.ex", false, "M1/cap"); err != nil {
+	if _, err := p.FileTriageProposal(ctx, "Extract the cap module", "why", "debt", "lib/cap.ex", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.FileTriageProposal(ctx, "Preflight passes without comparing the label sets", "why", "bug", "cmd/pipeline/preflight.go", false, "M1/preflight"); err != nil {
+	if _, err := p.FileTriageProposal(ctx, "Preflight passes without comparing the label sets", "why", "bug", "cmd/pipeline/preflight.go", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -806,7 +829,7 @@ func TestProposalKindsReachTheirLabels(t *testing.T) {
 	}
 	for kind, label := range want {
 		title := "proposal of kind " + kind
-		if err := p.FileTriageProposal(ctx, title, "why", kind, "lib/x.ex", false, "M1/"+kind); err != nil {
+		if _, err := p.FileTriageProposal(ctx, title, "why", kind, "lib/x.ex", false); err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
 		issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)

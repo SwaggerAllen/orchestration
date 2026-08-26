@@ -100,21 +100,30 @@ so a commit touching them is rejected and takes the run down with it.
 When a change here needs one of those files edited, that edit is the
 author's to make and belongs in its own change, ahead of this one.
 
-## The move store has a half that nothing calls
+## The move store holds two pairs, and both are wired now
 
-`internal/state` is the pipeline's record of its own writes, and its
-`Store` port holds two pairs. `Record`/`All` are wired and load-bearing:
-on a solo workspace the harness writes as the author, so §9's revert rules
-cannot tell the author's moves from the pipeline's without them.
+`internal/state` is the pipeline's record of its own writes. `Record`/`All`
+are what §9's revert rules read: on a solo workspace the harness writes as
+the author, so without them the sweep cannot tell the author's moves from
+the pipeline's.
 
 `Reserve`/`Release` — and the Durable Object's `/reserve` compare-and-set
-behind them — have **no caller outside their own package**. They landed as
-"Reservations: the storage half of closing the dispatch race" (`966b5ae`)
-and the dispatching half was never written, so the race that comment
-describes is still open.
+behind them — landed as "Reservations: the storage half of closing the
+dispatch race" (`966b5ae`) with **no caller outside their own package**,
+and stayed that way for a milestone. The dispatching half is now written:
+`plane.reserveDispatch` claims the agent kind before `Execute` calls the
+host, and each agent's claim releases it after `core.VerifyPickup` (DESIGN
+§6). The TTL is `plane.DispatchReservationTTL`.
 
-Parked deliberately, not dead code to tidy away. Leave it in place and
-raise it when dispatch or state management is next on the table. Note also
-that DESIGN §1's store table lists Linear, the project repo, the pipeline
-repo and the preview, and does not mention this store at all — its rules
-live in §13 instead.
+**That TTL is a bound, not a measurement**, and it says so where it is
+declared. The only figure anyone has taken for the window it covers is the
+ninety seconds `core.VerifyPickup` records between a dispatch and the proof
+it happened. Five minutes matches the Durable Object's own fallback
+deliberately, so the two halves of one mechanism cannot disagree about how
+long a lock lasts. If a project ever needs a different number it becomes a
+`pipeline.config.json` key, which is an author-owned edit in that project
+and belongs ahead of the change here.
+
+Note also that DESIGN §1's store table lists Linear, the project repo, the
+pipeline repo and the preview, and does not mention this store at all — its
+rules live in §13 instead.

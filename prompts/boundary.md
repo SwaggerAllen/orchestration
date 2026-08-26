@@ -49,11 +49,10 @@ should change. The author reviews your ranking before the queue resumes.
   about, as the repository names it — a file path, a config key, a mix
   task, a gate line, a doc section, a module. `ci.yml`,
   `qualityGates`, `mix xref graph --label compile-connected`,
-  `Catapult.Foundation.licensing/0`. The harness derives the dedupe key
-  from it, so two scans that find the same thing must agree here even
-  when they describe it differently. Name the thing, not your sentence
-  about it: `docs/non-goals.md` rather than "the decision record is
-  missing entries".
+  `Catapult.Foundation.licensing/0`. It rides on the filed ticket, and
+  it is what the author sorts by when two proposals look alike — so
+  name the thing, not your sentence about it: `docs/non-goals.md`
+  rather than "the decision record is missing entries".
 
   It carries one more job. When the subject names a path no agent can
   land a change to — `.github/workflows/**`, `pipeline.config.json`
@@ -61,11 +60,20 @@ should change. The author reviews your ranking before the queue resumes.
   keeps it out of the queue, so it waits for the author instead of
   being dispatched to a run that would die on a rejected push. You do
   not need to know that rule; you need to name the path.
-- **Every proposal carries a dedupe key**: `<milestone>/<finding-slug>`.
-  Still required, and used only when `subject` is absent.
-  A re-run files nothing twice because of this key. Check the retro
-  notes and existing tickets before proposing — archived work is
-  invisible to search, the retro note is your duplicate detector.
+- **`dedupe` names the carried finding a proposal answers**, when it
+  answers one — the finding's own key, copied. It is how the harness
+  tells a finding that was filed from one that was dropped. A proposal
+  that answers no carried finding still carries a key of
+  `<milestone>/<finding-slug>`; nothing keys off it.
+
+  **Nothing deduplicates your proposals automatically.** Two scans that
+  find the same thing file two tickets, and the author declines one.
+  That is deliberate (DESIGN §10): every automatic key tried either
+  merged unrelated findings or missed identical ones, and a dropped
+  finding is invisible while a duplicate is not. So **check the retro
+  notes and existing tickets before proposing** — archived work is
+  invisible to search, and the retro note is your duplicate detector.
+  You are the only dedupe there is.
 - **Read the confirmed non-asks** below before filing anything. The
   file lives in the repo and the section below inlines it, including
   whether the project has one at all. Proposing something recorded
@@ -110,7 +118,7 @@ Write JSON to the outcome path given below:
 
 **`declined` is how a carried finding leaves this pass without becoming a
 ticket.** Every finding in the section above leaves adjudicated: a
-proposal reusing its dedupe key, or a decline with the reason. Neither is
+proposal copying its key into `dedupe`, or a decline with the reason. Neither is
 not deferral — those findings were carried off tickets the archive step
 deleted, so this is the last pass that can see them, and one you pass
 over is gone when the next milestone opens a new boundary ticket.
@@ -120,7 +128,7 @@ worth the ticket it would cost — all fine, said in a sentence. What is
 not fine is silence, because the author reviewing this ticket cannot
 disagree with a judgment nobody recorded.
 
-Then stop. The harness files proposals (deduped), applies the ranking,
+Then stop. The harness files every proposal, applies the ranking,
 posts the step comments, computes the next debt milestone's proposed
 composition (all gating debt plus non-gating by priority to the floor of
 five), and hands the ticket to the author. You do not assign milestones:

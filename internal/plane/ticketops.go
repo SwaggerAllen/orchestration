@@ -115,17 +115,25 @@ func (p *Plane) StateIDFor(ctx context.Context, s protocol.State) (string, error
 	return p.idByState[s], nil
 }
 
-// FileTriageProposal creates one boundary proposal issue. It lands in the
-// team's Triage state when one exists, Backlog otherwise — Triage is
-// Linear-managed, so setup can't guarantee it. The dedupe marker rides in
-// the description; a re-run checks it before filing (DESIGN §10).
-func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind, subject string, gating bool, dedupe string) error {
+// FileTriageProposal creates one boundary proposal issue and returns its
+// key. It lands in the team's Triage state when one exists, Backlog
+// otherwise — Triage is Linear-managed, so setup can't guarantee it.
+//
+// It files unconditionally. Automatic deduplication was removed (DESIGN
+// §10); the boundary now files what it found and duplicates are resolved
+// by hand at Boundary review.
+//
+// The key is returned because the file step reports what it filed, and a
+// count is not a report: the gating proposals in particular need naming
+// on the ticket, or the only place a gating judgment appears is a field
+// inside a marker on an individual issue.
+func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind, subject string, gating bool) (string, error) {
 	if err := p.resolveStates(ctx); err != nil {
-		return err
+		return "", err
 	}
 	stateID, err := p.triageStateID(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	// One lookup, no switch. The mapping is protocol (DESIGN §13) and
 	// three of the four entries are not the identity, so a reader who
@@ -142,11 +150,17 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 	// filing under a guess would hide it.
 	label, ok := protocol.ProposalLabels[kind]
 	if !ok {
-		return fmt.Errorf("proposal kind %q has no label in protocol.ProposalLabels — filing it would have to guess (DESIGN §13)", kind)
+		return "", fmt.Errorf("proposal kind %q has no label in protocol.ProposalLabels — filing it would have to guess (DESIGN §13)", kind)
 	}
+	// `subject` rather than a dedupe key, because the key is gone
+	// (DESIGN §10) and this is the fact the key was derived from. It
+	// stays on the ticket because hand-deduplication is now the
+	// mechanism, and "what is this proposal about, named the way the
+	// repository names it" is exactly what a human sorting two similar
+	// tickets needs to see without reading both descriptions.
 	m := marker.Marker{Kind: marker.TriageProposal, Fields: map[string]string{
-		"dedupe": dedupe,
-		"gating": fmt.Sprintf("%t", gating),
+		"subject": subject,
+		"gating":  fmt.Sprintf("%t", gating),
 	}}
 	issue, err := p.Tracker.CreateIssue(ctx, tracker.NewIssue{
 		TeamID:      p.Config.Tracker.TeamID,
@@ -157,7 +171,7 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 		Labels:      []string{label},
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
 	// The subject names the concrete thing the proposal is about — a
 	// file, a config key, a gate line — so when it names a path no agent
@@ -174,11 +188,11 @@ func (p *Plane) FileTriageProposal(ctx context.Context, title, description, kind
 	// not landing is not.
 	if AuthorOnly(subject) {
 		if err := p.AddTicketLabel(ctx, issue.ID, core.LabelAuthorOnly); err != nil {
-			return fmt.Errorf("filed %s but could not mark it %s (its subject %q is author-only): %w",
+			return issue.Key, fmt.Errorf("filed %s but could not mark it %s (its subject %q is author-only): %w",
 				issue.Key, core.LabelAuthorOnly, subject, err)
 		}
 	}
-	return nil
+	return issue.Key, nil
 }
 
 // AuthorOnly reports whether a proposal subject names a path only the
@@ -214,59 +228,6 @@ func (p *Plane) PRForTicket(ctx context.Context, ticketKey string) *host.PR {
 		return nil
 	}
 	return prForTicket(prs, ticketKey)
-}
-
-// TriageProposal is a proposal already sitting in Triage.
-type TriageProposal struct {
-	Key    string
-	Title  string
-	Dedupe string
-}
-
-// ListTriageProposals reads the proposals already filed, straight from
-// the tracker rather than from a snapshot.
-//
-// It has to bypass the snapshot, and the reason is the whole bug. Build
-// skips tickets in a triage-category state — deliberately, because the
-// protocol does not map them — and FileTriageProposal files into exactly
-// those states. So a dedupe set assembled from snap.Tickets could never
-// contain a filed proposal: the check was not weak, it was inert, and
-// two identical keys would have produced two tickets just as readily as
-// two different ones did.
-//
-// It does not filter by state either, and that is the second half of the
-// same lesson. Filtering to triage-category states made the dedupe set
-// "proposals nobody has looked at yet": the moment the author accepted
-// one and moved it into the queue it dropped out, and the next scan that
-// found the same thing filed it again. Harmless while a milestone had
-// exactly one boundary pass, and not once a second pass became ordinary.
-// A proposal's marker is the record that it was filed, wherever the
-// ticket has since travelled.
-func (p *Plane) ListTriageProposals(ctx context.Context) ([]TriageProposal, error) {
-	if err := p.resolveStates(ctx); err != nil {
-		return nil, err
-	}
-	issues, err := p.Tracker.ListIssues(ctx, p.Config.Tracker.TeamID, p.Config.Tracker.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	var out []TriageProposal
-	for _, i := range issues {
-		tp := TriageProposal{Key: i.Key, Title: i.Title}
-		for _, line := range strings.Split(i.Description, "\n") {
-			m, ok, err := marker.Parse(line)
-			if err == nil && ok && m.Kind == marker.TriageProposal {
-				tp.Dedupe = m.Fields["dedupe"]
-			}
-		}
-		if tp.Dedupe == "" {
-			// Not a filed proposal — now that every issue is considered,
-			// the marker is what identifies one.
-			continue
-		}
-		out = append(out, tp)
-	}
-	return out, nil
 }
 
 // triageStateID resolves where a filed proposal lands: the team's Triage
