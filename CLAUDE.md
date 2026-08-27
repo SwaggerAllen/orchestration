@@ -61,6 +61,21 @@ anything was dispatched. CI was green, the boundary agent never started on
 a passing live suite, and the ticket sat until the stale-claim rule parked
 it twenty minutes later.
 
+**A probe must assert that it edited something.** The dangerous failure
+is not a probe that fails — it is one that never ran and printed `ok`.
+Four times in one session a scripted revert left the file untouched (an
+escaped regex that did not match, a `sed` anchor appearing twice, a
+`git checkout --` that reverted to HEAD and destroyed the uncommitted
+change under test) and the `ok` afterwards was indistinguishable from a
+guard holding. So the revert asserts its anchor matched *before* the
+test runs, and a probe that cannot find its anchor is a failed probe,
+not a passed one.
+
+Removing the code a test *reads* is a weaker probe than breaking what it
+*means*. Deleting a struct field the test references fails the build,
+which proves only that the test mentions it; misspelling that field's
+JSON tag fails the test, which is the behaviour under test.
+
 Measured 2026-08-23, because the folk version of this is wrong: the Go
 test cache does **not** serve a stale pass when you edit a file the test
 reads at runtime. Breaking `.github/actions/agent-dev/action.yml` after a
@@ -100,6 +115,56 @@ The order is the part that has to be got right.
 Adding `ready_for_design` in the other order took Catapult's pipeline
 down for about ninety minutes, with a ticket sitting in a queue nothing
 was sweeping.
+
+## Adding a config field is that same change in reverse
+
+`config.Load` calls `dec.DisallowUnknownFields()`, so a project config
+naming a key this binary does not declare fails to load. Validation runs
+before anything else, so **every** `pipeline` command fails, not just the
+one that wanted the key — the same blast radius as the state case, from
+the opposite end.
+
+So the order inverts:
+
+| the change | merges first | because |
+| --- | --- | --- |
+| a new protocol state | the project config | validation requires the *whole* state mapping, so a state we know and it lacks is invalid |
+| a new config field | this repo | `DisallowUnknownFields` rejects extras, so a key it has and we lack is invalid |
+
+Config validation is strict in both directions; which side moves first
+depends on which kind of strictness the change trips. Getting it wrong
+does not fail gracefully in either direction.
+
+This is not hypothetical either. Catapult's `citationShorthands` edit
+landed on its PR ahead of the field being declared here, and that PR's
+CI went red at the `pipeline audit` step with `json: unknown field
+"citationShorthands"` — the whole audit down, not the one check.
+
+**Declaring the outer field is not enough.** `DisallowUnknownFields` is
+a decoder setting, not a top-level one — measured, with a bogus key
+inside an existing nested struct:
+
+```
+nested unknown field -> json: unknown field "totallyBogusField"
+```
+
+A config using a value shape whose fields this binary has not declared
+still fails to load. Declare the whole shape, not the entry point.
+
+## A gate is not built until it has run against a real tree
+
+Three false-positive classes in the citation check were found by running
+it over Catapult and reading the output. **None was visible from its unit
+tests**, and each would have reported correct citations as dangling:
+anchoring on `docs/` matched the substring inside `seed-docs/...` (2);
+matching bare filenames read `dsl-syntax.md §15.1` as a repo-root path
+(262); and a heading parser accepting only numeric sections missed the
+v4 spec's part-lettered `### A.1.4` (17).
+
+Two false failures on a gate is how a suppression gets added, and a
+suppressed gate re-blinds itself to the next finding — the reasoning
+`mix.exs`'s own `ignore_advisories` already carries. A gate whose output
+nobody has read on a real corpus is a guess about that corpus.
 
 ## The project repos are not this repo
 
