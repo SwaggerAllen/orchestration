@@ -179,6 +179,23 @@ of defects, and the first session to read this list took the largest
 class for a config that could not resolve rather than one pointed at the
 wrong document.
 
+## CI sweeps the merge ref, so the branch head is the wrong thing to reproduce from
+
+`pull_request` checks out `refs/pull/N/merge` — the branch merged with
+current `main` — and the project workflows take that default
+(`actions/checkout@v4` with no `ref:`; catapult's own comment beside it
+says "a shallow PR-merge checkout"). Two things follow, and the first
+one cost a wrong prediction: running the audit against a branch head
+locally gives a **different answer** than CI, so a reproduction has to
+`git merge origin/main` into the branch first, or check out
+`refs/pull/N/merge`. A ticket branch predating a base-branch fix
+reported 59 dangling citations locally and none in CI, and neither
+number was wrong.
+
+The second: a ticket branch does **not** need a merge-from-main to pick
+up a fix that has landed on the base. CI already tests the merged
+result.
+
 ## The project repos are not this repo
 
 `pipeline.config.json` and `.github/workflows/**` are author-owned in

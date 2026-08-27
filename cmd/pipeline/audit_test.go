@@ -394,3 +394,56 @@ func TestAuditProposesAnUncitedShorthandWithoutFailing(t *testing.T) {
 		t.Errorf("prune candidates = %q, want just v4: v5 and DESIGN are both cited", names)
 	}
 }
+
+// The sweep must not read a checkout of another repository, and must
+// still read the project.
+//
+// Both halves are the test, and the second is the one that would rot.
+// `setup-pipeline` checks the pipeline out at `.pipeline` inside the
+// project workspace, so the sweep read the citation checker's own test
+// fixtures — citations that dangle *on purpose*, since that is what
+// they are for. No version of that repository passes this check, so
+// every ticket branch in every project failed on violations that were
+// none of the project's. A fix that skipped too much would pass the
+// first half of this test in exactly the way the audit has failed
+// before: by reporting clean from somewhere the answer could not be.
+func TestTheSweepSkipsANestedCheckoutButStillReadsTheProject(t *testing.T) {
+	root := project(t)
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A checkout, marked the way actions/checkout marks one.
+	write(".pipeline/.git/HEAD", "ref: refs/heads/main\n")
+	write(".pipeline/internal/citations/citations_test.go", "# docs/gone.md §1.1\n")
+	// One nested deeper than the top level, so the rule is not "the
+	// directory called .pipeline".
+	write("vendor/other/.git/HEAD", "ref: refs/heads/main\n")
+	write("vendor/other/lib/thing.ex", "# docs/gone.md §2.2\n")
+	// And the project's own, which must still be reported.
+	write("lib/mine.ex", "# docs/gone.md §3.3\n")
+	t.Chdir(t.TempDir())
+
+	args := []string{
+		"--config", filepath.Join(root, "pipeline.config.json"),
+		"--root", root,
+		"--changed-files", listFile(t, "README.md"),
+		"--labels", "system:billing",
+	}
+	var auditErr error
+	out := captureStderr(t, func() { auditErr = cmdAudit(args) })
+	if auditErr == nil {
+		t.Fatal("the project's own dangling citation did not fail the audit — the sweep skipped too much")
+	}
+	if strings.Contains(out, ".pipeline") || strings.Contains(out, "vendor/other") {
+		t.Errorf("a nested checkout's citations were audited as the project's:\n%s", out)
+	}
+	if !strings.Contains(out, "lib/mine.ex") {
+		t.Errorf("the project's own dangling citation is not reported:\n%s", out)
+	}
+}

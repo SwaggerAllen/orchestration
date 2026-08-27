@@ -419,6 +419,16 @@ strings, so the project's own audit was telling developers to read an entry that
 existed. Text rots without anyone touching it, which is why this is a recurring check and not a
 rule a prompt can carry.
 
+**Whole-tree stops at a checkout of another repository.** The workspace holds one: the harness
+checks this repo out at `.pipeline` inside the project, and the sweep read its source —
+including the citation checker's own test fixtures, which dangle on purpose, since fixtures
+that resolved would test nothing. No version of the pipeline repo passes that check, so it was
+not a citation to fix: every ticket branch in every project failed on 15 violations, none of
+them the project's. A directory carrying its own `.git` is therefore skipped, and skipped *by
+that* rather than by the name `.pipeline`, which is one action's `path:` input and would take
+the fix with it if it changed. The skip is printed, because a sweep quietly covering less than
+the tree is this audit's own worst failure mode.
+
 A citation naming its document by a project shorthand — `v5 §7.8`, `conventions §2` —
 outnumbers the explicit form by more than twenty to one, and resolves through
 `citationShorthands` in `pipeline.config.json`. One form stays outside the check: a prose
