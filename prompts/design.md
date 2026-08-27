@@ -61,9 +61,69 @@ never committed.
 - **Read the confirmed non-asks** below before proposing anything, and
   **record what this pass rules out** — the author pushed back, or you
   ruled an approach out for a reason the next pass would re-litigate —
-  in the same commit as your artifacts. Add and amend; never delete.
-  Arguing against a recorded decision is allowed, silently contradicting
-  it is not.
+  in the same commit as your artifacts. Arguing against a recorded
+  decision is allowed, silently contradicting it is not.
+
+  **In the non-asks file: add and amend; never delete.** A refusal that
+  quietly disappears is one the pipeline proposes again next quarter,
+  and the author sees every line of that file in the Design review diff.
+
+  **In a screen or system doc, and in the design docs generally: record
+  the decision and its reason, not the alternatives you passed over.**
+  Those are two different jobs and this instruction used to run them
+  together. "X is the rule, because Y turned out to be false" is one
+  entry per rule and it is what stops a later pass simplifying the rule
+  back into the bug. "The second review considered and rejected W" is
+  drawn from an open-ended set — every pass can add one, no pass may
+  remove one, and the doc then grows with the number of reviews rather
+  than the number of rules it states. Measured on ORC-115: eight
+  passages narrating prior passes across five design-owned docs,
+  including section headings that number the review round.
+
+  **A check that passed is not a finding either.** If you hold your
+  change against an existing entry and the entry already answers it, you
+  have nothing to add — the entry answering it *is* the outcome, and
+  appending a paragraph saying so is how a bounded list stops being one.
+  This is the commonest shape, not the rejected-alternative one:
+  ORC-115's own `non-goals.md` entry grew ~70 lines whose conclusions
+  were "neither adds a new declarable state or gate" and "what stays
+  refused is unchanged". Three of its four paragraphs were one pass each
+  recording that nothing had changed.
+
+  **The cost compounds past tidiness.** Nobody reads 140 lines of
+  accumulated passes end to end, so contradictions settle in unread:
+  `systems/engine.md` called one incident "four `async: true` test
+  modules" in one paragraph and "two independently-written test modules"
+  in another, and both stood.
+
+  **Superseding a rule means rewriting it, not appending beside it.**
+  Delete the sentence your decision makes false and state the new rule
+  in its place; git holds what it said before. That applies to a
+  sentence *this pass's own decision* supersedes. A refusal you merely
+  disagree with is not superseded — argue against it in your summary,
+  openly, which is the same rule as the one above.
+
+  **Cite a rule, never the shape of another document.** "`non-goals.md`
+  gains a paragraph recording why" was true when written and false one
+  compression pass later, when the entry gained a clause instead. A
+  citation naming a *rule* survives the cited document being rewritten;
+  one describing its shape — "gains a paragraph", "records this in three
+  places", "carries that history" — rots the moment anyone edits it.
+  Measured on the same audit: 44 citations needed repointing, and the
+  ones describing shape were the ones already stale.
+
+  This applies to everything this pass authors, not only `docs/**`.
+  Bundle content and code comments cite these documents too, and those
+  citations rot the same way with nothing sweeping them.
+
+  **"Not built" is a claim whose expiry you do not control.** Twice a
+  design pass wrote that something was not built and the *same ticket's*
+  dev pass built it — `systems/generation.md` said `feedback` and
+  `prior_review` were "not built here" while ORC-34's dev pass wired
+  both. True when written, false by the merge, and nothing reconciles
+  the two halves. Where you must name a gap, name the ticket or phase
+  that closes it rather than asserting the tree's present state: the
+  sentence outlives the condition it describes.
 
   **Where it goes is the part to get right, and it is usually not the
   non-asks file.**

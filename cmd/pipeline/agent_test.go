@@ -236,6 +236,52 @@ func TestBoundaryPromptReconcilesItsFlagsWithTheClaimRecord(t *testing.T) {
 	}
 }
 
+// The two halves of ORC-143's proposal side, which must not gate.
+//
+// Half B lands in the dev prompt because that pass has the context: it
+// knows what it built and what it deliberately left unbuilt. Half C
+// lands in boundary because two shapes are invisible from inside one
+// ticket. Both are proposals — a gate here fails on true statements,
+// since of the "not built" claims checked on one project three were
+// stale and three were correct with no textual difference between them,
+// and the fix a pass reaches for under a red build is to delete the true
+// statement or add a suppression.
+//
+// Asserted because the verify-first constraint is the half a later trim
+// reads as hedging, and it is the half that stops an automated pass
+// deleting correct documentation.
+func TestThePruneCandidateRulesAreProposalsAndDemandVerification(t *testing.T) {
+	dev := flat(repoFile(t, "prompts/dev.md"))
+	for _, want := range []struct{ text, why string }{
+		{"docs your change falsified", "the dev pass is where the context is freshest"},
+		{`"kind": "project"`, "it rides the finding channel the boundary already aggregates"},
+		{"these are candidates", "three of six such claims were correct, with no textual tell"},
+		{"verify against the tree", "the doc is the thing under suspicion, so it is not evidence"},
+		{"too-narrow search manufactures agreement", "a one-file grep once 'confirmed' a correct doc"},
+		{"nothing here fails your build", "a gate would fail on true statements"},
+	} {
+		if !strings.Contains(dev, strings.ToLower(want.text)) {
+			t.Errorf("prompts/dev.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+
+	boundary := flat(repoFile(t, "prompts/boundary.md"))
+	for _, want := range []struct{ text, why string }{
+		{"internal contradictions", "one doc saying two things, invisible from one ticket"},
+		{"superseded predictions", "the falsifying ticket is never the one that wrote the claim"},
+		{"proposals, never gates", "the same reason the dev half cannot gate"},
+	} {
+		if !strings.Contains(boundary, strings.ToLower(want.text)) {
+			t.Errorf("prompts/boundary.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+}
+
+// flat lowercases and collapses whitespace: the prompts are hard-wrapped
+// markdown, so a multi-word phrase can straddle a line break and a
+// reflow is not a defect.
+func flat(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
+
 // The agent is judged against its labels and could not see them.
 //
 // CI fails a diff touching a path mapped to a screen or system doc whose
@@ -663,6 +709,64 @@ func TestDesignPromptSaysTheCommentsCarryDeltasThatMayWiden(t *testing.T) {
 	for _, want := range []string{"deltas", "widen"} {
 		if !strings.Contains(head, want) {
 			t.Errorf("the comments header is missing %q — without it a pass reads the thread as history:\n  %s", want, head)
+		}
+	}
+}
+
+// "Never delete" is right about the non-asks file and wrong about every
+// other design doc, and the prompt used to state it before saying which
+// it meant.
+//
+// DESIGN §4 scopes it correctly — the sentence is about the file, and
+// the paragraph after it says most refusals go elsewhere — as does the
+// non-asks section the harness renders, which names the file's own path.
+// The role prompt was the one place it appeared unscoped, ahead of the
+// placement guidance, so a pass reasonably read it as governing the
+// screen and system docs too. Those then grow with the number of
+// reviews rather than the number of rules they state: measured on
+// Catapult's ORC-115, eight passages narrating prior passes across five
+// design-owned docs, two of them headings numbering the review round.
+//
+// Asserted rather than commented because the failure is invisible for a
+// milestone. Nothing is red while a doc bloats; it is only legible when
+// somebody reads the whole file and asks why it is a transcript.
+func TestDesignRolePromptScopesNeverDeleteToTheNonAsksFile(t *testing.T) {
+	// Whitespace collapsed before matching. The prompts are hard-wrapped
+	// markdown, so any multi-word phrase can straddle a line break —
+	// "merely\n  disagree" failed this test on its first run — and a
+	// reflow is not a defect. Matching the prose rather than the layout
+	// is what keeps that true.
+	lower := strings.Join(strings.Fields(strings.ToLower(repoFile(t, "prompts/design.md"))), " ")
+
+	// The rule survives, and says which artifact it governs.
+	i := strings.Index(lower, "never delete")
+	if i < 0 {
+		t.Fatal("prompts/design.md no longer says never delete; a refusal that " +
+			"quietly disappears is one the pipeline proposes again")
+	}
+	// Same sentence, not somewhere else in the file: the whole defect was
+	// the scope being stated too far from the rule to travel with it.
+	sentence := lower[max(0, i-120):min(len(lower), i+40)]
+	if !strings.Contains(sentence, "non-asks file") {
+		t.Errorf("never delete is stated without naming the non-asks file, so it reads as "+
+			"governing every design doc:\n  %s", sentence)
+	}
+
+	for _, want := range []struct{ text, why string }{
+		{"not the alternatives you passed over", "the bounded rule the docs actually need"},
+		{"superseding a rule means rewriting it", "or a correction gets appended beside the stale sentence"},
+		{"merely disagree", "or rewriting becomes licence to delete a refusal the pass dislikes"},
+		// The four the cleanup audit turned up. Each is a generator the
+		// bounded rule above does not close on its own, and each was
+		// measured rather than imagined — so each is asserted rather
+		// than left as prose a later trim can thin out.
+		{"a check that passed is not a finding", "the commonest bloat is a pass recording that nothing changed"},
+		{"cite a rule, never the shape of another document", "shape citations rot when the cited doc is edited"},
+		{"not only `docs/**`", "bundle content and code comments cite these docs and rot the same way"},
+		{"expiry you do not control", "\"not built\" outlives the condition, often within its own ticket"},
+	} {
+		if !strings.Contains(lower, strings.ToLower(want.text)) {
+			t.Errorf("prompts/design.md does not carry %q — %s", want.text, want.why)
 		}
 	}
 }

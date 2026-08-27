@@ -384,6 +384,17 @@ already reading, and where it cannot drift from the positive rule it qualifies. 
 is placement, not category: this file is inlined into every scoped prompt, while a system doc
 is read on the way to changing that system, which is the cheaper and better-aimed moment.
 
+**And it is written differently there, because "never deleted" does not travel with it.** In
+the file a refusal is an entry, kept because its disappearance is invisible. In an owning doc
+it is the *reason attached to a rule* — "X is the rule, because Y turned out to be false" —
+and superseding that rule means rewriting the sentence, not appending a correction beside it.
+The asymmetry is what keeps the docs bounded: a rule's reason is one entry per rule, while
+alternatives a pass passed over are drawn from an open-ended set, so a doc that records those
+grows with the number of reviews rather than the number of rules it states. Measured on
+Catapult's ORC-115, where the prompt stated "never delete" ahead of the placement guidance and
+a pass reasonably read it as governing both: eight passages narrating prior passes across five
+design-owned docs, two of them section headings numbering the review round.
+
 **Two kinds have no such home, and they are what the file is for.** Refusals every pass must
 see, and refusals spanning systems — which a per-doc home could serve only by copying into each
 one, and a copy is drift with extra steps. The tell for the second kind is two docs citing a
@@ -397,6 +408,47 @@ own bullet rather than in a parallel entry beside it.
 **A reversed decision is not a refusal**, and its record belongs where the reversal was argued.
 A struck-through entry left in the file makes every scoped pass read what is no longer true —
 which is the failure "never delete" exists to prevent, arrived at from the other direction.
+
+**A citation that names a section is checked; the rest are not, and the difference is stated so
+a clean run is not read as more than it is.** The audit resolves a reference that names its
+document by path and a section by number — `docs/v5-design-decisions.md §7.8` against `### 7.8`
+in that file — across the whole tree rather than `docs/**`. Whole-tree is the load-bearing half:
+a manual sweep of `docs/`, `systems/` and `bundles/` on Catapult reported clean while 22
+citations in `lib/`, `components/` and `test/` were dangling, two of them inside error-message
+strings, so the project's own audit was telling developers to read an entry that no longer
+existed. Text rots without anyone touching it, which is why this is a recurring check and not a
+rule a prompt can carry.
+
+Two forms are deliberately outside it. A citation naming its document by a project shorthand —
+`v5 §7.8`, `conventions §2` — outnumbers the explicit form four to one, and resolving it needs
+`citationShorthands` in `pipeline.config.json`. A prose reference carries no section and is not
+decidable at all. So the audit's citation line is a statement about one form, never about the
+documents being sound.
+
+Each entry carries either a `path`, the project-relative document the shorthand names, or an
+`unchecked` string recording why no path in this repository can resolve it — another
+repository's docs, a licence text. Behaviourally `unchecked` matches leaving the shorthand out
+of the table; what it buys is the record, so the next pass to notice a shorthand going
+unchecked does not invent a path for it and turn correct citations red.
+
+**The field is declared here before a project config may carry it, which is the opposite of the
+rule for a new protocol state.** `config.Load` rejects unknown fields — at every level, not only
+the top — so a config naming `citationShorthands` against a binary without it fails to load, and
+because validation precedes everything the whole sweep stops rather than one check degrading. A
+new protocol state runs the other way: validation requires the complete state mapping, so the
+project config must gain the line first. One strictness read from two ends, and which side moves
+first depends on which end the change trips.
+
+**What the docs claim about the tree is a proposal, never a gate.** A pass records the documents
+its own change falsified as `project` findings, which the boundary aggregates and the author
+adjudicates in one sitting — collected at the ticket because that is where the context is
+freshest, judged at the boundary because that is where they can be judged together. It cannot
+gate: of the "not built"-shaped claims checked across one project's system docs, three were
+stale and three were correct descriptions of deliberate gaps, with no textual difference between
+them. A gate there fails on true statements, and the fix a pass reaches for under a red build is
+to delete the true statement or add a suppression — a silent gate re-blinding itself to the next
+finding. A candidate is therefore verified against the tree before anything is removed, and the
+document under suspicion is not evidence for its own claim.
 
 **Relocating an entry is the author's move, not a pass's.** The citations that point at it move
 with it, and a pass that shuffled entries between documents would break references it cannot

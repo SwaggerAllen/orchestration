@@ -242,3 +242,90 @@ func TestInRootResolvesAgainstTheConfigsDirectory(t *testing.T) {
 		t.Errorf("InRoot(absolute) = %q, want it untouched", got)
 	}
 }
+
+// The table Catapult actually ships, verbatim from ORC-144. This is the
+// test the field exists for: the config edit is already written on
+// catapult PR #84, and if it merges against a binary that cannot decode
+// it, Load fails and every pipeline command stops — not just the
+// citation check. Both value forms and a filename-shaped key are here
+// because all three are in that file.
+func TestLoadAcceptsTheShippedCitationShorthands(t *testing.T) {
+	m := sampleAsMap(t)
+	m["citationShorthands"] = map[string]any{
+		"v5":            map[string]any{"path": "docs/v5-design-decisions.md"},
+		"v4":            map[string]any{"path": "seed-docs/catapult-spec-v4.md"},
+		"conventions":   map[string]any{"path": "docs/conventions.md"},
+		"Conventions":   map[string]any{"path": "docs/conventions.md"},
+		"dsl-syntax.md": map[string]any{"path": "docs/dsl-syntax.md"},
+		"DESIGN":        map[string]any{"unchecked": "orchestration's DESIGN.md — another repository"},
+		"orchestration": map[string]any{"unchecked": "orchestration's own docs — another repository"},
+		"AGPL":          map[string]any{"unchecked": "the AGPL-3.0 licence text, not a file in this tree"},
+	}
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatalf("Load rejected the shipped table: %v", err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate rejected the shipped table: %v", err)
+	}
+	if got := c.CitationShorthands["v5"].Path; got != "docs/v5-design-decisions.md" {
+		t.Errorf("v5.path = %q", got)
+	}
+	if c.CitationShorthands["AGPL"].Unchecked == "" {
+		t.Error("AGPL.unchecked did not survive the decode")
+	}
+}
+
+// Nested unknown fields are rejected too — DisallowUnknownFields is a
+// decoder setting, not a top-level one. So declaring only the outer map
+// would not have been enough: a config using the unchecked form would
+// still fail to load. Measured, because "the outer field is declared"
+// reads like it settles the question and does not.
+func TestAnUndeclaredFieldInsideAShorthandIsRejected(t *testing.T) {
+	m := sampleAsMap(t)
+	m["citationShorthands"] = map[string]any{
+		"v5": map[string]any{"path": "docs/v5.md", "reason": "not a field"},
+	}
+	_, err := Load(writeConfig(t, m))
+	if err == nil || !strings.Contains(err.Error(), "reason") {
+		t.Errorf("want unknown-field error naming reason, got %v", err)
+	}
+}
+
+// Absence is the state every project is in until it writes the table,
+// and it must stay loadable and valid — otherwise declaring the field
+// breaks every config that does not have it yet.
+func TestCitationShorthandsAreOptional(t *testing.T) {
+	c, err := Load(writeConfig(t, sampleAsMap(t)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a config with no citationShorthands must validate: %v", err)
+	}
+	if c.CitationShorthands != nil {
+		t.Errorf("want nil map, got %v", c.CitationShorthands)
+	}
+}
+
+func TestAShorthandNeedsEitherPathOrUnchecked(t *testing.T) {
+	m := sampleAsMap(t)
+	m["citationShorthands"] = map[string]any{"v5": map[string]any{}}
+	// Load validates, so the complaint arrives from there rather than
+	// from a separate Validate call.
+	_, err := Load(writeConfig(t, m))
+	if err == nil || !strings.Contains(err.Error(), "citationShorthands.v5") {
+		t.Errorf("want a complaint naming the entry, got %v", err)
+	}
+}
+
+func TestAShorthandRejectsBothPathAndUnchecked(t *testing.T) {
+	m := sampleAsMap(t)
+	m["citationShorthands"] = map[string]any{
+		"v5": map[string]any{"path": "docs/v5.md", "unchecked": "and also not checkable"},
+	}
+	_, err := Load(writeConfig(t, m))
+	if err == nil || !strings.Contains(err.Error(), "contradict") {
+		t.Errorf("want a contradiction complaint, got %v", err)
+	}
+}
