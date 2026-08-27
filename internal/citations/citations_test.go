@@ -336,3 +336,72 @@ func TestCitingASubsectionThatDoesNotExistIsReported(t *testing.T) {
 		t.Fatalf("Sweep = %v, want §7.8.1 reported — §7.8 existing does not satisfy it", got)
 	}
 }
+
+// The case Unused exists for: an entry that outlived the last citation
+// needing it. Nothing fails without this — the map simply keeps
+// asserting that a shorthand is in use, and the next pass to read it
+// believes the assertion.
+func TestAShorthandNoCitationNamesIsReported(t *testing.T) {
+	root := world(t)
+	write(t, root, "lib/thing.ex", "# v5 §7.8 explains the container\n")
+
+	got, err := Unused(root, []string{"lib/thing.ex"}, []string{"v5", "v4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "v4" {
+		t.Fatalf("Unused = %v, want just v4 — v5 is cited by that file", got)
+	}
+}
+
+// Naming the shorthand is not citing it. The map's own keys get written
+// down in prose — a README explaining the table, a comment listing what
+// a project declares — and counting those as uses would report nothing
+// for exactly the entries worth pruning. Sharing cite with the sweep is
+// what makes the two questions the same question.
+func TestNamingAShorthandInProseIsNotACitation(t *testing.T) {
+	root := world(t)
+	write(t, root, "README.md", "The map declares `v4` for the old spec, unused so far.\n")
+
+	got, err := Unused(root, []string{"README.md"}, []string{"v4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "v4" {
+		t.Fatalf("Unused = %v, want v4 — a mention beside no § is not a use", got)
+	}
+}
+
+// Case-sensitivity, for the reason resolve has it: a project spelling
+// one shorthand two ways declares both, and only the spelling the
+// corpus actually writes is in use. Folding case would excuse each
+// entry with the other's citations and report neither.
+func TestAnUnusedSpellingIsReportedThoughAnotherCaseIsCited(t *testing.T) {
+	root := world(t)
+	write(t, root, "lib/thing.ex", "# conventions §2 is the gate set\n")
+
+	got, err := Unused(root, []string{"lib/thing.ex"}, []string{"conventions", "Conventions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "Conventions" {
+		t.Fatalf("Unused = %v, want the uncited spelling only", got)
+	}
+}
+
+// A shorthand whose citations all dangle is still in use. Pruning it
+// would delete the entry that makes those citations checkable and turn
+// a reported defect into a silent one, so this asks the document half
+// of the citation only.
+func TestAShorthandIsUsedEvenWhenItsCitationsDangle(t *testing.T) {
+	root := world(t)
+	write(t, root, "lib/thing.ex", "# v5 §9.9 is long gone\n")
+
+	got, err := Unused(root, []string{"lib/thing.ex"}, []string{"v5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Unused = %v, want none — a dangling citation is still a use", got)
+	}
+}

@@ -226,6 +226,50 @@ func cmdAudit(args []string) error {
 		violations = append(violations, d.String())
 	}
 
+	// The map's own upkeep, and a proposal rather than a gate.
+	//
+	// A whitelist that only ever grows stops describing the corpus it
+	// was written for: an entry outlives the last citation needing it
+	// in silence, and the next pass to read the map takes it as
+	// evidence the shorthand is in use. Catapult's `# catapult:allow`
+	// escape already prunes itself this way — a tag covering no
+	// violation is reported — and the reasoning carries over.
+	//
+	// Who can act is where the two part, and it is why this cannot
+	// gate. That escape lives in the file the ticket is already
+	// editing. This map lives in `pipeline.config.json`, author-owned
+	// (DESIGN §5), so a red audit here would fail a ticket for a config
+	// state it did not create and has no legal path to fix — every file
+	// it needed closed to it. That is precisely the dead end
+	// `author-only` exists to prevent (DESIGN §8), reached by accident
+	// instead of by label, and the fix a pass reaches for under a red
+	// build is to delete a true statement or add a suppression.
+	//
+	// Unchecked entries count. Such an entry buys the record of why a
+	// shorthand cannot resolve here, and a record nothing cites has the
+	// same problem as a path nothing cites.
+	var declared []string
+	for name := range cfg.CitationShorthands {
+		declared = append(declared, name)
+	}
+	unused, err := citations.Unused(*root, cited, declared)
+	if err != nil {
+		return err
+	}
+	if len(unused) > 0 {
+		line := fmt.Sprintf("citation shorthands no citation names: %s — prune candidates for pipeline.config.json, which is the author's to edit (DESIGN §5). A proposal: it does not fail the audit.",
+			strings.Join(unused, ", "))
+		fmt.Println(line)
+		// Said in the summary as well as on stdout, because stdout here
+		// is a collapsed step of a workflow the pipeline runs on its
+		// own, and the only reader who can act on this is the author.
+		// That is the same reason the violations below are summarized.
+		summarize(func(w io.Writer) {
+			summaryHeading(w, "Citation shorthands never used")
+			fmt.Fprintln(w, line)
+		})
+	}
+
 	if len(violations) == 0 {
 		fmt.Printf("audit clean: %d changed paths against %d system and %d screen maps; %d files swept for section citations\n",
 			len(changed), len(systems), len(screens), len(cited))

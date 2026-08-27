@@ -251,3 +251,80 @@ func resolve(written string, shorthands map[string]string) (doc, via string, ok 
 	}
 	return path, path, true
 }
+
+// Unused reports declared shorthands that no citation in paths names.
+//
+// The map is a whitelist, and a whitelist that only ever grows stops
+// describing the corpus it was written for. An entry outlives the last
+// citation that needed it silently: nothing fails, and the next pass
+// reading the map takes it as evidence that the shorthand is in use.
+// Catapult's `# catapult:allow` escape already prunes itself this way —
+// a tag covering no violation is reported — and the reasoning carries
+// over unchanged.
+//
+// A declared name counts as used when it appears where a citation names
+// its document, which is why this shares cite with the sweep rather
+// than matching the name loosely. A shorthand mentioned in prose — the
+// map's own key, quoted in a sentence about the map — is not a use, and
+// a check that counted it would report nothing for exactly the entries
+// worth pruning.
+//
+// Lookup is case-sensitive here for the reason it is in resolve: a
+// project spelling one shorthand two ways declares both, and folding
+// case would report neither, each excused by the other's citations.
+//
+// The result is a proposal and must not gate — see the caller, where
+// that rule is applied and its reason recorded.
+func Unused(root string, paths []string, declared []string) ([]string, error) {
+	if len(declared) == 0 {
+		return nil, nil
+	}
+	want := map[string]bool{}
+	for _, name := range declared {
+		want[name] = true
+	}
+
+	seen := map[string]bool{}
+	for _, rel := range paths {
+		if len(seen) == len(want) {
+			break // every declared name is accounted for; the rest cannot change that
+		}
+		if err := namesIn(root, rel, want, seen); err != nil {
+			return nil, err
+		}
+	}
+
+	var out []string
+	for name := range want {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// namesIn records which of the wanted names one file cites, reading
+// the document half of every citation and ignoring the section.
+// Whether the section resolves is the sweep's question and a different
+// one: a shorthand whose citations all dangle is still in use, and
+// pruning it would delete the entry that makes those citations
+// checkable.
+func namesIn(root, rel string, want, seen map[string]bool) error {
+	f, err := os.Open(filepath.Join(root, rel))
+	if err != nil {
+		return nil // unreadable inputs are the caller's to enumerate, as in scan
+	}
+	defer f.Close()
+
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for s.Scan() {
+		for _, m := range cite.FindAllStringSubmatch(s.Text(), -1) {
+			if want[m[1]] {
+				seen[m[1]] = true
+			}
+		}
+	}
+	return s.Err()
+}
