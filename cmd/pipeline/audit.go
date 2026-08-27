@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -201,9 +202,18 @@ func cmdAudit(args []string) error {
 	// and takes every command down with it. Prose references carry no
 	// section and are not decidable at all. So "citations: N resolved"
 	// is a statement about one form, not about the docs being sound.
-	cited, err := citationPaths(*root)
+	cited, nested, err := citationPaths(*root)
 	if err != nil {
 		return err
+	}
+	// Named rather than skipped in silence. A sweep that quietly covers
+	// less than the tree is the failure this audit has already had once
+	// — "audit clean ... against 0 system and 0 screen maps" from the
+	// wrong directory — and a reader wondering why their file went
+	// unchecked should not have to read this function to find out.
+	if len(nested) > 0 {
+		fmt.Printf("citation sweep: skipped %s — a checkout of another repository, whose contents are not this project's to audit\n",
+			strings.Join(nested, ", "))
 	}
 	// Only path-bearing entries reach the sweep. An `unchecked` entry —
 	// a shorthand the project has recorded as unresolvable here, another
@@ -319,9 +329,9 @@ func readPathList(path string) ([]string, error) {
 // names — the citations that had rotted longest were the ones nobody
 // thought to sweep, and two of them were error strings shipping to
 // developers.
-func citationPaths(root string) ([]string, error) {
+func citationPaths(root string) ([]string, []string, error) {
 	skip := map[string]bool{".git": true, "deps": true, "_build": true, "node_modules": true, "cover": true}
-	var out []string
+	var out, nested []string
 	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -329,6 +339,32 @@ func citationPaths(root string) ([]string, error) {
 		if info.IsDir() {
 			if skip[info.Name()] {
 				return filepath.SkipDir
+			}
+			// A checkout of another repository is not this project's to
+			// audit, and the workspace has one: `setup-pipeline` checks
+			// the pipeline out at `.pipeline` inside the project tree,
+			// so the sweep read the pipeline's own source — including
+			// the citation checker's test fixtures, which are dangling
+			// citations *on purpose*. `docs/gone.md`, `§9.9`, `§15.99`
+			// are chosen because nothing resolves them, so there is no
+			// version of that repository which passes this check. Every
+			// ticket branch in every project failed on 15 violations,
+			// none of them the project's.
+			//
+			// Keyed on being a checkout rather than on the name
+			// `.pipeline`, which is one action's `path:` input and
+			// would take the fix with it if it ever changed. The root
+			// is exempt because its own `.git` is skipped by name
+			// above, before this runs.
+			if p != root {
+				if _, err := os.Lstat(filepath.Join(p, ".git")); err == nil {
+					rel, relErr := filepath.Rel(root, p)
+					if relErr != nil {
+						return relErr
+					}
+					nested = append(nested, rel)
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
@@ -342,5 +378,6 @@ func citationPaths(root string) ([]string, error) {
 		}
 		return nil
 	})
-	return out, err
+	sort.Strings(nested)
+	return out, nested, err
 }
