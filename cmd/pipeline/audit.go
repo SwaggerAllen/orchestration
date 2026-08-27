@@ -195,9 +195,10 @@ func cmdAudit(args []string) error {
 	// overclaim.** Two thirds of section citations name their document
 	// by a project shorthand — `v5 §7.8`, `conventions §2`,
 	// `dsl-syntax.md §15.1` — 564 against 132 on Catapult's tree.
-	// Resolving those needs a project-declared shorthand map, which is a
-	// `pipeline.config.json` key and so an author-owned edit that lands
-	// before the change here reading it. Prose references carry no
+	// Resolving those needs the project's own `citationShorthands`
+	// table, which a later change reads; the field is declared on
+	// config.Config first, because Load rejects a key it does not know
+	// and takes every command down with it. Prose references carry no
 	// section and are not decidable at all. So "citations: N resolved"
 	// is a statement about one form, not about the docs being sound.
 	cited, err := citationPaths(*root)

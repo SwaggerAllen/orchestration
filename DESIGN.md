@@ -420,10 +420,24 @@ existed. Text rots without anyone touching it, which is why this is a recurring 
 rule a prompt can carry.
 
 Two forms are deliberately outside it. A citation naming its document by a project shorthand —
-`v5 §7.8`, `conventions §2` — outnumbers the explicit form four to one, and resolving it needs a
-shorthand map in `pipeline.config.json`, an author-owned edit that lands before the change here
-reading it. A prose reference carries no section and is not decidable at all. So the audit's
-citation line is a statement about one form, never about the documents being sound.
+`v5 §7.8`, `conventions §2` — outnumbers the explicit form four to one, and resolving it needs
+`citationShorthands` in `pipeline.config.json`. A prose reference carries no section and is not
+decidable at all. So the audit's citation line is a statement about one form, never about the
+documents being sound.
+
+Each entry carries either a `path`, the project-relative document the shorthand names, or an
+`unchecked` string recording why no path in this repository can resolve it — another
+repository's docs, a licence text. Behaviourally `unchecked` matches leaving the shorthand out
+of the table; what it buys is the record, so the next pass to notice a shorthand going
+unchecked does not invent a path for it and turn correct citations red.
+
+**The field is declared here before a project config may carry it, which is the opposite of the
+rule for a new protocol state.** `config.Load` rejects unknown fields — at every level, not only
+the top — so a config naming `citationShorthands` against a binary without it fails to load, and
+because validation precedes everything the whole sweep stops rather than one check degrading. A
+new protocol state runs the other way: validation requires the complete state mapping, so the
+project config must gain the line first. One strictness read from two ends, and which side moves
+first depends on which end the change trips.
 
 **What the docs claim about the tree is a proposal, never a gate.** A pass records the documents
 its own change falsified as `project` findings, which the boundary aggregates and the author

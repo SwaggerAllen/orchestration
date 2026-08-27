@@ -24,11 +24,16 @@
 //
 // Two thirds of section citations name their document by a project
 // shorthand — `v5 §7.8`, `conventions §2` — 564 of them against 132
-// explicit. Resolving those needs a project-declared shorthand map,
-// which is a `pipeline.config.json` key and therefore an author-owned
-// edit that lands before any change here (CLAUDE.md, "The project repos
-// are not this repo"). Until it does, a shorthand citation is not
-// checked and does not fail.
+// explicit. Resolving those needs the project's own `citationShorthands`
+// table, declared on config.Config and read by a later change than this
+// one. Until a project writes it, a shorthand citation is not checked
+// and does not fail.
+//
+// The field is declared before any project config may carry it, and
+// that order is forced rather than tidy: config.Load rejects unknown
+// fields at every level, so a config naming the key against a binary
+// without it fails to load and the whole sweep stops. It is the
+// protocol-state rule inverted — same strictness, opposite end.
 //
 // Prose references — "docs/non-goals.md names for theme tokens" — carry
 // no section and are not decidable at all. ORC-143's own flagship

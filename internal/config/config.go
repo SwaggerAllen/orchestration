@@ -100,6 +100,55 @@ type Config struct {
 	// means the agent isn't wired yet: its dispatches are logged and
 	// skipped, which is safe because the sweep re-plans them every pass.
 	Agents map[string]string `json:"agents"`
+
+	// CitationShorthands maps this project's own shorthand for a document
+	// to what the citation check should do with it (DESIGN §4). Two thirds
+	// of a mature project's section citations name their document by a
+	// shorthand — `v5 §7.8`, `conventions §2` — which no path resolver can
+	// follow, so the check sees only the explicit-path minority without
+	// this table.
+	//
+	// Absent means no shorthands resolve, which is a smaller check rather
+	// than a broken one: a project that has not written this table gets
+	// exactly the explicit-path coverage it had before.
+	//
+	// Declared here ahead of the resolver that reads it, and that order is
+	// forced rather than tidy. Load rejects unknown fields, so a project
+	// config carrying this key against a binary that does not declare it
+	// fails to load at all — and validation runs before everything, so the
+	// whole sweep stops rather than one check degrading. That is the
+	// mirror image of the protocol-state rule in CLAUDE.md: a new state
+	// needs the project config first, a new config field needs this repo
+	// first. Both are the same strictness read from opposite ends.
+	CitationShorthands map[string]CitationShorthand `json:"citationShorthands"`
+}
+
+// CitationShorthand is one entry of Config.CitationShorthands: either a
+// document this shorthand names, or a recorded reason it cannot be one.
+//
+// Exactly one of the two is set. The second form exists because a real
+// corpus cites documents that are not in the tree at all — another
+// repository's DESIGN.md, a licence text — and those citations are
+// correct. Reporting them as dangling would be a false failure on a
+// gate, and two of those is how a suppression gets added and the check
+// goes quiet for everything after it.
+//
+// Behaviourally an Unchecked entry matches leaving the shorthand out of
+// the table: neither resolves, neither fails. What it buys is the
+// record. An absent shorthand is indistinguishable from one nobody has
+// got to yet, so the next pass to notice `DESIGN §5` going unchecked
+// invents a path for it and turns 15 correct citations red. The string
+// is there to stop that, which makes it documentation with a reason,
+// not a third code path.
+type CitationShorthand struct {
+	// Path is the project-relative document this shorthand names.
+	Path string `json:"path"`
+
+	// Unchecked records why this shorthand cannot resolve to a file in
+	// this repository. Its content is the whole point of the entry —
+	// JSON carries no comments, so a reason with nowhere to live is a
+	// reason that does not get written.
+	Unchecked string `json:"unchecked"`
 }
 
 // AgentKinds are the legal keys of Agents. live-suite is not an LLM
@@ -310,6 +359,19 @@ func (c *Config) Validate() error {
 	if c.StaleClaimGrace <= 0 {
 		add("staleClaimGrace: missing")
 	}
+	for name, sh := range c.CitationShorthands {
+		// Neither set is the zero value a typo deserializes to, and it
+		// would sit in the table looking configured while resolving
+		// nothing. Both set is a genuine ambiguity: the entry claims a
+		// document and simultaneously claims there cannot be one.
+		switch {
+		case sh.Path == "" && sh.Unchecked == "":
+			add("citationShorthands.%s: needs either path or unchecked", name)
+		case sh.Path != "" && sh.Unchecked != "":
+			add("citationShorthands.%s: has both path and unchecked, which contradict", name)
+		}
+	}
+
 	if c.Preview.PagesProject == "" {
 		add("preview.pagesProject: missing")
 	}
