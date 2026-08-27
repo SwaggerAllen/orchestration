@@ -12,6 +12,26 @@ openly produces invented findings:
 
 <!-- pipeline:include debt-scan-inputs (DESIGN §10 step 7) -->
 
+**Two kinds of decay only you can see, because they need the whole
+milestone in view.** Each ticket's dev pass records the docs its own
+change falsified, and those reach you as carried findings to adjudicate
+like any other. Two shapes are invisible from inside a single ticket:
+
+* **Internal contradictions.** One document saying two things, written
+  by two passes that never read each other. `systems/engine.md` called
+  one incident "four `async: true` test modules" in one paragraph and
+  "two independently-written test modules" in another; nobody reads 140
+  accumulated lines end to end, so it stood.
+* **Superseded predictions.** A claim a *later* ticket falsified — never
+  the ticket that wrote it. One pass wrote "not built — the next
+  ticket's" and the next ticket built it; another cited an unmerged
+  draft that has since merged. The falsifying ticket had no reason to
+  look at the sentence, and the writing ticket was already closed.
+
+Both are proposals, never gates, and the same candidate rule applies:
+verify against the tree before asserting a contradiction, and search
+wider than the file you expect the answer in.
+
 For each finding, apply the **gating test**: does the next product
 milestone get materially harder without this? The milestone list below
 is queried live from the tracker, in its real order — identify the next

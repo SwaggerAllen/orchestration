@@ -409,6 +409,33 @@ own bullet rather than in a parallel entry beside it.
 A struck-through entry left in the file makes every scoped pass read what is no longer true —
 which is the failure "never delete" exists to prevent, arrived at from the other direction.
 
+**A citation that names a section is checked; the rest are not, and the difference is stated so
+a clean run is not read as more than it is.** The audit resolves a reference that names its
+document by path and a section by number — `docs/v5-design-decisions.md §7.8` against `### 7.8`
+in that file — across the whole tree rather than `docs/**`. Whole-tree is the load-bearing half:
+a manual sweep of `docs/`, `systems/` and `bundles/` on Catapult reported clean while 22
+citations in `lib/`, `components/` and `test/` were dangling, two of them inside error-message
+strings, so the project's own audit was telling developers to read an entry that no longer
+existed. Text rots without anyone touching it, which is why this is a recurring check and not a
+rule a prompt can carry.
+
+Two forms are deliberately outside it. A citation naming its document by a project shorthand —
+`v5 §7.8`, `conventions §2` — outnumbers the explicit form four to one, and resolving it needs a
+shorthand map in `pipeline.config.json`, an author-owned edit that lands before the change here
+reading it. A prose reference carries no section and is not decidable at all. So the audit's
+citation line is a statement about one form, never about the documents being sound.
+
+**What the docs claim about the tree is a proposal, never a gate.** A pass records the documents
+its own change falsified as `project` findings, which the boundary aggregates and the author
+adjudicates in one sitting — collected at the ticket because that is where the context is
+freshest, judged at the boundary because that is where they can be judged together. It cannot
+gate: of the "not built"-shaped claims checked across one project's system docs, three were
+stale and three were correct descriptions of deliberate gaps, with no textual difference between
+them. A gate there fails on true statements, and the fix a pass reaches for under a red build is
+to delete the true statement or add a suppression — a silent gate re-blinding itself to the next
+finding. A candidate is therefore verified against the tree before anything is removed, and the
+document under suspicion is not evidence for its own claim.
+
 **Relocating an entry is the author's move, not a pass's.** The citations that point at it move
 with it, and a pass that shuffled entries between documents would break references it cannot
 see. A pass that believes an entry is in the wrong place says so in its summary.

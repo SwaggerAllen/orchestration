@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/citations"
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -176,9 +177,44 @@ func cmdAudit(args []string) error {
 		violations = append(violations, filemap.DesignAudit(cfg.DesignOwnedPaths, designWrote)...)
 	}
 
+	// The citation sweep, whole-tree rather than docs-scoped, and that
+	// scoping is the finding rather than a detail. Catapult's own manual
+	// audit swept docs/, systems/, CLAUDE.md and bundles/, reported
+	// clean, and left 22 dangling citations in lib/, components/ and
+	// test/ — two of them inside `Catapult.Audit.Declarations`' error
+	// message strings, so the audit was telling developers to go read an
+	// entry that no longer existed. A dangling citation shipping as
+	// runtime output.
+	//
+	// It resolves a section citation that names its document by path:
+	// `docs/v5-design-decisions.md §7.8` against `### 7.8` in that file.
+	// That is decidable, so it can honestly fail a build, which is the
+	// only part of ORC-143 that can.
+	//
+	// **What it does not cover, said here because a clean line must not
+	// overclaim.** Two thirds of section citations name their document
+	// by a project shorthand — `v5 §7.8`, `conventions §2`,
+	// `dsl-syntax.md §15.1` — 564 against 132 on Catapult's tree.
+	// Resolving those needs a project-declared shorthand map, which is a
+	// `pipeline.config.json` key and so an author-owned edit that lands
+	// before the change here reading it. Prose references carry no
+	// section and are not decidable at all. So "citations: N resolved"
+	// is a statement about one form, not about the docs being sound.
+	cited, err := citationPaths(*root)
+	if err != nil {
+		return err
+	}
+	dangling, err := citations.Sweep(*root, cited)
+	if err != nil {
+		return err
+	}
+	for _, d := range dangling {
+		violations = append(violations, d.String())
+	}
+
 	if len(violations) == 0 {
-		fmt.Printf("audit clean: %d changed paths against %d system and %d screen maps\n",
-			len(changed), len(systems), len(screens))
+		fmt.Printf("audit clean: %d changed paths against %d system and %d screen maps; %d files swept for section citations\n",
+			len(changed), len(systems), len(screens), len(cited))
 		return nil
 	}
 	for _, v := range violations {
@@ -215,4 +251,38 @@ func readPathList(path string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// citationPaths lists the files the citation sweep reads: every text
+// file in the tree a pass could write a citation into.
+//
+// Whole-tree by construction, with only build output and vendored
+// dependencies skipped. Narrowing this to docs/ is the mistake ORC-143
+// names — the citations that had rotted longest were the ones nobody
+// thought to sweep, and two of them were error strings shipping to
+// developers.
+func citationPaths(root string) ([]string, error) {
+	skip := map[string]bool{".git": true, "deps": true, "_build": true, "node_modules": true, "cover": true}
+	var out []string
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if skip[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(p)) {
+		case ".md", ".ex", ".exs", ".go", ".yaml", ".yml", ".json", ".ts", ".js", ".sh":
+			rel, err := filepath.Rel(root, p)
+			if err != nil {
+				return err
+			}
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out, err
 }

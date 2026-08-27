@@ -236,6 +236,52 @@ func TestBoundaryPromptReconcilesItsFlagsWithTheClaimRecord(t *testing.T) {
 	}
 }
 
+// The two halves of ORC-143's proposal side, which must not gate.
+//
+// Half B lands in the dev prompt because that pass has the context: it
+// knows what it built and what it deliberately left unbuilt. Half C
+// lands in boundary because two shapes are invisible from inside one
+// ticket. Both are proposals — a gate here fails on true statements,
+// since of the "not built" claims checked on one project three were
+// stale and three were correct with no textual difference between them,
+// and the fix a pass reaches for under a red build is to delete the true
+// statement or add a suppression.
+//
+// Asserted because the verify-first constraint is the half a later trim
+// reads as hedging, and it is the half that stops an automated pass
+// deleting correct documentation.
+func TestThePruneCandidateRulesAreProposalsAndDemandVerification(t *testing.T) {
+	dev := flat(repoFile(t, "prompts/dev.md"))
+	for _, want := range []struct{ text, why string }{
+		{"docs your change falsified", "the dev pass is where the context is freshest"},
+		{`"kind": "project"`, "it rides the finding channel the boundary already aggregates"},
+		{"these are candidates", "three of six such claims were correct, with no textual tell"},
+		{"verify against the tree", "the doc is the thing under suspicion, so it is not evidence"},
+		{"too-narrow search manufactures agreement", "a one-file grep once 'confirmed' a correct doc"},
+		{"nothing here fails your build", "a gate would fail on true statements"},
+	} {
+		if !strings.Contains(dev, strings.ToLower(want.text)) {
+			t.Errorf("prompts/dev.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+
+	boundary := flat(repoFile(t, "prompts/boundary.md"))
+	for _, want := range []struct{ text, why string }{
+		{"internal contradictions", "one doc saying two things, invisible from one ticket"},
+		{"superseded predictions", "the falsifying ticket is never the one that wrote the claim"},
+		{"proposals, never gates", "the same reason the dev half cannot gate"},
+	} {
+		if !strings.Contains(boundary, strings.ToLower(want.text)) {
+			t.Errorf("prompts/boundary.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+}
+
+// flat lowercases and collapses whitespace: the prompts are hard-wrapped
+// markdown, so a multi-word phrase can straddle a line break and a
+// reflow is not a defect.
+func flat(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
+
 // The agent is judged against its labels and could not see them.
 //
 // CI fails a diff touching a path mapped to a screen or system doc whose

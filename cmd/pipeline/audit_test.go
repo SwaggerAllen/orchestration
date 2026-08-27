@@ -105,6 +105,46 @@ func TestAuditRunsTheDocLintAgainstTheProjectsDocs(t *testing.T) {
 	}
 }
 
+// The citation sweep reaches outside docs/, which is the finding
+// ORC-143 says matters most and the one the natural scoping misses.
+//
+// Catapult's own manual audit swept docs/, systems/, CLAUDE.md and
+// bundles/, reported clean, and left 22 dangling citations in lib/,
+// components/ and test/. Two sat inside error message strings, so the
+// project's own audit was telling developers to read an entry that no
+// longer existed.
+func TestAuditResolvesSectionCitationsOutsideTheDocsTree(t *testing.T) {
+	root := project(t)
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "spec.md"),
+		[]byte("# Spec\n## 7. Machinery\n### 7.8 Containers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A dangling citation in lib/, not in docs/ — and inside a string
+	// literal, which is where the two worst real ones were.
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "lib", "audit.ex"),
+		[]byte(`raise "see docs/spec.md §9.9 for the rule"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	err := cmdAudit([]string{
+		"--config", filepath.Join(root, "pipeline.config.json"),
+		"--root", root,
+		"--changed-files", listFile(t, "README.md"),
+		"--labels", "system:billing",
+	})
+	if err == nil {
+		t.Fatal("audit passed a citation of docs/spec.md §9.9, which that document does not have — " +
+			"scoped to docs/ this is exactly the class that stays dangling")
+	}
+}
+
 // An explicit --root still wins: the agents run the audit by hand from
 // inside a project checkout, and that has to keep working.
 func TestAuditHonoursAnExplicitRoot(t *testing.T) {
