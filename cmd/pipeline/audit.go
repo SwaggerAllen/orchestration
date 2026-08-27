@@ -205,7 +205,20 @@ func cmdAudit(args []string) error {
 	if err != nil {
 		return err
 	}
-	dangling, err := citations.Sweep(*root, cited)
+	// Only path-bearing entries reach the sweep. An `unchecked` entry —
+	// a shorthand the project has recorded as unresolvable here, another
+	// repository's docs or a licence text — is left out, so the sweep
+	// treats it exactly as it treats a token the map has never heard of.
+	// That is the whole of the rule: resolve a path when there is one,
+	// skip otherwise. Dropping them here rather than branching inside
+	// the sweep is what keeps it one rule instead of two.
+	shorthands := map[string]string{}
+	for name, sh := range cfg.CitationShorthands {
+		if sh.Path != "" {
+			shorthands[name] = sh.Path
+		}
+	}
+	dangling, err := citations.Sweep(*root, cited, shorthands)
 	if err != nil {
 		return err
 	}

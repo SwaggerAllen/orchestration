@@ -22,18 +22,15 @@
 //
 // # What this does not cover, stated because a green run must not overclaim
 //
-// Two thirds of section citations name their document by a project
-// shorthand — `v5 §7.8`, `conventions §2` — 564 of them against 132
-// explicit. Resolving those needs the project's own `citationShorthands`
-// table, declared on config.Config and read by a later change than this
-// one. Until a project writes it, a shorthand citation is not checked
-// and does not fail.
+// Most section citations name their document by a project shorthand —
+// `v5 §7.8`, `conventions §2`, `dsl-syntax.md §15.1` — 896 of them
+// against 33 explicit paths on Catapult's tree. They resolve through the
+// project's own `citationShorthands` table, and a project that has not
+// written one gets the explicit-path coverage alone: a shorthand nobody
+// declared is not checked and does not fail.
 //
-// The field is declared before any project config may carry it, and
-// that order is forced rather than tidy: config.Load rejects unknown
-// fields at every level, so a config naming the key against a binary
-// without it fails to load and the whole sweep stops. It is the
-// protocol-state rule inverted — same strictness, opposite end.
+// The table is a whitelist and lookup is case-sensitive, both for the
+// same reason — see resolve and Sweep, where each is applied.
 //
 // Prose references — "docs/non-goals.md names for theme tokens" — carry
 // no section and are not decidable at all. ORC-143's own flagship
@@ -83,25 +80,38 @@ import (
 // spaces — rather than `.*`. A permissive gap matches across sentence
 // boundaries and pairs a document with a section number belonging to
 // something else, which is the same false failure from the other side.
-var cite = regexp.MustCompile("([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+\\.md)[`']{0,2}(?:s)?[ ,]{0,3}§([0-9]+(?:\\.[0-9]+)*)")
+var cite = regexp.MustCompile("((?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+)[`']{0,2}(?:s)?[ ,]{0,3}§((?:[A-Z]\\.)?[0-9]+(?:\\.[0-9]+)*)")
 
 // heading matches a numbered markdown heading: `### 7.8 Containers...`.
 // The number is what a citation resolves against; the text after it is
 // free to be rewritten, which is the point of citing a rule by number
 // rather than by the shape of the document.
-var heading = regexp.MustCompile(`^#+[ \t]+([0-9]+(?:\.[0-9]+)*)\.?[ \t]`)
+//
+// The number may carry a part letter — `### A.1.4 Reviews`. Catapult's
+// vendored v4 spec numbers every section that way, and 17 citations of
+// it write the letter. Without this they resolve against nothing and a
+// correct citation is reported as dangling, which is the false-failure
+// class this package exists to avoid rather than create.
+var heading = regexp.MustCompile(`^#+[ \t]+((?:[A-Z]\.)?[0-9]+(?:\.[0-9]+)*)\.?[ \t]`)
 
 // A Problem is one citation that does not resolve.
 type Problem struct {
 	Path    string // the file holding the citation
 	Line    int
-	Doc     string // the document cited
+	Doc     string // the document as the citation writes it
+	Via     string // the path a shorthand resolved to, empty for an explicit path
 	Section string // the section named
 	Why     string
 }
 
 func (p Problem) String() string {
-	return fmt.Sprintf("%s:%d: cites %s §%s, which %s", p.Path, p.Line, p.Doc, p.Section, p.Why)
+	// A shorthand is named as written and then as resolved. The writer
+	// searches for what they typed; the reader fixing it needs the file.
+	doc := p.Doc
+	if p.Via != "" {
+		doc = fmt.Sprintf("%s (%s)", p.Doc, p.Via)
+	}
+	return fmt.Sprintf("%s:%d: cites %s §%s, which %s", p.Path, p.Line, doc, p.Section, p.Why)
 }
 
 // Sweep resolves every explicit-file section citation in paths against
@@ -111,11 +121,22 @@ func (p Problem) String() string {
 // than skipped: a citation naming a file that no longer exists is the
 // same defect as one naming a section that no longer exists, and
 // skipping it silently is how the check loses the case it was built for.
-func Sweep(root string, paths []string) ([]Problem, error) {
+// shorthands maps a project's own name for a document to its
+// repo-relative path. Only entries that name a path belong in it: an
+// entry recording why a shorthand cannot resolve is left out by the
+// caller, which is what makes "unchecked" and "absent from the map" one
+// behaviour here rather than two branches.
+//
+// Lookup is case-sensitive, and that is the whitelist holding. Folding
+// case would resolve prose like "the design §4 said" against a DESIGN
+// entry — `design` is an ordinary word in these corpora, and a
+// whitelist whose keys silently widen to every capitalisation is not a
+// whitelist. A project spelling one shorthand two ways lists both.
+func Sweep(root string, paths []string, shorthands map[string]string) ([]Problem, error) {
 	sections := map[string]map[string]bool{}
 	var out []Problem
 	for _, rel := range paths {
-		found, err := scan(root, rel, sections)
+		found, err := scan(root, rel, sections, shorthands)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +151,7 @@ func Sweep(root string, paths []string) ([]Problem, error) {
 	return out, nil
 }
 
-func scan(root, rel string, sections map[string]map[string]bool) ([]Problem, error) {
+func scan(root, rel string, sections map[string]map[string]bool, shorthands map[string]string) ([]Problem, error) {
 	f, err := os.Open(filepath.Join(root, rel))
 	if err != nil {
 		return nil, nil // unreadable inputs are the caller's to enumerate
@@ -142,14 +163,18 @@ func scan(root, rel string, sections map[string]map[string]bool) ([]Problem, err
 	s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for line := 1; s.Scan(); line++ {
 		for _, m := range cite.FindAllStringSubmatch(s.Text(), -1) {
-			doc, section := m[1], m[2]
+			written, section := m[1], m[2]
+			doc, via, ok := resolve(written, shorthands)
+			if !ok {
+				continue
+			}
 			have, err := sectionsOf(root, doc, sections)
 			if err != nil {
-				out = append(out, Problem{rel, line, doc, section, err.Error()})
+				out = append(out, Problem{rel, line, written, via, section, err.Error()})
 				continue
 			}
 			if !have[section] {
-				out = append(out, Problem{rel, line, doc, section,
+				out = append(out, Problem{rel, line, written, via, section,
 					"names no section in that document"})
 			}
 		}
@@ -195,4 +220,34 @@ func sectionsOf(root, doc string, cache map[string]map[string]bool) (map[string]
 	}
 	cache[doc] = have
 	return have, nil
+}
+
+// resolve turns the token a citation writes into the document it names.
+// It reports false for a token that names no document, which is the
+// common case and must stay silent: most words before a `§` are prose
+// introducing a back-reference to the same file — `and §3`, `see §2`,
+// `per §7` — 285 of them across 120 ordinary English words in one
+// project's tree. None is a citation, and a matcher that treated them
+// as one would report the whole corpus.
+//
+// Two shapes name a document. A token carrying a directory is a path,
+// and must end .md to be one: that requirement is the fix for a
+// measured false-positive class, where anchoring on `docs/` matched the
+// substring inside `seed-docs/...` and reported correct citations as
+// dangling. A token without a directory names a document only if the
+// project declared it, which is why a bare `dsl-syntax.md` — 190 of
+// them, and no such file at the repo root — resolves through the map or
+// not at all rather than being read as a path.
+func resolve(written string, shorthands map[string]string) (doc, via string, ok bool) {
+	if strings.Contains(written, "/") {
+		if !strings.HasSuffix(written, ".md") {
+			return "", "", false
+		}
+		return written, "", true
+	}
+	path, declared := shorthands[written]
+	if !declared {
+		return "", "", false
+	}
+	return path, path, true
 }
