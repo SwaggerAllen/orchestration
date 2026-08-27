@@ -323,3 +323,74 @@ func TestAuditResolvesShorthandCitationsFromTheProjectConfig(t *testing.T) {
 		t.Fatal("audit passed v5 §9.9 — the config's shorthand map never reached the sweep")
 	}
 }
+
+// A shorthand nothing cites is reported, and the audit still passes.
+//
+// Both halves are the test. The report is the point of the check; the
+// exit code is the constraint that makes it shippable, because the only
+// file that can answer it — `pipeline.config.json` — is author-owned
+// (DESIGN §5). Gating would leave a ticket red with every file it
+// needed closed to it.
+func TestAuditProposesAnUncitedShorthandWithoutFailing(t *testing.T) {
+	root := project(t)
+	cfg := config.Sample()
+	cfg.CitationShorthands = map[string]config.CitationShorthand{
+		"v5":     {Path: "docs/spec.md"},
+		"v4":     {Path: "docs/spec.md"},
+		"DESIGN": {Unchecked: "another repository's docs"},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pipeline.config.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "spec.md"),
+		[]byte("# Spec\n## 7. Machinery\n### 7.8 Containers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// v5 is cited and DESIGN is cited-but-unchecked, so both are in
+	// use. v4 is named nowhere before a §, and `v4` in this sentence is
+	// not a use either.
+	if err := os.WriteFile(filepath.Join(root, "lib", "ok.ex"),
+		[]byte("# v5 §7.8, DESIGN §5, and a bare mention of v4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	var auditErr error
+	out := captureStdout(t, func() {
+		auditErr = cmdAudit([]string{
+			"--config", filepath.Join(root, "pipeline.config.json"),
+			"--root", root,
+			"--changed-files", listFile(t, "README.md"),
+			"--labels", "system:billing",
+		})
+	})
+	if auditErr != nil {
+		t.Fatalf("an uncited shorthand failed the audit: %v — it is a proposal, and its fix is author-owned", auditErr)
+	}
+	// Read the prune line alone. The audit's other lines cite DESIGN §5
+	// themselves, so a substring search over the whole output would
+	// pass whatever the check reported.
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "citation shorthands") {
+			line = l
+		}
+	}
+	if line == "" {
+		t.Fatalf("no prune line in the audit's output: %s", out)
+	}
+	names, _, _ := strings.Cut(strings.TrimPrefix(line, "citation shorthands no citation names: "), " —")
+	if names != "v4" {
+		t.Errorf("prune candidates = %q, want just v4: v5 and DESIGN are both cited", names)
+	}
+}

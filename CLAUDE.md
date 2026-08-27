@@ -166,6 +166,19 @@ suppressed gate re-blinds itself to the next finding — the reasoning
 `mix.exs`'s own `ignore_advisories` already carries. A gate whose output
 nobody has read on a real corpus is a guess about that corpus.
 
+Read the output again once the shorthand map landed, and the lesson
+repeats one level up: **59 findings on Catapult, 4 of them rot.** The
+message is accurate on every one and the diagnosis is still not in it.
+34 were correct citations of a *second* document — that project spends
+one `v4` shorthand on both a spec numbered `A.1.4` and a bundle
+reference numbered `1.4`, and a map entry holds one path, so every
+bare-numbered citation resolved against the wrong file. 19 cited a
+numbered list item under a heading, which §4 rules dangling on purpose.
+2 were prose quoting a bad citation. A count of findings is not a count
+of defects, and the first session to read this list took the largest
+class for a config that could not resolve rather than one pointed at the
+wrong document.
+
 ## The project repos are not this repo
 
 `pipeline.config.json` and `.github/workflows/**` are author-owned in

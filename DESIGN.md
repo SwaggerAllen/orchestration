@@ -425,6 +425,16 @@ outnumbers the explicit form by more than twenty to one, and resolves through
 reference carries no section and is not decidable at all. So the audit's citation line is a
 statement about two forms, never about the documents being sound.
 
+**Prose that quotes a bad citation is read as making one, and there is no escape comment.** A
+document warning against a citation has to write it down to name it, and the adjacency is all
+the check reads — two of these sat in one project's tree, both in sentences explaining the very
+mistake they were reported for. The project rewrites the sentence to describe the mistake
+rather than spell it, which is the deliberate answer and not a workaround waiting on a feature:
+an escape comment here would be a suppression on a check whose whole value is that it cannot be
+argued with, and the one it copied — `# catapult:allow` — is honest only because an unused tag
+is itself reported. Nothing here could report an unused escape, because a suppressed citation
+looks exactly like a resolved one.
+
 **The map is a whitelist, and lookup is case-sensitive.** A token before a `§` names a document
 only if the project declared it. That is what keeps prose out: 285 bare back-references across
 120 ordinary English words — `and §3`, `see §2`, `per §7` — sit before a `§` in one project's
@@ -443,6 +453,23 @@ Each entry carries either a `path`, the project-relative document the shorthand 
 repository's docs, a licence text. Behaviourally `unchecked` matches leaving the shorthand out
 of the table; what it buys is the record, so the next pass to notice a shorthand going
 unchecked does not invent a path for it and turn correct citations red.
+
+**A shorthand no citation names is proposed for pruning, never gated.** A whitelist that only
+grows stops describing the corpus it was written for: an entry outlives the last citation
+needing it in silence, and the next pass to read the map takes it as evidence that the
+shorthand is in use. Catapult's `# catapult:allow` escape prunes itself exactly this way — a
+tag covering no violation is reported — and the reasoning carries over. Who can act is where
+the two part, and it is why this one cannot gate: that escape sits in the file the ticket is
+already editing, while this map sits in `pipeline.config.json`, author-owned (§5). A gate would
+leave a ticket red for a config state it did not create, with every file it needed closed to
+it — the dead end `author-only` exists to prevent (§8), reached by accident instead of by
+label. Naming a shorthand is not citing it: the check reads the document half of a citation
+through the same grammar as the sweep, so a key written down in prose about the map does not
+excuse itself, and a check that counted such mentions would report nothing for exactly the
+entries worth pruning. `unchecked` entries count, because a record nothing cites has the same
+problem as a path nothing cites. A shorthand whose citations all dangle is in use: pruning it
+would delete the entry that makes those citations checkable and turn a reported defect into a
+silent one.
 
 **The field is declared here before a project config may carry it, which is the opposite of the
 rule for a new protocol state.** `config.Load` rejects unknown fields — at every level, not only
