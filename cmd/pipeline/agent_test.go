@@ -710,6 +710,14 @@ func TestDesignRolePromptScopesNeverDeleteToTheNonAsksFile(t *testing.T) {
 		{"not the alternatives you passed over", "the bounded rule the docs actually need"},
 		{"superseding a rule means rewriting it", "or a correction gets appended beside the stale sentence"},
 		{"merely disagree", "or rewriting becomes licence to delete a refusal the pass dislikes"},
+		// The four the cleanup audit turned up. Each is a generator the
+		// bounded rule above does not close on its own, and each was
+		// measured rather than imagined — so each is asserted rather
+		// than left as prose a later trim can thin out.
+		{"a check that passed is not a finding", "the commonest bloat is a pass recording that nothing changed"},
+		{"cite a rule, never the shape of another document", "shape citations rot when the cited doc is edited"},
+		{"not only `docs/**`", "bundle content and code comments cite these docs and rot the same way"},
+		{"expiry you do not control", "\"not built\" outlives the condition, often within its own ticket"},
 	} {
 		if !strings.Contains(lower, strings.ToLower(want.text)) {
 			t.Errorf("prompts/design.md does not carry %q — %s", want.text, want.why)
