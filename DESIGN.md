@@ -419,11 +419,24 @@ strings, so the project's own audit was telling developers to read an entry that
 existed. Text rots without anyone touching it, which is why this is a recurring check and not a
 rule a prompt can carry.
 
-Two forms are deliberately outside it. A citation naming its document by a project shorthand —
-`v5 §7.8`, `conventions §2` — outnumbers the explicit form four to one, and resolving it needs
-`citationShorthands` in `pipeline.config.json`. A prose reference carries no section and is not
-decidable at all. So the audit's citation line is a statement about one form, never about the
-documents being sound.
+A citation naming its document by a project shorthand — `v5 §7.8`, `conventions §2` —
+outnumbers the explicit form by more than twenty to one, and resolves through
+`citationShorthands` in `pipeline.config.json`. One form stays outside the check: a prose
+reference carries no section and is not decidable at all. So the audit's citation line is a
+statement about two forms, never about the documents being sound.
+
+**The map is a whitelist, and lookup is case-sensitive.** A token before a `§` names a document
+only if the project declared it. That is what keeps prose out: 285 bare back-references across
+120 ordinary English words — `and §3`, `see §2`, `per §7` — sit before a `§` in one project's
+tree, and a resolver reading the preceding word as a document name reports the corpus rather
+than its defects. Case-sensitivity is the same guard one level down: folding case resolves "the
+design §4 said" against a `DESIGN` entry, and a whitelist whose keys silently widen to every
+capitalisation is not a whitelist. A project spelling one shorthand two ways lists both.
+
+A section number may carry a part letter — `§A.1.4`, `§B.3.2` — because a cited document may
+number that way. A citation resolves against a heading's own number or any prefix of it, so
+`§7` is satisfied by `§7.8`; the reverse does not hold, and `§7.12.1` is dangling when the
+document stops at `§7.12`.
 
 Each entry carries either a `path`, the project-relative document the shorthand names, or an
 `unchecked` string recording why no path in this repository can resolve it — another

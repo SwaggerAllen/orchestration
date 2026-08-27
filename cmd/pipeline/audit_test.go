@@ -268,3 +268,58 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	return b.String()
 }
+
+// The wiring test: a shorthand in a project's own config has to reach
+// the sweep, or steps 1 and 2 pass their unit tests separately while the
+// gate checks nothing new. Both halves in one run — a live shorthand
+// stays silent, a dangling one fails the audit.
+func TestAuditResolvesShorthandCitationsFromTheProjectConfig(t *testing.T) {
+	root := project(t)
+	cfg := config.Sample()
+	cfg.CitationShorthands = map[string]config.CitationShorthand{
+		"v5":     {Path: "docs/spec.md"},
+		"DESIGN": {Unchecked: "another repository's docs"},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pipeline.config.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "spec.md"),
+		[]byte("# Spec\n## 7. Machinery\n### 7.8 Containers\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// v5 §7.8 resolves; DESIGN §5 is unchecked and must stay silent.
+	if err := os.WriteFile(filepath.Join(root, "lib", "ok.ex"),
+		[]byte("# v5 §7.8 and DESIGN §5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+
+	args := []string{
+		"--config", filepath.Join(root, "pipeline.config.json"),
+		"--root", root,
+		"--changed-files", listFile(t, "README.md"),
+		"--labels", "system:billing",
+	}
+	if err := cmdAudit(args); err != nil {
+		t.Fatalf("audit failed on a live shorthand and an unchecked one: %v", err)
+	}
+
+	// Now dangle it.
+	if err := os.WriteFile(filepath.Join(root, "lib", "ok.ex"),
+		[]byte("# v5 §9.9\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdAudit(args); err == nil {
+		t.Fatal("audit passed v5 §9.9 — the config's shorthand map never reached the sweep")
+	}
+}
