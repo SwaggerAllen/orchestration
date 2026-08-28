@@ -66,6 +66,14 @@ const (
 	// one — Linear manages it when the team enables Triage — but the
 	// boundary agent files proposals into it when it exists (DESIGN §10).
 	CategoryTriage Category = "triage"
+	// CategoryDuplicate is Linear's own type for its built-in Duplicate
+	// state, and it is a type of its own rather than a flavour of
+	// `canceled`. Setup never creates one; it is declared so the plane
+	// can read a ticket someone marked Duplicate in the UI, and so the
+	// in-memory tracker can be given the category Linear actually
+	// returns. Without it the fake rejected the real value, which is how
+	// a regression test for this state came to seed a different one.
+	CategoryDuplicate Category = "duplicate"
 )
 
 // Categories assigns each canonical state its tracker category. Queue states

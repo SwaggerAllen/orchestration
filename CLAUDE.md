@@ -83,6 +83,32 @@ cached `ok` re-ran the test and failed it. A `(cached)` line is not a
 reason to distrust a result, and `go clean -testcache` between probes is
 insurance, not a requirement.
 
+## A fake that rejects a real value hides the bug it was built to catch
+
+`tracker.Memory` validates state categories against a fixed list, which is
+the right shape — it enforces Linear's one-category-per-state rule so
+setup is tested against the real constraint. But the list was a copy of
+what `protocol` happened to declare, and it was missing `duplicate`, the
+type Linear gives its own built-in Duplicate state.
+
+So the regression test for "a ticket marked Duplicate must not take the
+sweep down" could not seed a Duplicate. It named its state `"Duplicate"`
+and gave it `CategoryCanceled`, the fake accepted that, the plane read it,
+and the test passed — on a state Linear never produces. The fake and the
+code under test agreed with each other while both disagreed with the
+tracker, and the incident the test was written for stayed live behind a
+green suite for a milestone.
+
+Measured against the real tracker, not inferred: the Orchestration team's
+own state list returns `{"type":"duplicate","name":"Duplicate"}`, and all
+seven of Linear's types appear in it.
+
+The lesson generalises past this one field. **When a fake enumerates what
+the real system may return, that enumeration is a claim about the real
+system** — and it is the kind of claim that fails silently, because
+narrowing it does not break a test, it deletes one. Check such a list
+against the live API rather than against the constants beside it.
+
 ## The sim asserts what you tell it to assert
 
 `internal/sim` runs a scenario to convergence and checks its `expect`

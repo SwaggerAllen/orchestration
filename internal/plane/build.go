@@ -223,6 +223,25 @@ func (p *Plane) Build(ctx context.Context, now time.Time, killSwitch bool) (*cor
 					st = protocol.Canceled
 				case protocol.CategoryCompleted:
 					st = protocol.Done
+				case protocol.CategoryDuplicate:
+					// Linear's built-in Duplicate is its own category
+					// rather than a flavour of `canceled`, and it is the
+					// state the ORC-47 incident was actually about. The
+					// first fix read `canceled` and `completed` and was
+					// believed to cover this; it did not, because the
+					// regression test seeded `canceled` under the name
+					// "Duplicate" — the category did not exist and the
+					// in-memory tracker rejected the real value, so the
+					// fake and this switch agreed with each other while
+					// both disagreed with the tracker.
+					//
+					// Canceled rather than Done: a duplicate was
+					// discarded, not finished. Either answers the only
+					// question the sweep asks — it is resolved and not in
+					// the queue — but the two are read apart by the
+					// revert rules, and reporting discarded work as
+					// completed would be a lie the board carries.
+					st = protocol.Canceled
 				}
 			}
 			if st == "" {

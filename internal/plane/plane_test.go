@@ -372,19 +372,25 @@ func TestFileTriageProposalSurvivesAMissingAuthorOnlyLabel(t *testing.T) {
 }
 
 // One ticket in an unmapped state used to make the whole project's
-// snapshot unreadable. Marking ORC-47 with Linear's built-in Duplicate
-// state — two taps in the UI, not a misconfiguration — took every sweep
-// on Catapult down for about two hours and roughly thirty runs.
+// snapshot unreadable — every sweep on Catapult down for about two hours
+// and roughly thirty runs, on a tracker action that looks like
+// housekeeping.
 //
 // A resolved state the config does not name is still readable: its
 // category answers the only question the pipeline has, which is that the
 // ticket is finished and not in the queue. Failing loudly stays the rule
 // where guessing could put work in the queue nobody put there.
+//
+// The states here are a team's own additions, which is what makes them
+// unmapped while carrying a category that settles them. Linear's
+// built-in Duplicate is a *third* category and has its own test — this
+// one used to claim it, under a state named "Duplicate" that was seeded
+// `canceled`, and claiming it is how it went unnoticed.
 func TestBuildReadsUnmappedResolvedStatesByCategory(t *testing.T) {
 	ctx := context.Background()
 	tr, cfg, p := world(t)
 
-	dup, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Duplicate", Category: protocol.CategoryCanceled})
+	wontDo, err := tr.CreateState(ctx, cfg.Tracker.TeamID, tracker.NewState{Name: "Won't do", Category: protocol.CategoryCanceled})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,10 +398,10 @@ func TestBuildReadsUnmappedResolvedStatesByCategory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicate := seedIssue(t, tr, cfg, "Filed twice", protocol.Todo)
+	declined := seedIssue(t, tr, cfg, "Not doing this", protocol.Todo)
 	released := seedIssue(t, tr, cfg, "Out the door", protocol.Todo)
 	bystander := seedIssue(t, tr, cfg, "Ordinary work", protocol.Todo)
-	if err := tr.UpdateIssueState(ctx, duplicate.ID, dup.ID); err != nil {
+	if err := tr.UpdateIssueState(ctx, declined.ID, wontDo.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := tr.UpdateIssueState(ctx, released.ID, shipped.ID); err != nil {
@@ -407,7 +413,7 @@ func TestBuildReadsUnmappedResolvedStatesByCategory(t *testing.T) {
 		t.Fatalf("one ticket's state broke the whole snapshot: %v", err)
 	}
 	want := map[string]protocol.State{
-		duplicate.ID: protocol.Canceled,
+		declined.ID:  protocol.Canceled,
 		released.ID:  protocol.Done,
 		bystander.ID: protocol.Todo,
 	}
@@ -467,5 +473,48 @@ func TestBuildDegradesOneTicketsUnreadableVerdict(t *testing.T) {
 	}
 	if got[queued.ID] == nil {
 		t.Error("a ticket with no PR at all went missing from the snapshot")
+	}
+}
+
+// Linear's built-in Duplicate carries its own category, not `canceled`,
+// and that is the state the ORC-47 incident was actually about: two taps
+// in the UI took every sweep on Catapult down for two hours.
+//
+// The fix for that incident read an unmapped state by category and was
+// believed to cover this. It did not. `TestBuildReadsUnmappedResolvedStatesByCategory`
+// names its state "Duplicate" but seeds it as `CategoryCanceled`, and it
+// could not do otherwise — the category did not exist and the in-memory
+// tracker rejected the real value. So the fake and the plane agreed with
+// each other while both disagreed with Linear, and the test passed on a
+// state Linear never produces.
+func TestBuildReadsLinearsOwnDuplicateCategory(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+
+	dup, err := tr.CreateState(ctx, cfg.Tracker.TeamID,
+		tracker.NewState{Name: "Duplicate", Category: protocol.CategoryDuplicate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filedTwice := seedIssue(t, tr, cfg, "Filed twice", protocol.Todo)
+	bystander := seedIssue(t, tr, cfg, "Ordinary work", protocol.Todo)
+	if err := tr.UpdateIssueState(ctx, filedTwice.ID, dup.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("one ticket marked Duplicate broke the whole project's snapshot: %v", err)
+	}
+	got := map[string]protocol.State{}
+	for _, tk := range snap.Tickets {
+		got[tk.ID] = tk.State
+	}
+	// Canceled rather than Done: a duplicate was discarded, not finished.
+	if got[filedTwice.ID] != protocol.Canceled {
+		t.Errorf("the duplicate read as %q, want %q", got[filedTwice.ID], protocol.Canceled)
+	}
+	if got[bystander.ID] != protocol.Todo {
+		t.Errorf("the bystander read as %q, want %q", got[bystander.ID], protocol.Todo)
 	}
 }
