@@ -93,7 +93,8 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 			case host.ChecksGreen:
 				t.CI = core.CIInfo{Status: core.CIGreen, RunURL: checks.RunURL}
 			case host.ChecksRed:
-				t.CI = core.CIInfo{Status: core.CIRed, RunURL: checks.RunURL, FailedJobs: checks.FailedJobs}
+				t.CI = core.CIInfo{Status: core.CIRed, RunURL: checks.RunURL,
+					RunAttempt: checks.RunAttempt, FailedJobs: checks.FailedJobs}
 			case host.ChecksPending:
 				t.CI = core.CIInfo{Status: core.CIPending}
 			}

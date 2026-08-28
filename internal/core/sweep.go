@@ -608,15 +608,21 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 				Reason: "reconcile the green PR against the argument"},
 		}
 	case CIRed:
-		if t.CI.RunURL == "" || hasMarkerField(t, marker.CIRed, "run", t.CI.RunURL) {
+		if t.CI.RunURL == "" || alreadyReportedCIRed(t, t.CI.RunURL, t.CI.RunAttempt) {
 			// Already recorded (or unidentifiable); the earlier sweep
 			// moved the ticket. Nothing new to say.
 			return nil
 		}
 		attempt := len(markersOf(t, marker.CIRed)) + 1
 		m := &marker.Marker{Kind: marker.CIRed, Fields: map[string]string{
-			"run":     t.CI.RunURL,
-			"attempt": fmt.Sprintf("%d", attempt),
+			"run": t.CI.RunURL,
+			// Two different counts, and conflating them is the bug this
+			// separates. `attempt` counts failures on this branch and
+			// escalates at two; `run_attempt` is GitHub's attempt number
+			// on the one run, which a re-run increments while the id and
+			// the URL stay put.
+			"run_attempt": fmt.Sprintf("%d", normalizeRunAttempt(t.CI.RunAttempt)),
+			"attempt":     fmt.Sprintf("%d", attempt),
 		}}
 		if attempt >= 2 {
 			return block(t, m,

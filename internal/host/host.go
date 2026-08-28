@@ -65,6 +65,13 @@ const (
 type Checks struct {
 	Status CheckStatus
 	RunURL string
+	// RunID and RunAttempt identify the failing run itself, which the
+	// URL cannot: a re-run keeps the same id and the same URL and only
+	// increments the attempt. Both are needed — the id to ask for a
+	// re-run, the attempt to tell one verdict from the next on the same
+	// run. Zero when nothing failed.
+	RunID      int64
+	RunAttempt int
 	// FailedJobs names the checks that are not green, so the failure
 	// comment can say what broke. DESIGN §12 always described the comment
 	// as "naming the failing jobs and linking the run"; for a long time it
@@ -106,6 +113,25 @@ type Host interface {
 	ListAgentRuns(ctx context.Context) ([]AgentRun, error)
 	ListOpenPRs(ctx context.Context) ([]PR, error)
 	ChecksFor(ctx context.Context, headSHA string) (Checks, error)
+	// RerunRun asks for a completed run to run again. It is how a
+	// verdict is refreshed when the thing that invalidated it was not a
+	// commit — a mutex label the audit reads is the case that forced
+	// this (DESIGN §12).
+	//
+	// Measured before being relied on, because the obvious worry is
+	// real elsewhere: GitHub does not start a workflow run from an
+	// *event* created with GITHUB_TOKEN. A re-run is an API instruction
+	// rather than an event and is not covered by that rule — a re-run
+	// issued with a workflow's own GITHUB_TOKEN and `actions: write`
+	// took a run from attempt 1 to attempt 2, keeping `event:
+	// pull_request`, with `github-actions[bot]` as the triggering
+	// actor. The sweep already declares that permission.
+	//
+	// The new attempt is not visible immediately: `run_attempt` still
+	// read 1 on a poll taken straight after the 201 and 2 about six
+	// seconds later. A caller that reads once and concludes nothing
+	// happened will be wrong.
+	RerunRun(ctx context.Context, runID int64) error
 	// MergeStateFor reports whether a PR can land on its base.
 	//
 	// Separate from ListOpenPRs because the list endpoint does not carry

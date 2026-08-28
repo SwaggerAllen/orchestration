@@ -39,7 +39,10 @@ type Memory struct {
 	// SHA rather than a flag, because the property worth testing is that
 	// *one* ticket's unreadable verdict costs only that ticket.
 	FailChecksFor map[string]bool
-	nextPR        int
+	// Reruns records RerunRun calls in order, so a test can assert the
+	// harness asked — separately from asserting the attempt moved.
+	Reruns []int64
+	nextPR int
 }
 
 // Deployment is one recorded deployment.
@@ -101,6 +104,34 @@ func (m *Memory) ChecksFor(_ context.Context, headSHA string) (Checks, error) {
 		return Checks{}, fmt.Errorf("memory host: checks for %s are refused (HTTP 403)", headSHA)
 	}
 	return m.CheckState[headSHA], nil
+}
+
+// RerunRun models what the real re-run does to a verdict, which is the
+// only part callers can observe: the run keeps its id and its URL, its
+// attempt increments, and it stops being completed until the new
+// attempt finishes. A fake that merely recorded the call would let a
+// caller "confirm" a re-run by asking a question whose answer never
+// changes — and confirming the attempt moved is the whole point, since
+// a re-run that returns 201 and starts nothing is the failure worth
+// catching (`internal/host`.Host.RerunRun).
+//
+// Unknown run ids are refused rather than ignored: asking to re-run
+// something that is not there is a caller bug, and a fake that shrugs
+// hides it.
+func (m *Memory) RerunRun(_ context.Context, runID int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for sha, c := range m.CheckState {
+		if c.RunID != runID {
+			continue
+		}
+		c.RunAttempt++
+		c.Status = ChecksPending
+		m.CheckState[sha] = c
+		m.Reruns = append(m.Reruns, runID)
+		return nil
+	}
+	return fmt.Errorf("memory host: no run %d to re-run", runID)
 }
 
 // MergeStateFor answers from the same Unmergeable set MergePR refuses

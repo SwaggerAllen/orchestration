@@ -375,6 +375,19 @@ func (c *Client) MergeStateFor(ctx context.Context, number int) (host.MergeState
 	return host.MergeClean, nil
 }
 
+// RerunRun re-runs every job of a completed run, keeping the run's id
+// and its original event — which is the reason it is a re-run and not a
+// fresh dispatch. `workflow_dispatch` would fail three ways over: a
+// project's ci.yml declares `on: pull_request` and would not accept it;
+// outside a pull_request event `github.head_ref` is empty, so the
+// audit's own gate skips and the run reports a green that checked
+// nothing; and runsForSHA drops `workflow_dispatch` runs on purpose, so
+// the verdict would never be read even if it were right.
+func (c *Client) RerunRun(ctx context.Context, runID int64) error {
+	path := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun", c.owner, c.repo, runID)
+	return c.rest(ctx, http.MethodPost, path, nil, nil)
+}
+
 func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, error) {
 	runs, err := c.runsForSHA(ctx, headSHA)
 	if err != nil {
@@ -399,6 +412,7 @@ func (c *Client) ChecksFor(ctx context.Context, headSHA string) (host.Checks, er
 		// marker has always carried.
 		if red.RunURL == "" {
 			red.RunURL = r.HTMLURL
+			red.RunID, red.RunAttempt = r.ID, r.RunAttempt
 		}
 		// Every failing job is named, not just the first — a build that
 		// broke three jobs is a different fact from one that broke one,
@@ -433,6 +447,9 @@ type workflowRun struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion"`
 	HTMLURL    string `json:"html_url"`
+	// RunAttempt separates one verdict from the next on the same run.
+	// The id and the URL do not: a re-run keeps both.
+	RunAttempt int `json:"run_attempt"`
 }
 
 // runsForSHA lists the Actions runs that judged a commit.
