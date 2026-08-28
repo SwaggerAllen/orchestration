@@ -1907,7 +1907,32 @@ read and no author reliably remembers.
 - **CI red twice on the same branch → `Blocked`.** The count is the count of the control
   plane's own failure-comment markers on the ticket — nothing else needs to be stored, and a
   marker can't be miscounted the way an agent's prose can. Two reds on one branch is rarely a
-  flake; the author decides whether it's scope, design, or infrastructure.
+  flake; the author decides whether it's scope, design, or infrastructure. **One failure read
+  twice is not two**, and a verdict is identified by the run *and the attempt of it*: a re-run
+  keeps the run's id and its URL and increments only the attempt, so keying on the URL alone
+  reads a re-run's own failure as the one already recorded and says nothing about a real
+  failure. That silence is the worse half — the ticket sits in `Checks` with red CI and no
+  comment naming it.
+- **A label the harness attaches invalidates the verdict, so the harness re-runs it.** The
+  audit reads the ticket's labels as well as the diff, so a mutex label attached from a run's
+  outcome is an input the standing verdict never saw. Nothing in the commit changed, so
+  nothing re-triggers CI on its own — and a rework whose whole remedy is metadata is a
+  legitimate outcome (§7) with no commit to produce. Left alone the pre-label failure is
+  published as a second red and a single real failure escalates to `Blocked`, which is where
+  ORC-148 sat with nothing inside the pipeline able to clear it.
+  The re-run happens where the label is attached, before the transition, for the reason the
+  label is attached there: on the other side of it the sweep reads the verdict, and one
+  refreshed afterwards is refreshed too late. **A re-run, never a fresh dispatch** — a re-run
+  replays the original `pull_request` event, and the audit's gate reads `github.head_ref`,
+  which is empty outside that event, so a dispatched run skips the audit and reports a green
+  that checked nothing. Only a red verdict is refreshed: the audit fails on a mapped path
+  whose label is absent, so attaching one removes violations and never adds any, and a green
+  verdict stays green under a larger label set.
+  **Accepted is not started.** The re-run is confirmed by watching the attempt move, not by
+  the HTTP status, because a call that returns success and starts nothing is the failure worth
+  catching. When it cannot be confirmed the ticket is told so in the same comment that records
+  the label, and the finish continues — failing a run that did exactly the right thing is the
+  outcome this route exists to prevent.
 - **A passing reconciliation that cannot merge → the conflict comment, then `Ready for rework`.**
   The branch conflicts with something that landed while the ticket was in flight. The verdict
   stood: the work is right and the branch is stale, which are different problems with different

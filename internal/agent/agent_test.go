@@ -1207,3 +1207,80 @@ func TestWithPreparedSummaryAppendsNothingWhenThereIsNoArgument(t *testing.T) {
 		}
 	}
 }
+
+// labelWorld is a project whose systems/ maps one path, so a discovered
+// label has a real doc to resolve against and a real diff to be needed by.
+func labelWorld(t *testing.T) (*tracker.Memory, *host.Memory, *config.Config, *plane.Plane) {
+	t.Helper()
+	tr, h, cfg, p := world(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "systems"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "systems", "billing.md"),
+		[]byte("---\npaths:\n  - lib/app/billing/**\n---\n\n# billing\n\n## Standing decisions\n\n- Prose.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Root = root
+	return tr, h, cfg, p
+}
+
+// Attaching a mutex label changes what the audit reads, so the verdict
+// computed before it is not an answer to the question the next state
+// asks. On ORC-148 nothing refreshed it: the harness attached the label,
+// the sweep read the pre-label failure, published it as a second red and
+// escalated a single real failure to Blocked — with no commit to run
+// against, because the remedy was metadata.
+func TestALabelAttachRerunsTheVerdictItInvalidated(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := labelWorld(t)
+	i := seed(t, tr, cfg, "Touch billing", "The argument.", protocol.InProgress)
+
+	h.PRs = []host.PR{{Number: 7, Branch: "orc-1-touch-billing", HeadSHA: "sha7"}}
+	h.CheckState["sha7"] = host.Checks{
+		Status: host.ChecksRed, RunURL: "https://ci/9", RunID: 9, RunAttempt: 1,
+	}
+	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, PRNumber: 7}
+	o := &DevOutcome{Outcome: "done", Labels: []string{"billing"}}
+
+	if err := applyDiscoveredLabels(ctx, p, h, res, o, []string{"lib/app/billing/ledger.ex"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Reruns) != 1 || h.Reruns[0] != 9 {
+		t.Fatalf("the failing run was not re-run: %v", h.Reruns)
+	}
+	// The verdict the next state will read is no longer the stale one.
+	if got := h.CheckState["sha7"]; got.Status == host.ChecksRed {
+		t.Errorf("the pre-label failure is still the standing verdict: %+v", got)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	var body string
+	for _, c := range issues[0].Comments {
+		body += c.Body
+	}
+	if !strings.Contains(body, "Re-ran the failing CI run") {
+		t.Errorf("the ticket does not say the verdict was refreshed: %s", body)
+	}
+}
+
+// A green verdict is not stale in the direction that matters: the mutex
+// audit fails on a mapped path whose label is absent, so attaching one
+// only ever removes violations. Re-running it would spend a CI run to be
+// told the same thing.
+func TestAGreenVerdictIsNotRerun(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := labelWorld(t)
+	i := seed(t, tr, cfg, "Touch billing", "The argument.", protocol.InProgress)
+
+	h.PRs = []host.PR{{Number: 7, Branch: "orc-1-touch-billing", HeadSHA: "sha7"}}
+	h.CheckState["sha7"] = host.Checks{Status: host.ChecksGreen}
+	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, PRNumber: 7}
+	o := &DevOutcome{Outcome: "done", Labels: []string{"billing"}}
+
+	if err := applyDiscoveredLabels(ctx, p, h, res, o, []string{"lib/app/billing/ledger.ex"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Reruns) != 0 {
+		t.Errorf("a green verdict was re-run for nothing: %v", h.Reruns)
+	}
+}

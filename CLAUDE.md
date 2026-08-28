@@ -222,6 +222,45 @@ The second: a ticket branch does **not** need a merge-from-main to pick
 up a fix that has landed on the base. CI already tests the merged
 result.
 
+## A re-run is not an event, and GITHUB_TOKEN can start one
+
+Measured on `orchestration-dummy` before anything relied on it, because
+the neighbouring rule is real and would have made this a silent no-op:
+GitHub does not start a workflow run from an *event* created with
+`GITHUB_TOKEN`. A re-run is an API instruction rather than an event and
+is not covered. A probe mirroring the sweep's auth exactly — same
+`github.token`, same lone `actions: write` — took a completed
+`pull_request` run from attempt 1 to attempt 2:
+
+```
+attempt_before: 1
+http_status: 201
+poll 1: run_attempt=1 (was 1)
+poll 2: run_attempt=2 (was 1)
+RESULT: GITHUB_TOKEN re-run STARTED a new attempt (1 -> 2)
+```
+
+The new attempt kept `event: pull_request` and recorded
+`github-actions[bot]` as its triggering actor. So the sweep's existing
+credential and its already-declared permission are enough; no project's
+workflows need editing for it.
+
+**The 201 is not the answer, and neither is a single check afterwards.**
+`run_attempt` still read 1 on the poll taken straight after the call and
+2 about six seconds later. A caller that reads once and concludes
+nothing happened will be wrong, which is why `rerunStaleVerdict`
+watches the attempt move rather than trusting the status.
+
+Two incidental facts from taking the measurement: the GitHub App
+credential these sessions use cannot dispatch a workflow at all (`403
+Resource not accessible by integration`), so the probe was triggered by
+a push instead; and `workflow_dispatch` would have been the wrong
+primitive three times over anyway — a project's `ci.yml` declares `on:
+pull_request` and would not accept it, `github.head_ref` is empty
+outside that event so the audit's gate skips and reports a green that
+checked nothing, and `runsForSHA` drops `workflow_dispatch` runs on
+purpose so the verdict would never be read.
+
 ## The project repos are not this repo
 
 `pipeline.config.json` and `.github/workflows/**` are author-owned in

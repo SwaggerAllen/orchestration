@@ -1530,3 +1530,33 @@ func TestALiveRunOfAnotherKindStillHoldsTheBoundaryAgent(t *testing.T) {
 		t.Fatalf("dispatched over a live run, got %v", a)
 	}
 }
+
+// A re-run keeps the run's id and its URL and increments only the
+// attempt, so a verdict keyed on the URL alone reads the second failure
+// as the first one already recorded. That is silence on a real failure:
+// the ticket sits in Checks with red CI and no comment saying so. The
+// pipeline re-runs deliberately now, so this is reachable rather than
+// theoretical.
+func TestARerunsOwnFailureIsNotReadAsTheOneAlreadyRecorded(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks,
+		withComment(marker.CIRed, map[string]string{"run": "https://ci/9", "run_attempt": "1", "attempt": "1"}),
+		func(t *Ticket) { t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/9", RunAttempt: 2} }))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil {
+		t.Fatal("the re-run's own failure was swallowed as already recorded")
+	}
+	if a.Marker.Fields["run_attempt"] != "2" {
+		t.Errorf("marker records run_attempt %q, want 2", a.Marker.Fields["run_attempt"])
+	}
+}
+
+// The same attempt of the same run stays silent, which is the half the
+// URL key got right and must keep.
+func TestTheSameAttemptOfTheSameRunStaysSilent(t *testing.T) {
+	s := snap(tk("T1", protocol.Checks,
+		withComment(marker.CIRed, map[string]string{"run": "https://ci/9", "run_attempt": "2", "attempt": "1"}),
+		func(t *Ticket) { t.CI = CIInfo{Status: CIRed, RunURL: "https://ci/9", RunAttempt: 2} }))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
+		t.Errorf("recorded red re-fired: %v", *a)
+	}
+}

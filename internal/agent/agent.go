@@ -354,7 +354,7 @@ func Finish(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, 
 	// Before the PR and the transition: the label is what the CI audit
 	// on the other side of that transition reads, so attaching it after
 	// would be attaching it too late.
-	if err := applyDiscoveredLabels(ctx, p, res, o, changed); err != nil {
+	if err := applyDiscoveredLabels(ctx, p, h, res, o, changed); err != nil {
 		return err
 	}
 	if res.PRNumber == 0 {
@@ -731,7 +731,7 @@ func deriveBranch(key, title string) string {
 // Blocked/failed over a label — the failure mode this whole path exists
 // to remove. What a wrong or missing label costs is a red audit and a
 // bounce, which is where the ticket already was.
-func applyDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResult, o *DevOutcome, changed []string) error {
+func applyDiscoveredLabels(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DevOutcome, changed []string) error {
 	if len(o.Labels) == 0 {
 		return nil
 	}
@@ -760,8 +760,102 @@ func applyDiscoveredLabels(ctx context.Context, p *plane.Plane, res *ClaimResult
 		if err := flagCollisions(ctx, p, res, added); err != nil {
 			notes = append(notes, fmt.Sprintf("collision check failed (%v) — check by hand whether another in-flight ticket holds %s.", err, strings.Join(added, ", ")))
 		}
+		// The label is an audit input, so the verdict computed without
+		// it is not an answer to the question the next state asks. Here
+		// rather than after the transition, for the reason the caller
+		// already attaches labels here: on the other side of that
+		// transition the sweep reads the verdict, and a verdict
+		// refreshed afterwards is refreshed too late.
+		if note := rerunStaleVerdict(ctx, h, res); note != "" {
+			notes = append(notes, note)
+		}
 	}
 	return recordDiscoveredLabels(ctx, p, res, added, notes)
+}
+
+// rerunConfirmWindow bounds the wait for a re-run to become visible, and
+// rerunPollInterval is how often it is asked.
+//
+// The only figure measured for the lag is six seconds: on a real
+// repository `run_attempt` still read 1 on a poll taken straight after
+// the 201 and 2 about six seconds later. Thirty is that measurement with
+// room, not anybody's worst case — if re-runs are seen to take longer,
+// this is the number to revisit rather than the loop to loosen.
+const (
+	rerunConfirmWindow = 30 * time.Second
+	rerunPollInterval  = 3 * time.Second
+)
+
+// rerunStaleVerdict refreshes the CI verdict a label attach has just
+// invalidated, and returns what to say about it on the ticket.
+//
+// The audit reads the ticket's labels as well as the diff, so a label
+// attached after a run is an input that run never saw. Nothing in the
+// commit changes, so nothing re-triggers CI on its own: on ORC-148 the
+// harness attached a label and then published the pre-label failure as a
+// second red, escalated the ticket to Blocked on one real failure, and
+// left it somewhere no agent could clear — the remedy was metadata, and
+// metadata produces no commit to run against.
+//
+// A re-run rather than a fresh dispatch, because a re-run replays the
+// original `pull_request` event: the audit's own gate reads
+// `github.head_ref`, which is empty outside that event, so a dispatched
+// run would skip the audit and report a green that checked nothing.
+//
+// Soft, like everything else on this path: every failure is a sentence
+// on the ticket and the finish continues. The alternative is failing a
+// run that did exactly the right thing, which is the outcome this whole
+// route exists to prevent.
+func rerunStaleVerdict(ctx context.Context, h host.Host, res *ClaimResult) string {
+	if res.PRNumber == 0 {
+		// Nothing has judged this branch yet, and the run the PR is
+		// about to start will read the labels just attached.
+		return ""
+	}
+	prs, err := h.ListOpenPRs(ctx)
+	if err != nil {
+		return fmt.Sprintf("The CI verdict could not be refreshed (reading open PRs failed: %v), so it may still be the one computed before the label.", err)
+	}
+	var head string
+	for _, pr := range prs {
+		if pr.Number == res.PRNumber {
+			head = pr.HeadSHA
+		}
+	}
+	if head == "" {
+		return fmt.Sprintf("The CI verdict could not be refreshed: PR #%d is not in the open list.", res.PRNumber)
+	}
+	checks, err := h.ChecksFor(ctx, head)
+	if err != nil {
+		return fmt.Sprintf("The CI verdict could not be refreshed (reading checks failed: %v), so it may still be the one computed before the label.", err)
+	}
+	// Only a red verdict can be stale in the direction that matters.
+	// The mutex audit fails on a changed path whose owning doc's label
+	// the ticket lacks, so attaching one removes violations and never
+	// adds any: a green verdict stays green under a larger label set,
+	// and re-running it would spend a CI run to be told the same thing.
+	if checks.Status != host.ChecksRed || checks.RunID == 0 {
+		return ""
+	}
+	before := checks.RunAttempt
+	if err := h.RerunRun(ctx, checks.RunID); err != nil {
+		return fmt.Sprintf("The failing CI run could not be re-run (%v), so the verdict here is still the one computed before the label was attached. It needs a re-run by hand, or the audit reports the same failure again.", err)
+	}
+	// A 2xx is not the answer. The failure worth catching is a re-run
+	// that is accepted and starts nothing, and the new attempt is not
+	// visible the instant the call returns — so this asks the question
+	// the answer to which is the point: did the attempt move?
+	deadline := time.Now().Add(rerunConfirmWindow)
+	for {
+		now, err := h.ChecksFor(ctx, head)
+		if err == nil && (now.RunAttempt > before || now.Status != host.ChecksRed) {
+			return fmt.Sprintf("Re-ran the failing CI run so the audit reads the label just attached (attempt %d -> %d).", before, now.RunAttempt)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Sprintf("The CI re-run was accepted but no new attempt appeared within %s, so the verdict here is still the pre-label one. The next sweep will read that stale failure; re-run the job by hand to clear it.", rerunConfirmWindow)
+		}
+		time.Sleep(rerunPollInterval)
+	}
 }
 
 // resolveDiscoveredLabel turns a declared bare name into a full mutex

@@ -95,6 +95,12 @@ type Comment struct {
 type CIInfo struct {
 	Status CIStatus
 	RunURL string
+	// RunAttempt is which attempt of that run produced this verdict. A
+	// re-run keeps the id and the URL and increments only this, so the
+	// URL alone cannot tell "the failure we already recorded" from "the
+	// same run, run again, still failing" — and reading it as the
+	// former would swallow a real failure in silence.
+	RunAttempt int
 	// FailedJobs names what is red, so the failure comment can say so.
 	// The comment is the rework scope (DESIGN §2.3), and a scope that
 	// says only "fix what the linked run reports" is a scope for whoever
