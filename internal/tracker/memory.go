@@ -69,7 +69,8 @@ func (m *Memory) CreateState(_ context.Context, teamID string, ns NewState) (Sta
 	}
 	switch category {
 	case protocol.CategoryBacklog, protocol.CategoryUnstarted, protocol.CategoryStarted,
-		protocol.CategoryCompleted, protocol.CategoryCanceled, protocol.CategoryTriage:
+		protocol.CategoryCompleted, protocol.CategoryCanceled, protocol.CategoryTriage,
+		protocol.CategoryDuplicate:
 	default:
 		return StateInfo{}, fmt.Errorf("memory tracker: invalid state category %q", category)
 	}

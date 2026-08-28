@@ -238,7 +238,15 @@ there is nowhere to return a ticket to that a PR would back.
 tracker has states the protocol never mapped — Linear ships built-in `Duplicate` and `Canceled`
 alongside whatever `pipeline setup` created — and they are two taps away in the UI. A resolved
 category answers the only question the pipeline has about such a ticket: it is finished and not
-in the queue. `canceled` reads as `Canceled`, `completed` as `Done`, `triage` is skipped (§10).
+in the queue. `canceled` and `duplicate` read as `Canceled`, `completed` as `Done`, `triage` is
+skipped (§10).
+
+**`duplicate` is enumerated because Linear makes it a category of its own**, not a flavour of
+`canceled`, and it is the category the incident below was actually about — so a rule reading
+only `canceled` and `completed` left the state that caused it still fatal. It reads as
+`Canceled` rather than `Done`: a duplicate was discarded, not finished, and the two are read
+apart by the revert rules, so reporting discarded work as completed would be a lie the board
+carries.
 
 Anything else still fails the snapshot loudly, and that half of the rule is not softening:
 guessing at an unmapped `started` or `unstarted` state would put a ticket in the queue nobody
