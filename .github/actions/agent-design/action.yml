@@ -260,8 +260,36 @@ runs:
         # pass that strayed is blocked at finish and the author reads
         # the diff to strip it, so the files have to be somewhere to
         # read.
-        git diff --name-only "${{ steps.branch.outputs.before }}"..HEAD \
-          > "$RUNNER_TEMP/pipeline/changed.txt"
+        # What this pass *authored*, which is not what the branch
+        # gained. A plain `git diff before..HEAD` is the second thing,
+        # and the difference is every file a merge brought in: a pass
+        # whose base moved does the right thing by merging origin/main,
+        # and the diff then bills it for everything main changed in the
+        # interim. On Catapult's ORC-116 that read as "a design pass
+        # wrote 23 file(s) outside the paths design owns", naming ten
+        # `lib/**.ex` and six test files the pass never opened — a false
+        # report that grows with how far main moved, and looks more
+        # convincing the longer it gets.
+        #
+        # --first-parent walks this branch's own commits and steps over
+        # the ones a merge brought in.
+        #
+        # What a merge commit *itself* writes still counts: resolving a
+        # conflict is the merger's own writing, and nothing stops a pass
+        # making other edits while it is in there. So merge commits are
+        # walked, not skipped — skipping them is the obvious fix and it
+        # lets an implementation file written during a merge through the
+        # gate entirely.
+        #
+        # --cc is explicit and, measured on git 2.43, inert: it is
+        # already what `git show` does for a merge, and dropping it
+        # changes nothing. It stays because that is a default, and this
+        # gate should not silently change behaviour with the runner's git
+        # version. Whether older or newer git differs here has not been
+        # measured.
+        git log --first-parent --format=%H "${{ steps.branch.outputs.before }}"..HEAD \
+          | xargs -r -n1 git show --name-only --format= --cc \
+          | sort -u > "$RUNNER_TEMP/pipeline/changed.txt"
         cat "$RUNNER_TEMP/pipeline/changed.txt"
 
     # The branch preview, published by the harness rather than by a
