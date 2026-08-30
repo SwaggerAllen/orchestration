@@ -187,7 +187,7 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
-func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string, changed []string) error {
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string, changed, branchFiles []string) error {
 	// The ownership boundary, held before anything else lands. A pass
 	// that wrote outside it does not get a draft PR and does not reach
 	// Design review: returning here fails the finish step, and the
@@ -230,7 +230,7 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 	}
 	switch o.Outcome {
 	case "artifacts":
-		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
+		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}
 		if res.PRNumber == 0 {
@@ -265,7 +265,7 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview, core.RoleDesign)
 
 	case "decisionless":
-		if err := ensureMutexLabels(ctx, p, res.TicketID, o); err != nil {
+		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}
 		m := marker.Marker{Kind: marker.DecisionlessPass, Fields: map[string]string{}}
@@ -301,23 +301,136 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
 }
 
-// ensureMutexLabels attaches the declared touch lists as mutex labels,
-// creating per-name labels on demand (DESIGN §6).
-func ensureMutexLabels(ctx context.Context, p *plane.Plane, ticketID string, o *DesignOutcome) error {
+// reconcileMutexLabels makes the ticket's mutex labels the pass's
+// declared touch list: the declared ones are attached, creating per-name
+// labels on demand (DESIGN §6), and ones the ticket carries that this
+// pass did not declare are released.
+//
+// The release half was missing entirely, and the labels were add-only
+// from the day they were written. A design pass narrowing its scope is
+// routine — the author sends a ticket back from Design review and the
+// next pass draws less — and the label the first pass took stayed on the
+// ticket holding the mutex against every other ticket naming that
+// system, with no legal way for any pass to clear it. Catapult's ORC-141
+// sat on `system:delivery` that way; only a direct tracker write got it
+// off.
+//
+// **A label the branch's own files require is never released**, whatever
+// the touch list says. CI derives the labels it demands from the diff
+// (filemap.Audit), so releasing one the diff needs would fail the next
+// push — and the pass that narrowed cannot know what an earlier pass or
+// a dev round already put on the branch. Design's touch list is a
+// prediction; the branch is evidence, and evidence wins. The kept label
+// is reported rather than dropped silently: it means the pass and the
+// branch disagree about the ticket's scope, which is a thing for a
+// person to look at.
+//
+// branchFiles is everything the branch changed against main, and an
+// empty one means nobody looked rather than a branch that touches
+// nothing — the same reading resolveDiscoveredLabel gives its own diff,
+// and for the same reason. Nothing is released without it: a wiring gap
+// must not read as permission.
+//
+// Only screen: and system: labels are considered. Every other label on
+// the ticket belongs to somebody else — the author, the sweep, the
+// boundary — and a design pass has no business with them.
+func reconcileMutexLabels(ctx context.Context, p *plane.Plane, res *ClaimResult, o *DesignOutcome, branchFiles []string) error {
 	if err := verifyDeclaredDocs(p.Config.Root, o); err != nil {
 		return err
 	}
+	declared := map[string]bool{}
 	for _, s := range o.Screens {
-		if err := p.EnsureMutexLabel(ctx, ticketID, protocol.ScreenLabelPrefix+s); err != nil {
+		declared[protocol.ScreenLabelPrefix+s] = true
+		if err := p.EnsureMutexLabel(ctx, res.TicketID, protocol.ScreenLabelPrefix+s); err != nil {
 			return err
 		}
 	}
 	for _, s := range o.Systems {
-		if err := p.EnsureMutexLabel(ctx, ticketID, protocol.SystemLabelPrefix+s); err != nil {
+		declared[protocol.SystemLabelPrefix+s] = true
+		if err := p.EnsureMutexLabel(ctx, res.TicketID, protocol.SystemLabelPrefix+s); err != nil {
 			return err
 		}
 	}
-	return nil
+	stale := staleMutexLabels(res.Labels, declared)
+	if len(stale) == 0 {
+		return nil
+	}
+	if len(branchFiles) == 0 {
+		return p.CommentTicket(ctx, res.TicketID, fmt.Sprintf(
+			"This pass did not declare %s, which the ticket carries. No branch-file list reached the finish step, so nothing could confirm the branch is done with them and they were left in place — they hold the mutex until somebody removes them by hand (DESIGN §6).",
+			strings.Join(backticked(stale), ", ")))
+	}
+	required, err := requiredMutexLabels(p.Config.Root, branchFiles)
+	if err != nil {
+		return err
+	}
+	var released, kept []string
+	for _, l := range stale {
+		if required[l] {
+			kept = append(kept, l)
+			continue
+		}
+		if err := p.RemoveTicketLabel(ctx, res.TicketID, l); err != nil {
+			// Soft, like the abort labels: a release that fails leaves
+			// the mutex where it was, which is where it already is. The
+			// pass's outcome is not worth failing over it.
+			kept = append(kept, l)
+			continue
+		}
+		released = append(released, l)
+	}
+	var parts []string
+	if len(released) > 0 {
+		parts = append(parts, fmt.Sprintf("Released %s: this pass did not declare them and nothing on the branch is mapped by their docs, so they were holding the mutex for work that is not happening (DESIGN §6).", strings.Join(backticked(released), ", ")))
+	}
+	if len(kept) > 0 {
+		parts = append(parts, fmt.Sprintf("Kept %s although this pass did not declare them: the branch already carries files their docs map, and CI derives the labels it requires from the diff. The pass and the branch disagree about this ticket's scope — worth a look.", strings.Join(backticked(kept), ", ")))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return p.CommentTicket(ctx, res.TicketID, strings.Join(parts, "\n\n"))
+}
+
+// staleMutexLabels is the mutex labels held but not declared, in the
+// order the ticket carries them.
+func staleMutexLabels(held []string, declared map[string]bool) []string {
+	var out []string
+	for _, l := range held {
+		if !strings.HasPrefix(l, protocol.ScreenLabelPrefix) && !strings.HasPrefix(l, protocol.SystemLabelPrefix) {
+			continue
+		}
+		if declared[l] {
+			continue
+		}
+		out = append(out, l)
+	}
+	return out
+}
+
+// requiredMutexLabels is what CI would demand of this branch's diff.
+func requiredMutexLabels(root string, branchFiles []string) (map[string]bool, error) {
+	systems, err := filemap.LoadDir(filepath.Join(root, "systems"))
+	if err != nil {
+		return nil, fmt.Errorf("design finish: reading systems/: %w", err)
+	}
+	screens, err := filemap.LoadDir(filepath.Join(root, "screens"))
+	if err != nil {
+		return nil, fmt.Errorf("design finish: reading screens/: %w", err)
+	}
+	out := map[string]bool{}
+	for _, l := range filemap.OwnerLabels(systems, screens, branchFiles) {
+		out[l] = true
+	}
+	return out, nil
+}
+
+func backticked(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, "`"+s+"`")
+	}
+	return out
 }
 
 // verifyDeclaredDocs refuses a touch list naming a doc that does not

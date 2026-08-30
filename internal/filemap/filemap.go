@@ -122,6 +122,45 @@ func globRe(glob string) *regexp.Regexp {
 	return regexp.MustCompile(b.String())
 }
 
+// OwnerLabels returns the mutex labels the given paths require: for each
+// changed path, the label of every system or screen doc whose file map
+// claims it (DESIGN §6, §9). Sorted and deduplicated.
+//
+// This is Audit's "a changed path mapped by a doc requires that doc's
+// label" rule read forwards instead of backwards, and it exists because
+// one caller needs the labels themselves rather than a list of
+// violations: releasing a mutex label a design pass no longer declares
+// must never release one the audit is about to demand back.
+//
+// Two implementations of one rule is how they drift, so
+// TestOwnerLabelsAgreesWithAudit holds them together — for any corpus,
+// the labels this returns are exactly the ones whose absence Audit
+// reports.
+func OwnerLabels(systems, screens []Doc, changed []string) []string {
+	seen := map[string]bool{}
+	for _, path := range changed {
+		for _, d := range []struct {
+			docs   []Doc
+			prefix string
+		}{{systems, "system:"}, {screens, "screen:"}} {
+			for _, doc := range d.docs {
+				for _, g := range doc.Globs {
+					if Match(g, path) {
+						seen[d.prefix+doc.Name] = true
+						break
+					}
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for l := range seen {
+		out = append(out, l)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Audit checks a diff against the maps and the labels (DESIGN §9):
 //
 //   - no path may be mapped by two system docs — overlapping ownership is

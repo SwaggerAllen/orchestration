@@ -884,6 +884,13 @@ func cmdAgentFinish(args []string) error {
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
 	changedPath := fs.String("changed-files", "", "file with one changed path per line; what a reported mutex label (dev) and the design ownership boundary (design) are checked against")
+	// Everything the branch changed against main, which is not what
+	// --changed-files holds: that one is scoped to the run, deliberately,
+	// so an ownership stray is billed to the pass that wrote it. Releasing
+	// a mutex label asks the other question — is the *branch* done with
+	// this system — and answering it from one pass's files would release a
+	// label an earlier pass's commits still need.
+	branchPath := fs.String("branch-files", "", "file with one path per line: everything the branch changes against main; what releasing a stale mutex label is checked against (design)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -914,6 +921,10 @@ func cmdAgentFinish(args []string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	branchFiles, err := readPathList(*branchPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	if res.Mode == "reconcile" {
 		if *verdict == "" {
@@ -941,7 +952,7 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed, branchFiles); err != nil {
 			return err
 		}
 		if err := postFindings(p, res.TicketID, *findings); err != nil {

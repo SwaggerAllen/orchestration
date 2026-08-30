@@ -112,3 +112,72 @@ func TestAudit(t *testing.T) {
 		t.Errorf("overlap not flagged: %v", v)
 	}
 }
+
+// OwnerLabels reads Audit's "a changed path mapped by a doc requires
+// that doc's label" rule forwards, and two implementations of one rule
+// is how they drift. So: for any corpus, the labels OwnerLabels returns
+// are exactly the ones whose absence Audit reports.
+//
+// Asserted in both directions on purpose. Narrowing OwnerLabels would
+// release a mutex label the audit is about to demand back — the failure
+// it exists to prevent — and widening it would hold one nothing needs,
+// which is the failure the release exists to prevent.
+func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
+	systems := []Doc{
+		{Name: "delivery", Globs: []string{"lib/delivery/**", "config/delivery.exs"}},
+		{Name: "engine", Globs: []string{"lib/engine/**"}},
+		{Name: "core_dsl", Globs: []string{"lib/dsl/**"}},
+	}
+	screens := []Doc{
+		{Name: "home", Globs: []string{"lib/web/home/**"}},
+		{Name: "cap", Globs: []string{"storybook/screens/cap/*"}},
+	}
+	corpus := [][]string{
+		nil,
+		{"README.md"},
+		{"lib/engine/retry.ex"},
+		{"lib/delivery/queue.ex", "config/delivery.exs"},
+		{"lib/web/home/index.ex", "storybook/screens/cap/component.ex", "lib/dsl/parse.ex"},
+		{"lib/engine/a.ex", "lib/engine/b.ex", "mix.exs", "lib/web/home/x.ex"},
+	}
+	for _, changed := range corpus {
+		want := OwnerLabels(systems, screens, changed)
+		// What Audit demands, read off an empty label set: every mapped
+		// path with no label is one violation naming that label.
+		var got []string
+		for _, l := range want {
+			// Hand Audit every label but this one; if it is genuinely
+			// required, exactly that one must come back missing.
+			var others []string
+			for _, o := range want {
+				if o != l {
+					others = append(others, o)
+				}
+			}
+			missing := 0
+			for _, v := range Audit(systems, screens, changed, others) {
+				if strings.Contains(v, l) {
+					missing++
+				}
+			}
+			if missing == 0 {
+				t.Errorf("OwnerLabels(%v) claims %q is required and Audit does not demand it", changed, l)
+				continue
+			}
+			got = append(got, l)
+		}
+		// And the other direction: given every label OwnerLabels named,
+		// Audit must have nothing left to say. Overlap is its only other
+		// finding and no label answers it, so anything else is a label
+		// the audit demands and the release would have taken off.
+		for _, v := range Audit(systems, screens, changed, want) {
+			if strings.Contains(v, "overlapping ownership") {
+				continue
+			}
+			t.Errorf("Audit(%v) still demands a label OwnerLabels did not name: %s", changed, v)
+		}
+		if len(got) != len(want) {
+			t.Errorf("OwnerLabels(%v) = %v, agreed on %v", changed, want, got)
+		}
+	}
+}

@@ -725,6 +725,28 @@ audit violations on every path the ticket was about, with a push-back asking a h
 a label as the only outcome left. The information needed to refuse existed at the moment the
 label was created.
 
+**A design pass's touch list is the whole label set, not an addition to it.** The declared
+labels are attached and the mutex labels the ticket carries that the pass did *not* declare are
+released. They were add-only until ORC-158, and narrowing is routine — the author sends a
+ticket back from `Design review` and the next pass draws less — so the label the first pass
+took stayed on the ticket holding the mutex against every other ticket naming that system, with
+no legal way for any pass to clear it. Catapult's `ORC-141` sat on `system:delivery` that way;
+only a direct tracker write got it off.
+
+**A label the branch's own files require is never released**, whatever the touch list says. CI
+derives the labels it demands from the diff (§9), so releasing one the diff needs fails the
+next push — and the narrowing pass cannot know what an earlier pass or a dev round already put
+on the branch. Design's touch list is a prediction and the branch is evidence; evidence wins,
+and the kept label is reported on the ticket rather than dropped silently, because a pass and a
+branch that disagree about a ticket's scope is a thing for a person to look at.
+
+The release is checked against everything the branch changes against main, which is not the
+per-pass file list the ownership audit (§5) reads: that one is scoped to the run so a stray is
+billed to the pass that wrote it, while this asks whether the *branch* is done with a system.
+An absent list releases nothing and says so — a wiring gap must not read as permission — and a
+`prerequisite` pass (§3) declares no touch list at all, so it releases nothing either: a pass
+that could not read its scope does not get to decide the mutex.
+
 **"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
 commits are on main, so a ticket starting afterwards contains that work rather than racing it —
 there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
