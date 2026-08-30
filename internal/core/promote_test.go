@@ -116,18 +116,58 @@ func TestNoCurrentMilestonePromotesNothing(t *testing.T) {
 	}
 }
 
-// Absolute here, Urgent included, and stricter than dev pickup: the pause
-// exists so a milestone's scope stops changing while it is audited, and a
-// design pass is the one thing that adds to it (DESIGN §8, §10).
-func TestNothingPromotesWhilePaused(t *testing.T) {
-	urgent := tk("T1", protocol.Todo, func(t *Ticket) { t.Priority = 1 })
+// The pause is per ticket, and the exception is the tickets marked as
+// blocking the boundary — the milestone's remaining scope, which the
+// author committed to by filing them there (DESIGN §8, §10).
+//
+// Urgent is in this case to pin the half that did not move: it overrides
+// the pause at dev pickup, where it means finishing work already designed,
+// and a ticket in Todo is undesigned whatever its priority.
+func TestOnlyBoundaryBlockersPromoteWhilePaused(t *testing.T) {
 	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
-	s := snap(b, urgent)
-	if got := promotions(s); len(got) != 0 {
-		t.Errorf("promoted %v during the boundary pause", got)
+	blocker := tk("T1", protocol.Todo, func(t *Ticket) { t.Blocks = []string{"B1"} })
+	urgent := tk("T2", protocol.Todo, func(t *Ticket) { t.Priority = 1 })
+	got := promotions(snap(b, urgent, blocker))
+	if len(got) != 1 || got[0] != "T1" {
+		t.Errorf("promoted %v during the boundary pause, want T1 alone", got)
 	}
-	if p := NextPromotion(s); !strings.Contains(p.Why, "paused") {
-		t.Errorf("want the pause named as the reason, got %q", p.Why)
+}
+
+// Promotion is upstream of the drain, so pausing it strands the very
+// tickets the drain exists to run: a blocker filed during the pass opens
+// in Todo and needs design to reach Ready for dev. Catapult's ORC-156 sat
+// in Boundary review behind thirteen of them.
+func TestABlockerFiledDuringThePassReachesTheDevQueue(t *testing.T) {
+	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	blocker := tk("T1", protocol.Todo, func(t *Ticket) { t.Blocks = []string{"B1"} })
+	s := snap(b, blocker)
+	if got := promotions(s); len(got) != 1 || got[0] != "T1" {
+		t.Fatalf("promoted %v, want the blocker T1", got)
+	}
+	// The design dispatcher never had a pause gate of its own — it had
+	// nothing to dispatch. Assert it picks the ticket up now that it does,
+	// or this proves only that a label moved.
+	blocker.State = protocol.ReadyForDesign
+	blocker.Last = &Transition{From: protocol.Todo, To: protocol.ReadyForDesign, Actor: RoleControlPlane, At: blocker.StateSince}
+	s = snap(b, blocker)
+	if a := find(Sweep(s), ActDispatch, "T1"); a == nil || a.Agent != AgentDesign {
+		t.Errorf("no design run dispatched for the promoted blocker: %v", Sweep(s))
+	}
+}
+
+// Without a blocker among them the pause is the reason, and it has to be
+// the one reported. Counting these as blocked or as milestone-less names a
+// condition the author could go and fix and would still leave nothing
+// moving — which is how ORC-156 stayed stuck without the report saying so.
+func TestTheReportNamesThePauseHoldingTicketsBack(t *testing.T) {
+	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	s := snap(b, tk("T1", protocol.Todo))
+	if got := promotions(s); len(got) != 0 {
+		t.Errorf("promoted %v during the pause with no blocker among them", got)
+	}
+	p := NextPromotion(s)
+	if !strings.Contains(p.Why, "pause") || !strings.Contains(p.Why, "B1") {
+		t.Errorf("want the pause and the boundary ticket named, got %q", p.Why)
 	}
 }
 

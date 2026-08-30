@@ -1,0 +1,60 @@
+{
+  "name": "boundary: a blocker filed during the pass is designed and dev'd while the pause holds everything else (DESIGN 8, 10)",
+  "steps": [
+    {"kind": "milestone", "name": "M1"},
+    {"kind": "seed", "key": "T1", "state": "done", "milestone": "M1"},
+    {"kind": "sweep"},
+    {"kind": "expect-boundary", "milestone": "M1"},
+    {"kind": "expect", "key": "B-M1", "state": "todo", "runKind": "live-suite", "runLive": true},
+
+    {"kind": "run-end", "key": "B-M1"},
+    {"kind": "comment", "key": "B-M1", "marker": "live-suite", "fields": {"result": "pass", "run": "https://ci/live/1"}, "actor": "controlplane"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "B-M1", "state": "todo", "runLive": false},
+
+    {"kind": "seed", "key": "T2", "state": "todo", "milestone": "M1", "blocks": ["B-M1"]},
+    {"kind": "seed", "key": "T3", "state": "todo", "milestone": "M1", "createdAgo": "3h"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "state": "ready_for_design"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "runKind": "design", "runLive": true},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "T2", "to": "designing", "actor": "design"},
+    {"kind": "run-end", "key": "T2"},
+    {"kind": "transition", "key": "T2", "to": "design_review", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "T2", "to": "ready_for_dev", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "T2", "to": "in_progress", "actor": "dev"},
+    {"kind": "transition", "key": "T2", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T2"},
+    {"kind": "ci", "key": "T2", "status": "green", "run": "https://ci/2"},
+    {"kind": "sweep"},
+    {"kind": "transition", "key": "T2", "to": "merged", "actor": "reconcile"},
+    {"kind": "transition", "key": "T2", "to": "done", "actor": "controlplane"},
+    {"kind": "advance", "by": "1m"},
+    {"kind": "transition", "key": "B-M1", "to": "in_progress", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "state": "done"},
+    {"kind": "expect", "key": "B-M1", "state": "in_progress"},
+    {"kind": "expect", "key": "B-M1", "runKind": "boundary", "runLive": true},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "B-M1", "to": "boundary_review", "actor": "boundary"},
+    {"kind": "run-end", "key": "B-M1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "todo"},
+
+    {"kind": "transition", "key": "B-M1", "to": "done", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T3", "state": "ready_for_design"}
+  ]
+}
