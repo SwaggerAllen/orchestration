@@ -1091,12 +1091,38 @@ The report says what to start next; the control plane starts it. The sweep moves
   neither of which changes anything the pass would read. **The relaxation is design's alone.** Dev
   pickup keeps `Resolved`, because code built on top of a blocker that fails its check would have
   to be re-examined; a design that described it would only have to be re-read.
-- **The queue is not paused.** Nothing promotes while a boundary ticket is open, `Urgent`
-  included. The pause exists so a milestone's scope stops changing while it is being audited, and
-  a design pass is the one thing that adds to that scope: new artifacts, new mutex labels, in the
-  middle of the archive and the debt scan. This is stricter than dev pickup, where `Urgent` does
-  override the pause — that is finishing work already designed, and this would be starting work
-  that is not.
+- **The queue is not paused, or the ticket is marked as blocking the boundary ticket, or it is
+  `Urgent`.** The pause
+  exists so a milestone's scope stops changing while it is being audited, and a design pass is the
+  one thing that adds to that scope: new artifacts, new mutex labels, in the middle of the archive
+  and the debt scan. A ticket blocking the boundary is the exception, and it mirrors the dev drain
+  (§10) rather than being narrower than it: filing a ticket against the current milestone and
+  marking it a blocker is what declares it part of the scope being audited, so promoting it adds
+  nothing the author has not already committed to.
+
+  **The exemption is not optional, because promotion is upstream of the drain.** This condition
+  was once absolute, and the asymmetry with pickup read as a deliberately stricter policy. It was
+  a deadlock. A blocker filed during the pass opens in `Todo`, so it needs a design pass to reach
+  `Ready for dev` — the only queue the drain can see — and with promotion paused it never got one,
+  so the drain had nothing to drain, so the blocker never closed, so the boundary never closed, so
+  promotion stayed paused. Catapult's ORC-156 sat in `Boundary review` behind thirteen of them,
+  and the report said only that the queue was paused.
+
+  **`Urgent` is the second exemption, and it is the one pickup already grants.** The flag means
+  one thing across the pipeline rather than one thing at pickup and another here, which is what
+  an author reaching for it is entitled to assume. The narrower reading — that dev under `Urgent`
+  is finishing work already designed while promotion would start work that is not — is true and
+  is not the point: an urgent ticket in `Todo` has never been designed, so under it the pickup
+  override was unreachable for exactly the tickets that needed it, and it bought no scope freeze
+  either, because the ticket ran the moment the boundary closed. The cost is real and is
+  accepted: an urgent promotion does add artifacts and mutex labels to a milestone mid-audit.
+  `Urgent` is the author's own declaration that this ticket outranks the ordering, and the
+  boundary pass is theirs to run.
+
+  **`Urgent` clears the pause and nothing else.** The milestone condition above is a commitment
+  the author makes by assigning it, not an ordering the flag outranks, so an urgent ticket in a
+  later milestone or carrying none still waits — reading "urgent overrides" as "urgent promotes"
+  would start work on a milestone nobody has pulled.
 - **It is not the boundary ticket and not `author-only`.** Neither is the pipeline's to move at
   all (§8, §10).
 
@@ -1110,7 +1136,8 @@ same derivation the report stops being advice and becomes a prediction, and a pr
 omits the rule it is predicting is worse than none. Three things it owes.
 
 - **It names the ticket the sweep will promote next**, or says why it will promote nothing: the
-  design queue is occupied, the queue is paused, the head of *ready now* carries no milestone.
+  design queue is occupied, the pause is holding everything that does not block the boundary,
+  the head of *ready now* carries no milestone.
   *Ready now* is a fact about blockers; *next* is a fact about all five conditions above, and
   those are not the same set. A reader looking at three unblocked tickets while the pipeline
   promotes none of them has been told the truth and misled by it.
@@ -1545,6 +1572,11 @@ automation has to make later.
 the queue is either fully stopped, in which case blockers never get fixed, or fully open, in
 which case the pause means nothing.
 
+**Promotion into the design queue follows the same rule** (§8), `Urgent` included, and has to. A blocker filed during
+the pass opens in `Todo` and needs a design pass to reach `Ready for dev`, so a drain fed by a
+paused queue drains nothing: the pause outlasts the boundary it was protecting, and the author is
+left holding tickets that cannot start and a boundary that cannot close.
+
 The boundary agent does not begin while a blocker is open.
 
 ### Resuming a failed boundary pass
@@ -1665,15 +1697,19 @@ This ticket is pipeline machinery. Automation created it and will not close it.
   In progress     → YOU move it here when your pass is done. This is the signal.
                     The boundary agent then runs archive / debt scan / grooming,
                     posting a comment per step. If it fails, move it back here and
-                    it resumes from the first step with no comment.
+                    it resumes from the first step with no comment. Once it has
+                    finished a pass, moving it back here starts a NEW one — the
+                    scan runs again over whatever has landed since.
   Boundary review → the agent put it back. Proposals are in Triage; accept or
                     decline, confirm the ranking, then close this ticket and pull
-                    the next milestone into Todo.
+                    the next milestone into Todo. The comment above proposes the
+                    next debt milestone's contents — assigning those milestones is
+                    yours, because assigning one commits the work.
   Done            → you close it. The queue resumes.
 
-The queue is paused while this ticket is open. The dev agent will only pick up
-tickets marked as blocking this one — plus anything marked Urgent, which
-overrides the pause.
+The queue is paused while this ticket is open. Tickets marked as blocking this one
+still run — design and dev both, which is how this pass's own findings get fixed.
+So does anything marked Urgent, in this milestone. Everything else waits.
 
 Blocking bug found during your pass?  File it against THIS milestone and mark it
 blocking this ticket. Anything that can wait goes to Triage for the next milestone.
@@ -2109,7 +2145,7 @@ permanently idle is permanently dispatchable.
 
 | Condition | Action |
 |---|---|
-| Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused | State → `Ready for design`, first by the precedence rule (§8) |
+| Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused — or paused and either marked blocking the boundary ticket or `Urgent` | State → `Ready for design`, first by the precedence rule (§8) |
 | State → `Ready for design` | Design agent run; its claim writes `Designing` |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |

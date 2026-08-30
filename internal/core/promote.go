@@ -42,18 +42,6 @@ func nextPromotion(s *Snapshot, skip map[string]bool) Promotion {
 	if s.KillSwitch {
 		return Promotion{Why: "the kill switch is set, so the pipeline writes nothing (DESIGN §13)"}
 	}
-	if s.Paused() {
-		// Absolute here, Urgent included, and stricter than dev pickup
-		// on purpose. The pause exists so a milestone's scope stops
-		// changing while it is audited, and a design pass is the one
-		// thing that adds to that scope — new artifacts, new mutex
-		// labels, in the middle of the archive and the debt scan. Dev
-		// under Urgent is finishing work already designed; this would be
-		// starting work that is not (DESIGN §8, §10).
-		return Promotion{Why: fmt.Sprintf(
-			"the queue is paused — %s is open, and a design pass would add to the milestone being audited",
-			s.boundaryTicket().Key)}
-	}
 	if held := queueHolder(s); held != nil {
 		return Promotion{Why: fmt.Sprintf(
 			"%s is already in Ready for design; the queue is kept one deep so that its order is the order work runs",
@@ -99,14 +87,17 @@ func queueHolder(s *Snapshot) *Ticket {
 	return nil
 }
 
-// promotable reports the per-ticket half of the rule. The queue-wide
-// conditions — the pause, the queue's depth — are not facts about a
-// ticket and are checked once, above.
+// promotable reports the per-ticket half of the rule. The queue's depth is
+// not a fact about a ticket and is checked once, above. The boundary pause
+// is: it turns on which boundary a ticket blocks, so it lives here.
 func promotable(s *Snapshot, t *Ticket) bool {
 	if t.State != protocol.Todo {
 		return false
 	}
 	if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+		return false
+	}
+	if pausedFor(s, t) {
 		return false
 	}
 	// Milestone-less is held back rather than promoted, and it is the
@@ -126,6 +117,52 @@ func promotable(s *Snapshot, t *Ticket) bool {
 		return false
 	}
 	return !blockedBeforeMerge(s, t)
+}
+
+// pausedFor reports whether the milestone-boundary pause holds this ticket
+// out of the design queue.
+//
+// Per ticket rather than queue-wide, and that is the whole of the rule.
+// The pause exists so a milestone's scope stops changing while it is
+// audited, and a design pass is the one thing that adds to that scope —
+// new artifacts, new mutex labels, in the middle of the archive and the
+// debt scan. A ticket marked as blocking the boundary is the exception,
+// because filing it against the current milestone and marking it a blocker
+// is what declares it part of the scope being audited (DESIGN §10):
+// promoting it adds nothing the author has not already committed to.
+//
+// **It mirrors the dev drain because it is upstream of it.** This was once
+// absolute, and the asymmetry with pickup read as a deliberately stricter
+// policy. It was a deadlock. A blocker filed during the pass opens in
+// `Todo`, so it needs a design pass to reach `Ready for dev` — the only
+// queue the drain can see — and with promotion paused it never got one, so
+// the drain had nothing to drain, so the blocker never closed, so the
+// boundary never closed, so promotion stayed paused. Catapult's ORC-156
+// sat in `Boundary review` behind thirteen of them, and the report said
+// only that the queue was paused.
+//
+// `Urgent` is the second exemption, and it is the same one pickup already
+// grants: anything urgent enough to carry the flag outranks the pause
+// wherever the pause would hold it. The flag means one thing across the
+// pipeline rather than one thing at pickup and another here, which is
+// what an author reaching for it is entitled to assume.
+//
+// The narrower reading — that dev under `Urgent` is finishing work already
+// designed while promotion would start work that is not — is true and is
+// not the point. An urgent ticket in `Todo` has never been designed, so
+// under it the pickup override was unreachable for exactly the tickets
+// that needed it: the ticket could not reach `Ready for dev`, which is the
+// only queue pickup can see. It bought no scope freeze either, because the
+// ticket ran the moment the boundary closed.
+//
+// This does cost something, and the cost is real rather than notional: an
+// urgent promotion adds artifacts and mutex labels to a milestone mid-
+// audit, which is the thing the pause exists to prevent. It is accepted
+// because `Urgent` is the author's own declaration that this ticket
+// outranks the ordering, and the boundary pass is theirs to run.
+func pausedFor(s *Snapshot, t *Ticket) bool {
+	b := s.boundaryTicket()
+	return b != nil && !b.Resolved() && !t.Urgent() && !blocks(t, b.ID)
 }
 
 // blockedBeforeMerge reports whether any blocker has yet to reach `Merged`.
@@ -166,13 +203,19 @@ func onMain(t *Ticket) bool {
 // stuck on me or on itself", and three numbers answer it where twelve
 // keys would have to be read first.
 func heldBack(s *Snapshot, ordered []*Ticket) string {
-	var blocked, uncommitted, elsewhere, total int
+	var paused, blocked, uncommitted, elsewhere, total int
 	for _, t := range ordered {
 		if t.State != protocol.Todo || t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
 			continue
 		}
 		total++
 		switch {
+		// First, because while the pause holds it is the operative
+		// reason for everything that is not a blocker. Reporting such a
+		// ticket as blocked or as milestone-less names a condition the
+		// author could go and fix and would still leave nothing moving.
+		case pausedFor(s, t):
+			paused++
 		case t.Milestone == "":
 			uncommitted++
 		case t.Milestone != s.CurrentMilestone:
@@ -187,6 +230,11 @@ func heldBack(s *Snapshot, ordered []*Ticket) string {
 		return "nothing is waiting in Todo"
 	}
 	var parts []string
+	if paused > 0 {
+		parts = append(parts, fmt.Sprintf(
+			"%d held by the boundary pause on %s, which only tickets marked as blocking it clear",
+			paused, s.boundaryTicket().Key))
+	}
 	if blocked > 0 {
 		parts = append(parts, fmt.Sprintf("%d blocked by work that has not reached Merged", blocked))
 	}

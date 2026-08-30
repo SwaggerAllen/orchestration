@@ -32,9 +32,9 @@ const boundaryDescription = `This ticket is pipeline machinery. Automation creat
                     yours, because assigning one commits the work.
   Done            → you close it. The queue resumes.
 
-The queue is paused while this ticket is open. The dev agent will only pick up
-tickets marked as blocking this one — plus anything marked Urgent, which
-overrides the pause.
+The queue is paused while this ticket is open. Tickets marked as blocking this one
+still run — design and dev both, which is how this pass's own findings get fixed.
+So does anything marked Urgent, in this milestone. Everything else waits.
 
 Blocking bug found during your pass?  File it against THIS milestone and mark it
 blocking this ticket. Anything that can wait goes to Triage for the next milestone.`
