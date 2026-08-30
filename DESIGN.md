@@ -191,6 +191,25 @@ advances straight to `Ready for dev` (§6), recording its reasoning and touch li
 marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
 stamp, and rubber stamps train the author to skim the reviews that matter.
 
+**The prerequisite park:** a design pass whose scope depends on something that is not on `main`
+and is not the ticket's to write reports `prerequisite`, and the harness parks the ticket in
+`Blocked` under the `prerequisite` label (§12) with the pass's summary naming what it is
+waiting on. The author lands the other change and returns the ticket to `Ready for design`.
+
+It is a third outcome rather than a use of the two that existed, because neither is true:
+`artifacts` claims there is something to approve and `decisionless` claims the scope was
+examined and needs no decision. Without it such a pass had no legal outcome at all — the run
+died, and a dead run lands in `Blocked` under `failed`, which says the harness broke. Catapult's
+`ORC-157` is the measurement: the same ticket hit it twice, and the follow-up filed to record the
+second occurrence was cancelled, so it would have gone unrecorded again.
+
+A `prerequisite` pass declares no screens and no systems, and the harness refuses the outcome if
+it does. This is where it differs from the decisionless exception, which still declares its
+systems: a decisionless pass read the scope and knows what it will touch, while a prerequisite
+pass is reporting that it could not read the scope, so its touch list is a guess. `Blocked` is
+in flight as far as the mutex is concerned (§6), so a guessed label there locks every other
+ticket naming that system out until a human moves this one.
+
 **Design gets a queue state for the same reason dev has one, and did not have one for far too
 long.** `Designing` used to mean both "queued for design" and "a design agent is working on
 this", so no writer rule could be true of it — the author moved tickets in to queue them and the
@@ -911,6 +930,7 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
+| `prerequisite` | The scope depends on something not on `main` and not this ticket's to write. Written by `abort --reason prerequisite` (§3, §12, §13), and the outcome a design pass reports it with. Land the other change, then return the ticket to its queue. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
@@ -1164,10 +1184,10 @@ one no agent will act on.
 
 **And they are not prompt material.** A marker is an address, not an argument, so what reaches a
 model is the prose under the header and nothing else — with the comments that carry no prose
-dropped whole. Kind alone does not decide it: `blocked` is posted for six different arrivals
-(§12), and a push-back, a needs-setup, an author-only split and a scope-satisfied park each
-carry the argument that put the ticket there, while a plain failed run carries a URL and the
-captured tail of a crash. That last one on a prompt is the previous run's death handed to the
+dropped whole. Kind alone does not decide it: `blocked` is posted for seven different arrivals
+(§12), and a push-back, a needs-setup, an author-only split, a scope-satisfied park and a
+prerequisite park each carry the argument that put the ticket there, while a plain failed run
+carries a URL and the captured tail of a crash. That last one on a prompt is the previous run's death handed to the
 next run as context. So the flavor decides, not the kind.
 
 Two things were wrong before, not one. Bytes: a ticket that fails repeatedly grows its own
@@ -1713,7 +1733,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has six flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has seven flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -1733,6 +1753,14 @@ the comment and a label say which:
   `Done` stays a record of what actually shipped — but sometimes a scope that went stale and
   wants rewriting, and the pipeline cannot tell which. It parks with the run's hand-back and
   the author decides.
+- **Nothing failed, and the thing this ticket builds on isn't there yet.** The `prerequisite`
+  case (§3): the scope depends on a change that is not on `main` and is not this ticket's to
+  write, so there is nothing to decide. It fits the `needs-setup` sentence — a human has to do
+  something the run cannot — and gets its own label anyway, because the action and the clearing
+  condition are different: `needs-setup` wants a secret provisioned now, this wants another
+  change merged and then this ticket put back in its queue. The design pass reaches it as an
+  outcome rather than an abort (§13); without it such a pass had no legal outcome, died, and
+  parked under `failed`, reading as a harness fault.
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
   parks here rather than looping back to the design queue.
 - **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
@@ -1762,14 +1790,14 @@ credential and nothing else — no tracker key, no repository token — so it ca
 and that is the boundary rather than an oversight (§9). It writes `{"outcome": ..., "summary":
 ...}` alongside its hand-back and the harness routes it.
 
-**Three labels, not one**, because a duplicate ticket, a missing secret and an unbuildable
-design want three different actions from a human. A `Blocked` column that renders them
+**Four labels, not one**, because a duplicate ticket, a missing secret, an unlanded
+prerequisite and an unbuildable design want four different actions from a human. A `Blocked` column that renders them
 identically is one where every ticket has to be opened before it can be triaged, which is the
 same failure as a column where waiting and broken look alike.
 
-**And not four.** A run that changes nothing and names no reason is filed as `scope-satisfied`
-too, with a comment saying the label was inferred rather than reported. A fourth label for it
-was tried and dropped: it is the same status, read by the same person, answering the same
+**And not one more.** A run that changes nothing and names no reason is filed as
+`scope-satisfied` too, with a comment saying the label was inferred rather than reported. Its
+own label was tried and dropped: it is the same status, read by the same person, answering the same
 question, and two labels somebody triages identically are two labels they have to learn the
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
@@ -2237,8 +2265,10 @@ without passing through `Design review`.
 | abort | `needs-setup` | `Blocked` | `needs-setup` | blocked, **`setup=1`** |
 | abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
 | abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
+| abort | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `artifacts` | `Design review` | the pass's mutex labels | — |
 | design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
+| design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `clear` | unchanged | removes `re-evaluate` | — |
 | design | `demote` | `Ready for design` | — | — |
 | reconcile | `pass` | `Merged` | — | merged |

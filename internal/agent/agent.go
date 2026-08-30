@@ -572,6 +572,14 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 //     that changed nothing and named no reason lands — a separate label
 //     for that was tried and dropped, because it is the same status and
 //     the same question, and the comment already says which happened.
+//   - prerequisite -> Blocked with the prerequisite label: the ticket's
+//     scope depends on something that is not on main and is not this
+//     ticket's to write. Nothing failed and nothing was decided; the
+//     ticket goes back in its queue once the other change lands. Design
+//     reaches this as an outcome rather than an abort (DESIGN §3) —
+//     before it existed such a pass had no legal outcome and died,
+//     which put it in Blocked under `failed`, reading as a harness
+//     fault.
 //
 // Every reason but "failed" parks in Blocked, including push-back. They
 // want different things from a human — cancel the ticket, provision a
@@ -632,6 +640,13 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		to = protocol.Blocked
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"scope-satisfied": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelScopeSatisfied)
+	case "prerequisite":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: prerequisite without naming what it is waiting on is a ticket nobody can unpark — say which change has to land first")
+		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"prerequisite": "1"}}
+		message = softLabel(ctx, p, res, message, core.LabelPrerequisite)
 	default:
 		return fmt.Errorf("abort: reason must be one of %s, got %q", strings.Join(protocol.AbortReasons, ", "), reason)
 	}

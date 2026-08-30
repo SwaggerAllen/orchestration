@@ -987,8 +987,8 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or scope-satisfied")
-	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
+	reason := fs.String("reason", "failed", "one of protocol.AbortReasons: pushback, failed, needs-setup, author-only, scope-satisfied or prerequisite")
+	message := fs.String("message", "", "the argument (required for every reason but failed)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")

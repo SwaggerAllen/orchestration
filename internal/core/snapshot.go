@@ -414,6 +414,26 @@ const (
 	// the work is, and the ticket still moves through the ordinary states
 	// as the author does it.
 	LabelAuthorOnly = "author-only"
+	// LabelPrerequisite: the ticket's scope depends on something that is
+	// not on main and is not this ticket's to write, so there is nothing
+	// the pass can decide yet.
+	//
+	// Its own flavor rather than needs-setup, which it otherwise fits
+	// ("a human has to do something the run cannot"), because the human
+	// action is different and so is the clearing condition: needs-setup
+	// wants a secret provisioned, this wants another change merged and
+	// then this ticket put back in its queue. A Blocked column that
+	// renders the two identically is one where the author has to open
+	// each ticket to find out whether anything is owed of them yet.
+	//
+	// Before it existed a design pass in this position had no legal
+	// outcome at all — `artifacts` claims there is something to approve
+	// and `decisionless` claims the scope was examined and needs no
+	// decision — so the run died and the ticket landed in Blocked under
+	// `failed`, reading as a harness fault. Catapult's ORC-157 is the
+	// measurement: it happened twice on one ticket, and the follow-up
+	// filed to carry the second occurrence was cancelled.
+	LabelPrerequisite = "prerequisite"
 )
 
 func (s *Snapshot) ticket(id string) *Ticket {

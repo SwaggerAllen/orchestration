@@ -113,7 +113,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 // DesignOutcome is the design model's structured output.
 type DesignOutcome struct {
 	// Outcome by mode:
-	//   design:        "artifacts" | "decisionless"
+	//   design:        "artifacts" | "decisionless" | "prerequisite"
 	//   design-reread: "clear" | "demote"
 	Outcome string `json:"outcome"`
 	// Screens and Systems are the touch lists; the harness turns them
@@ -138,8 +138,11 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 	if err := json.Unmarshal(raw, &o); err != nil {
 		return nil, fmt.Errorf("design outcome %s: %w", path, err)
 	}
+	// `prerequisite` is a normal pass's third way out and is absent from
+	// the re-read on purpose: a re-read runs on a ticket already in the
+	// dev queue, where "the ground moved" is what `demote` is for.
 	legal := map[string][]string{
-		"design":        {"artifacts", "decisionless"},
+		"design":        {"artifacts", "decisionless", "prerequisite"},
 		"design-reread": {"clear", "demote"},
 	}
 	ok := false
@@ -154,6 +157,18 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 	if o.Outcome == "decisionless" && len(o.Screens) > 0 {
 		return nil, fmt.Errorf("design outcome: decisionless with screens %v is a contradiction — a screen touched is an artifact owed", o.Screens)
 	}
+	// Both lists, where decisionless refuses only screens. The difference
+	// is that a decisionless pass examined the scope and knows what it
+	// will touch, so its systems are real and the mutex should hold them.
+	// A prerequisite pass could not examine the scope — that is what it
+	// is reporting — so its touch list is a guess, and the mutex is the
+	// wrong place to put a guess: `Blocked` is a started state (see
+	// core.isStarted), so a label attached here holds the mutex against
+	// every other ticket naming that system for as long as the ticket
+	// sits parked, which is until a human moves it.
+	if o.Outcome == "prerequisite" && (len(o.Screens) > 0 || len(o.Systems) > 0) {
+		return nil, fmt.Errorf("design outcome: prerequisite declares screens %v and systems %v, but a pass that could not start has nothing to hold the mutex for — say what it is waiting on in the summary instead", o.Screens, o.Systems)
+	}
 	if o.Outcome != "artifacts" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("design outcome: %q without its argument is one the next pass repeats (DESIGN §3)", o.Outcome)
 	}
@@ -167,6 +182,8 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //     deciding), decisionless-pass marker, straight to Ready for dev
 //     (the §9 sign-off exception; the marker must exist before the
 //     transition or the sweep reverts it)
+//   - prerequisite  -> parked in Blocked under the prerequisite label,
+//     through the same Abort the dev agent's named outcomes take
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
@@ -256,6 +273,14 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 			return err
 		}
 		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDev, core.RoleDesign)
+
+	case "prerequisite":
+		// Through Abort rather than transitioning here, for the reason
+		// dev's named outcomes go through it: the park is not just a
+		// state write. It stamps the state the run was working in, soft-
+		// attaches the label, and records the move — and a second copy of
+		// that in this switch is a second copy to keep in step.
+		return Abort(ctx, p, res, "prerequisite", o.Summary, "")
 
 	case "clear":
 		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {

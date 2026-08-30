@@ -327,20 +327,26 @@ func Prose(body string) (string, bool) {
 // bookkeeping reports whether a marker comment is the control plane
 // talking about itself, with nothing under it a pass could act on.
 //
-// Kind alone does not decide it. `blocked` is posted for six different
+// Kind alone does not decide it. `blocked` is posted for seven different
 // arrivals (DESIGN §12): a push-back, a needs-setup, an author-only
-// split and a scope-satisfied park all carry the argument that put the
-// ticket there, while a plain failed run carries a URL and — since the
-// harness started capturing what a run printed — up to forty lines of a
-// CLI's death rattle. That last one on a prompt is worse than useless:
-// it is the previous run's crash presented to the next run as context.
-// So the flavor field decides, not the kind.
+// split, a scope-satisfied park and a prerequisite park all carry the
+// argument that put the ticket there, while a plain failed run carries a
+// URL and — since the harness started capturing what a run printed — up
+// to forty lines of a CLI's death rattle. That last one on a prompt is
+// worse than useless: it is the previous run's crash presented to the
+// next run as context. So the flavor field decides, not the kind.
+//
+// A flavor missing from the list below is not a small mistake: its
+// argument is dropped from the next run's prompt, so the pass that
+// re-picks the ticket up is told only that it was blocked and never why
+// — which is the whole failure this function exists to prevent, arriving
+// through the one door nothing checks.
 func bookkeeping(m Marker) bool {
 	switch m.Kind {
 	case Dispatch, Base, Preview, StaleClaim, ClaimFailed, Merged, Revert, BoundaryStep:
 		return true
 	case Blocked:
-		for _, flavor := range []string{"pushback", "setup", "author-only", "scope-satisfied", "live-suite"} {
+		for _, flavor := range []string{"pushback", "setup", "author-only", "scope-satisfied", "prerequisite", "live-suite"} {
 			if m.Fields[flavor] != "" {
 				return false
 			}

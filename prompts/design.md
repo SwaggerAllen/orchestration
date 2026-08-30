@@ -215,6 +215,26 @@ Mode `design` — a normal pass. The harness claimed this ticket out of
   touching is not deciding, and the labels feed the mutex. Commit
   nothing. Only say this when it is true — the pass exists to catch
   screens and unreviewed decisions nobody predicted.
+- `{"outcome": "prerequisite", "summary": "..."}` — the scope depends on
+  something that is not on `main` and is not yours to write, so there is
+  nothing to decide yet. The harness parks the ticket in `Blocked` under
+  the `prerequisite` label; the author lands the other change and puts
+  this ticket back in the queue. Name the change you are waiting on —
+  the ticket, the PR, or the file that does not exist yet — because the
+  summary is the only thing the person unparking this has to go on.
+
+  Declare no `screens` and no `systems` here, and the harness refuses the
+  outcome if you do: `Blocked` is a state the mutex counts as in flight,
+  so a label attached by a pass that could not read the scope locks every
+  other ticket naming that system out for as long as this one sits
+  parked.
+
+  This is the narrow one. It is not "the scope is hard", not "I would
+  rather the other ticket went first", and not "main moved" — that last
+  is the base check, and reconciling it is the dev pass's push-back. It
+  is *the thing this ticket builds on does not exist in the tree I can
+  see*. A pass that can draw the design against what is on `main` today
+  draws it.
 
 Mode `design-reread` — a queue ticket flagged re-evaluate (DESIGN §7):
 - `{"outcome": "clear", "summary": "why the scope still holds"}` — the

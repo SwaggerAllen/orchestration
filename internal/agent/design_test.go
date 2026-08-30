@@ -586,3 +586,107 @@ func TestDesignFinishAcceptsOwnedPaths(t *testing.T) {
 		t.Errorf("state = %q, want design_review", got)
 	}
 }
+
+// The dead end ORC-157 records: a pass that correctly finds its scope
+// depends on something not on main had no legal outcome, so the run died
+// and the ticket landed in Blocked under `failed` — the flavor that says
+// the harness broke. It now parks deliberately, with its own flavor.
+func TestDesignPrerequisiteParksTheTicket(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Delivery retries", "Depends on the queue doc.", protocol.ReadyForDesign)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_57", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const summary = "systems/queue.md is not on main yet; ORC-140 writes it. Nothing to draw against until that lands."
+	o := &DesignOutcome{Outcome: "prerequisite", Summary: summary}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	label := false
+	for _, l := range issues[0].Labels {
+		if l == core.LabelPrerequisite {
+			label = true
+		}
+	}
+	if !label {
+		// Without the flavor the park is indistinguishable from a crash
+		// in the one column the author triages from.
+		t.Errorf("no %q label: %v", core.LabelPrerequisite, issues[0].Labels)
+	}
+	var blocked, argument bool
+	for _, c := range issues[0].Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok && m.Kind == marker.Blocked && m.Fields["prerequisite"] == "1" {
+			blocked = true
+		}
+		if strings.Contains(c.Body, summary) {
+			argument = true
+		}
+	}
+	if !blocked {
+		t.Error("no blocked marker carrying prerequisite=1")
+	}
+	if !argument {
+		t.Error("the pass's summary never reached the ticket — the person unparking it has nothing to go on")
+	}
+	if len(h.PRs) != 0 {
+		t.Errorf("a pass that decided nothing must not open a PR: %+v", h.PRs)
+	}
+}
+
+// A prerequisite park's argument has to survive into the next run's
+// prompt. Markers are addresses, not arguments, so a `blocked` comment
+// whose flavor `marker.Prose` does not recognise is dropped whole —
+// which would tell the re-picked-up ticket that it was blocked and never
+// why (DESIGN §9).
+func TestThePrerequisiteArgumentSurvivesIntoThePrompt(t *testing.T) {
+	m := marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"prerequisite": "1", "from": "designing"}}
+	body := m.Comment("systems/queue.md is not on main yet; ORC-140 writes it.")
+	prose, worth := marker.Prose(body)
+	if !worth || !strings.Contains(prose, "ORC-140") {
+		t.Errorf("prose = %q, worth = %v — the park's argument was dropped as bookkeeping", prose, worth)
+	}
+}
+
+// The mutex reads Blocked as in flight (core.isStarted), so a label
+// attached by a pass that could not read its scope holds every other
+// ticket naming that system out until a human moves this one. The touch
+// list is refused rather than ignored: a pass that thought it was
+// declaring one should learn it was not.
+func TestPrerequisiteRefusesATouchList(t *testing.T) {
+	dir := t.TempDir()
+	write := func(s string) string {
+		p := filepath.Join(dir, "o.json")
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct{ name, json string }{
+		{"systems", `{"outcome":"prerequisite","systems":["queue"],"summary":"x"}`},
+		{"screens", `{"outcome":"prerequisite","screens":["home"],"summary":"x"}`},
+	} {
+		if _, err := LoadDesignOutcome(write(c.json), "design"); err == nil {
+			t.Errorf("prerequisite with %s must be refused", c.name)
+		}
+	}
+	if _, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":""}`), "design"); err == nil {
+		t.Error("prerequisite without naming what it waits on is a ticket nobody can unpark")
+	}
+	if _, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":"x"}`), "design-reread"); err == nil {
+		t.Error("a re-read ticket is already in the dev queue; `demote` is its way out, not this")
+	}
+	if o, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":"x"}`), "design"); err != nil || o.Outcome != "prerequisite" {
+		t.Errorf("prerequisite must load in design mode, got %v %v", o, err)
+	}
+}
