@@ -12,6 +12,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
+	"github.com/SwaggerAllen/orchestration/internal/tracker"
 )
 
 func TestDesignArtifactsFlow(t *testing.T) {
@@ -28,7 +29,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -61,7 +62,7 @@ func TestDesignDecisionlessAutoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -109,7 +110,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 	o := &DesignOutcome{Outcome: "clear", Summary: "The colliding ticket rewrote a different region; this scope still holds."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -131,7 +132,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	o2 := &DesignOutcome{Outcome: "demote", Summary: "The ground moved under this scope; it needs a fresh pass."}
-	if err := FinishDesign(ctx, p, h, res2, o2, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res2, o2, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForDesign {
@@ -250,7 +251,7 @@ func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
 	const url = "https://abc123.orchestration-dummy.pages.dev"
-	if err := FinishDesign(ctx, p, h, res, o, url, "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, url, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -287,7 +288,7 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -315,7 +316,7 @@ func TestDesignFinishRecordsTheBaseSHA(t *testing.T) {
 
 	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b"}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -374,7 +375,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "", nil)
+	err = FinishDesign(ctx, p, h, res, o, "", "", nil, nil)
 	if err == nil {
 		t.Fatal("a touch list naming a doc that does not exist was accepted")
 	}
@@ -389,7 +390,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 
 	// The correct spelling passes, and so does a screen beside it.
 	o = &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core_dsl"}, Screens: []string{"home"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
 		t.Fatalf("a touch list naming real docs was refused: %v", err)
 	}
 }
@@ -408,7 +409,7 @@ func TestDesignReportsEveryUnknownDocAtOnce(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl", "foundation"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "", nil)
+	err = FinishDesign(ctx, p, h, res, o, "", "", nil, nil)
 	if err == nil {
 		t.Fatal("unknown docs were accepted")
 	}
@@ -433,7 +434,7 @@ func TestDesignAcceptsAnyNameWhenTheProjectHasNoDocs(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"anything"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
 		t.Fatalf("a project with no system docs was refused: %v", err)
 	}
 }
@@ -528,7 +529,7 @@ func TestDesignFinishRefusesStraysOutsideOwnedPaths(t *testing.T) {
 		"lib/sample/greetings.ex",
 		"lib/sample_web/live/home_live.ex",
 	}
-	err = FinishDesign(ctx, p, h, res, o, "", "", changed)
+	err = FinishDesign(ctx, p, h, res, o, "", "", changed, nil)
 	if err == nil {
 		t.Fatal("finish accepted a pass that committed implementation")
 	}
@@ -579,10 +580,255 @@ func TestDesignFinishAcceptsOwnedPaths(t *testing.T) {
 		"lib/sample_web/components/cap_banner.ex",
 		"non-asks.md",
 	}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", changed); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", changed, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
 		t.Errorf("state = %q, want design_review", got)
 	}
+}
+
+// The dead end ORC-157 records: a pass that correctly finds its scope
+// depends on something not on main had no legal outcome, so the run died
+// and the ticket landed in Blocked under `failed` — the flavor that says
+// the harness broke. It now parks deliberately, with its own flavor.
+func TestDesignPrerequisiteParksTheTicket(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Delivery retries", "Depends on the queue doc.", protocol.ReadyForDesign)
+
+	res, err := ClaimDesign(ctx, p, i.Key, "run_57", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const summary = "systems/queue.md is not on main yet; ORC-140 writes it. Nothing to draw against until that lands."
+	o := &DesignOutcome{Outcome: "prerequisite", Summary: summary}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	label := false
+	for _, l := range issues[0].Labels {
+		if l == core.LabelPrerequisite {
+			label = true
+		}
+	}
+	if !label {
+		// Without the flavor the park is indistinguishable from a crash
+		// in the one column the author triages from.
+		t.Errorf("no %q label: %v", core.LabelPrerequisite, issues[0].Labels)
+	}
+	var blocked, argument bool
+	for _, c := range issues[0].Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok && m.Kind == marker.Blocked && m.Fields["prerequisite"] == "1" {
+			blocked = true
+		}
+		if strings.Contains(c.Body, summary) {
+			argument = true
+		}
+	}
+	if !blocked {
+		t.Error("no blocked marker carrying prerequisite=1")
+	}
+	if !argument {
+		t.Error("the pass's summary never reached the ticket — the person unparking it has nothing to go on")
+	}
+	if len(h.PRs) != 0 {
+		t.Errorf("a pass that decided nothing must not open a PR: %+v", h.PRs)
+	}
+}
+
+// A prerequisite park's argument has to survive into the next run's
+// prompt. Markers are addresses, not arguments, so a `blocked` comment
+// whose flavor `marker.Prose` does not recognise is dropped whole —
+// which would tell the re-picked-up ticket that it was blocked and never
+// why (DESIGN §9).
+func TestThePrerequisiteArgumentSurvivesIntoThePrompt(t *testing.T) {
+	m := marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"prerequisite": "1", "from": "designing"}}
+	body := m.Comment("systems/queue.md is not on main yet; ORC-140 writes it.")
+	prose, worth := marker.Prose(body)
+	if !worth || !strings.Contains(prose, "ORC-140") {
+		t.Errorf("prose = %q, worth = %v — the park's argument was dropped as bookkeeping", prose, worth)
+	}
+}
+
+// The mutex reads Blocked as in flight (core.isStarted), so a label
+// attached by a pass that could not read its scope holds every other
+// ticket naming that system out until a human moves this one. The touch
+// list is refused rather than ignored: a pass that thought it was
+// declaring one should learn it was not.
+func TestPrerequisiteRefusesATouchList(t *testing.T) {
+	dir := t.TempDir()
+	write := func(s string) string {
+		p := filepath.Join(dir, "o.json")
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, c := range []struct{ name, json string }{
+		{"systems", `{"outcome":"prerequisite","systems":["queue"],"summary":"x"}`},
+		{"screens", `{"outcome":"prerequisite","screens":["home"],"summary":"x"}`},
+	} {
+		if _, err := LoadDesignOutcome(write(c.json), "design"); err == nil {
+			t.Errorf("prerequisite with %s must be refused", c.name)
+		}
+	}
+	if _, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":""}`), "design"); err == nil {
+		t.Error("prerequisite without naming what it waits on is a ticket nobody can unpark")
+	}
+	if _, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":"x"}`), "design-reread"); err == nil {
+		t.Error("a re-read ticket is already in the dev queue; `demote` is its way out, not this")
+	}
+	if o, err := LoadDesignOutcome(write(`{"outcome":"prerequisite","summary":"x"}`), "design"); err != nil || o.Outcome != "prerequisite" {
+		t.Errorf("prerequisite must load in design mode, got %v %v", o, err)
+	}
+}
+
+// ORC-158: the mutex labels were add-only. A pass that narrows its scope
+// left the label the earlier pass took holding the mutex against every
+// other ticket naming that system, and no pass could clear it — only a
+// direct tracker write did. Catapult's ORC-141 sat on `system:delivery`
+// that way.
+func TestANarrowedPassReleasesTheLabelItNoLongerDeclares(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "delivery", "lib/delivery/**")
+	writeDoc(t, cfg, "systems", "engine", "lib/engine/**")
+	i := seed(t, tr, cfg, "Retry policy", "The argument.", protocol.ReadyForDesign)
+	for _, l := range []string{"system:delivery", "system:engine", "harness"} {
+		if err := p.AddTicketLabel(ctx, i.ID, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := ClaimDesign(ctx, p, i.Key, "run_58", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The narrowed pass: engine only, on a branch that touches engine
+	// only. Nothing on it is mapped by systems/delivery.md.
+	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Retries belong in the engine after all."}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, []string{"lib/engine/retry.ex", "systems/engine.md"}); err != nil {
+		t.Fatal(err)
+	}
+	labels := issueLabels(t, tr, cfg, i.ID)
+	if labels["system:delivery"] {
+		t.Error("system:delivery was not released — it holds the mutex against every other delivery ticket for as long as it stays")
+	}
+	if !labels["system:engine"] {
+		t.Error("system:engine is what the pass declared and must survive")
+	}
+	// Every other label on the ticket belongs to somebody else.
+	if !labels["harness"] {
+		t.Error("a non-mutex label was released — design has no business with it")
+	}
+}
+
+// Design's touch list is a prediction; the branch is evidence. CI
+// derives the labels it demands from the diff, so releasing one the diff
+// still needs fails the next push — and the narrowing pass cannot know
+// what an earlier pass or a dev round already put on the branch.
+func TestALabelTheBranchStillNeedsIsKeptAndSaidSo(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "delivery", "lib/delivery/**")
+	writeDoc(t, cfg, "systems", "engine", "lib/engine/**")
+	i := seed(t, tr, cfg, "Retry policy", "The argument.", protocol.ReadyForDesign)
+	for _, l := range []string{"system:delivery", "system:engine"} {
+		if err := p.AddTicketLabel(ctx, i.ID, l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := ClaimDesign(ctx, p, i.Key, "run_59", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Engine only."}
+	// An earlier round already wrote a delivery file onto the branch.
+	branch := []string{"lib/engine/retry.ex", "lib/delivery/queue.ex"}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, branch); err != nil {
+		t.Fatal(err)
+	}
+	if !issueLabels(t, tr, cfg, i.ID)["system:delivery"] {
+		t.Error("released a label the branch's own diff requires — the next push fails the audit on it")
+	}
+	if !commentContains(t, tr, cfg, i.ID, "Kept `system:delivery`") {
+		t.Error("kept it silently: the pass and the branch disagree about this ticket's scope, which is a thing for a person to look at")
+	}
+}
+
+// A wiring gap must not read as permission. resolveDiscoveredLabel gives
+// its own diff the same reading, and for the same reason.
+func TestNothingIsReleasedWithoutABranchFileList(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	cfg.Root = t.TempDir()
+	writeDoc(t, cfg, "systems", "delivery", "lib/delivery/**")
+	writeDoc(t, cfg, "systems", "engine", "lib/engine/**")
+	i := seed(t, tr, cfg, "Retry policy", "The argument.", protocol.ReadyForDesign)
+	if err := p.AddTicketLabel(ctx, i.ID, "system:delivery"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ClaimDesign(ctx, p, i.Key, "run_61", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Engine only."}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !issueLabels(t, tr, cfg, i.ID)["system:delivery"] {
+		t.Error("released a label with nothing to check it against")
+	}
+	if !commentContains(t, tr, cfg, i.ID, "No branch-file list reached the finish step") {
+		t.Error("left the label in place without saying so — nobody knows the mutex is still held")
+	}
+}
+
+func issueLabels(t *testing.T, tr *tracker.Memory, cfg *config.Config, id string) map[string]bool {
+	t.Helper()
+	issues, err := tr.ListIssues(context.Background(), cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range issues {
+		if i.ID == id {
+			out := map[string]bool{}
+			for _, l := range i.Labels {
+				out[l] = true
+			}
+			return out
+		}
+	}
+	t.Fatalf("no issue %s", id)
+	return nil
+}
+
+func commentContains(t *testing.T, tr *tracker.Memory, cfg *config.Config, id, want string) bool {
+	t.Helper()
+	issues, err := tr.ListIssues(context.Background(), cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range issues {
+		if i.ID != id {
+			continue
+		}
+		for _, c := range i.Comments {
+			if strings.Contains(c.Body, want) {
+				return true
+			}
+		}
+	}
+	return false
 }

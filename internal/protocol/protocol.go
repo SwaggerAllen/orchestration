@@ -153,6 +153,7 @@ var Labels = []string{
 	"scope-satisfied",
 	"pushback",
 	"author-only",
+	"prerequisite",
 	"harness",
 	"milestone-boundary",
 }

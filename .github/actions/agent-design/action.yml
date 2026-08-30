@@ -291,6 +291,24 @@ runs:
           | xargs -r -n1 git show --name-only --format= --cc \
           | sort -u > "$RUNNER_TEMP/pipeline/changed.txt"
         cat "$RUNNER_TEMP/pipeline/changed.txt"
+        # And what the whole *branch* changes, which is a different
+        # question and answers a different one. changed.txt is scoped to
+        # this pass so an ownership stray is billed to the pass that wrote
+        # it; releasing a mutex label the pass no longer declares asks
+        # whether the branch is done with that system, and an earlier
+        # pass's commits or a dev round's are just as much evidence as
+        # this pass's (DESIGN 6).
+        #
+        # Three dots: the diff from the merge-base, so a branch whose main
+        # moved is not billed for what main did. Two dots would report
+        # every file main changed since the branch started as this
+        # branch's, which is the same false report --first-parent exists
+        # to prevent one level up.
+        #
+        # An empty file is the honest answer for a branch that changed
+        # nothing, and the harness reads empty as "nobody looked" and
+        # releases nothing — a wiring gap must not read as permission.
+        git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/branch.txt" 2>/dev/null || : > "$RUNNER_TEMP/pipeline/branch.txt"
 
     # The branch preview, published by the harness rather than by a
     # workflow watching for a push. That watcher could never fire for
@@ -365,6 +383,7 @@ runs:
           --preview-url "${{ steps.published.outputs.deployment-url }}" \
           --base-sha "${{ steps.base.outputs.sha }}" \
           --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
+          --branch-files "$RUNNER_TEMP/pipeline/branch.txt" \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
           2> "$RUNNER_TEMP/pipeline/run-error.txt"
         rc=$?

@@ -191,6 +191,25 @@ advances straight to `Ready for dev` (§6), recording its reasoning and touch li
 marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
 stamp, and rubber stamps train the author to skim the reviews that matter.
 
+**The prerequisite park:** a design pass whose scope depends on something that is not on `main`
+and is not the ticket's to write reports `prerequisite`, and the harness parks the ticket in
+`Blocked` under the `prerequisite` label (§12) with the pass's summary naming what it is
+waiting on. The author lands the other change and returns the ticket to `Ready for design`.
+
+It is a third outcome rather than a use of the two that existed, because neither is true:
+`artifacts` claims there is something to approve and `decisionless` claims the scope was
+examined and needs no decision. Without it such a pass had no legal outcome at all — the run
+died, and a dead run lands in `Blocked` under `failed`, which says the harness broke. Catapult's
+`ORC-157` is the measurement: the same ticket hit it twice, and the follow-up filed to record the
+second occurrence was cancelled, so it would have gone unrecorded again.
+
+A `prerequisite` pass declares no screens and no systems, and the harness refuses the outcome if
+it does. This is where it differs from the decisionless exception, which still declares its
+systems: a decisionless pass read the scope and knows what it will touch, while a prerequisite
+pass is reporting that it could not read the scope, so its touch list is a guess. `Blocked` is
+in flight as far as the mutex is concerned (§6), so a guessed label there locks every other
+ticket naming that system out until a human moves this one.
+
 **Design gets a queue state for the same reason dev has one, and did not have one for far too
 long.** `Designing` used to mean both "queued for design" and "a design agent is working on
 this", so no writer rule could be true of it — the author moved tickets in to queue them and the
@@ -300,6 +319,29 @@ where it does), their rationale, and a front-matter **file map** declaring the p
 system owns. One doc per system for the same reason as one doc per screen: a monolithic
 architecture document goes stale as a whole, and nobody can tell which ticket last verified
 which paragraph. No inventory of what the code contains — the code is that inventory.
+
+**The design prompt carries an index of what those docs already decided.** Every heading and
+every top-level bullet's lead from `systems/*.md` and `screens/*.md`, selected by the ticket's
+scope with the rule the non-asks selection uses, with the unselected docs named and counted so
+a pass reaching further knows they are there. Catapult's `ORC-126` is the measurement: a design
+pass spent a full run re-verifying "no assignee or role-holder projection exists", which
+`systems/dashboard.md` and `screens/my-queue.md` already stated in near-identical words, with
+the same evidence and the same conclusion. Nothing put those in front of it, and a re-derived
+decision arrives at Design review looking like new work.
+
+An index rather than the text, and that is a measurement too: the `## Standing decisions`
+sections in Catapult's system docs come to 362KB, one of them 80KB on its own, against 25.6KB
+for the whole index. What is inlined is enough to know a decision exists and which file states
+it; the docs are in the checkout. So this is the non-asks argument — a prompt whose most
+important input is "go read this file" is a prompt whose most important input is optional —
+answered at the size the input actually is.
+
+It indexes headings *and* bullet leads because both are how these docs carry a decision, read
+off the tree rather than assumed: all of Catapult's system docs put theirs in a
+`## Standing decisions` bullet list, and none of its screen docs do — a screen doc's headings
+*are* its decisions. Needing no rule about which heading counts is the part worth having: it is
+a prompt input rather than a gate, so nothing here can report a decision the doc does not
+contain, and the worst a bad entry costs is a line.
 
 A design pass's structural output — **the sketch** — is a *diff against these docs*, committed
 on the ticket branch like every other design artifact. A new system is a new doc; a moved
@@ -706,6 +748,28 @@ audit violations on every path the ticket was about, with a push-back asking a h
 a label as the only outcome left. The information needed to refuse existed at the moment the
 label was created.
 
+**A design pass's touch list is the whole label set, not an addition to it.** The declared
+labels are attached and the mutex labels the ticket carries that the pass did *not* declare are
+released. They were add-only until ORC-158, and narrowing is routine — the author sends a
+ticket back from `Design review` and the next pass draws less — so the label the first pass
+took stayed on the ticket holding the mutex against every other ticket naming that system, with
+no legal way for any pass to clear it. Catapult's `ORC-141` sat on `system:delivery` that way;
+only a direct tracker write got it off.
+
+**A label the branch's own files require is never released**, whatever the touch list says. CI
+derives the labels it demands from the diff (§9), so releasing one the diff needs fails the
+next push — and the narrowing pass cannot know what an earlier pass or a dev round already put
+on the branch. Design's touch list is a prediction and the branch is evidence; evidence wins,
+and the kept label is reported on the ticket rather than dropped silently, because a pass and a
+branch that disagree about a ticket's scope is a thing for a person to look at.
+
+The release is checked against everything the branch changes against main, which is not the
+per-pass file list the ownership audit (§5) reads: that one is scoped to the run so a stray is
+billed to the pass that wrote it, while this asks whether the *branch* is done with a system.
+An absent list releases nothing and says so — a wiring gap must not read as permission — and a
+`prerequisite` pass (§3) declares no touch list at all, so it releases nothing either: a pass
+that could not read its scope does not get to decide the mutex.
+
 **"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
 commits are on main, so a ticket starting afterwards contains that work rather than racing it —
 there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
@@ -911,6 +975,7 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
+| `prerequisite` | The scope depends on something not on `main` and not this ticket's to write. Written by `abort --reason prerequisite` (§3, §12, §13), and the outcome a design pass reports it with. Land the other change, then return the ticket to its queue. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
@@ -1164,10 +1229,10 @@ one no agent will act on.
 
 **And they are not prompt material.** A marker is an address, not an argument, so what reaches a
 model is the prose under the header and nothing else — with the comments that carry no prose
-dropped whole. Kind alone does not decide it: `blocked` is posted for six different arrivals
-(§12), and a push-back, a needs-setup, an author-only split and a scope-satisfied park each
-carry the argument that put the ticket there, while a plain failed run carries a URL and the
-captured tail of a crash. That last one on a prompt is the previous run's death handed to the
+dropped whole. Kind alone does not decide it: `blocked` is posted for seven different arrivals
+(§12), and a push-back, a needs-setup, an author-only split, a scope-satisfied park and a
+prerequisite park each carry the argument that put the ticket there, while a plain failed run
+carries a URL and the captured tail of a crash. That last one on a prompt is the previous run's death handed to the
 next run as context. So the flavor decides, not the kind.
 
 Two things were wrong before, not one. Bytes: a ticket that fails repeatedly grows its own
@@ -1713,7 +1778,7 @@ the review working rather than failing. That's an argument for a comment, not a 
 
 ## 12. Failure handling
 
-**`Blocked` is global.** Any agent may move any ticket there. It has six flavors, and both
+**`Blocked` is global.** Any agent may move any ticket there. It has seven flavors, and both
 the comment and a label say which:
 
 - **Something failed.** Name what failed and the state it was in.
@@ -1733,6 +1798,14 @@ the comment and a label say which:
   `Done` stays a record of what actually shipped — but sometimes a scope that went stale and
   wants rewriting, and the pipeline cannot tell which. It parks with the run's hand-back and
   the author decides.
+- **Nothing failed, and the thing this ticket builds on isn't there yet.** The `prerequisite`
+  case (§3): the scope depends on a change that is not on `main` and is not this ticket's to
+  write, so there is nothing to decide. It fits the `needs-setup` sentence — a human has to do
+  something the run cannot — and gets its own label anyway, because the action and the clearing
+  condition are different: `needs-setup` wants a secret provisioned now, this wants another
+  change merged and then this ticket put back in its queue. The design pass reaches it as an
+  outcome rather than an abort (§13); without it such a pass had no legal outcome, died, and
+  parked under `failed`, reading as a harness fault.
 - **Nothing failed, and the design can't be built as drawn.** The `pushback` case (§2.7), which
   parks here rather than looping back to the design queue.
 - **Nothing failed, and no agent can land the change.** The `author-only` case: the work is in
@@ -1762,14 +1835,14 @@ credential and nothing else — no tracker key, no repository token — so it ca
 and that is the boundary rather than an oversight (§9). It writes `{"outcome": ..., "summary":
 ...}` alongside its hand-back and the harness routes it.
 
-**Three labels, not one**, because a duplicate ticket, a missing secret and an unbuildable
-design want three different actions from a human. A `Blocked` column that renders them
+**Four labels, not one**, because a duplicate ticket, a missing secret, an unlanded
+prerequisite and an unbuildable design want four different actions from a human. A `Blocked` column that renders them
 identically is one where every ticket has to be opened before it can be triaged, which is the
 same failure as a column where waiting and broken look alike.
 
-**And not four.** A run that changes nothing and names no reason is filed as `scope-satisfied`
-too, with a comment saying the label was inferred rather than reported. A fourth label for it
-was tried and dropped: it is the same status, read by the same person, answering the same
+**And not one more.** A run that changes nothing and names no reason is filed as
+`scope-satisfied` too, with a comment saying the label was inferred rather than reported. Its
+own label was tried and dropped: it is the same status, read by the same person, answering the same
 question, and two labels somebody triages identically are two labels they have to learn the
 difference between for nothing. The hedge belongs in the prose, where it can be read, rather
 than in a label, which is read at a glance.
@@ -2237,8 +2310,10 @@ without passing through `Design review`.
 | abort | `needs-setup` | `Blocked` | `needs-setup` | blocked, **`setup=1`** |
 | abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
 | abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
+| abort | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `artifacts` | `Design review` | the pass's mutex labels | — |
 | design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
+| design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `clear` | unchanged | removes `re-evaluate` | — |
 | design | `demote` | `Ready for design` | — | — |
 | reconcile | `pass` | `Merged` | — | merged |

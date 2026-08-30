@@ -14,6 +14,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/decisions"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
@@ -543,6 +544,7 @@ func assembleDesignPrompt(template string, res *agent.ClaimResult, outcomePath s
 		}
 	}
 	add(nonAsksSection(res.NonAsks, "proposing", res.Mode == "design", scopeOf(res)))
+	add(decisionsSection(res.Decisions, scopeOf(res)))
 	add(designBoundsSection(res.DesignOwnedPaths))
 	add(fmt.Sprintf("\n## Mechanics\n\n- Work on branch `%s` (already checked out); commit artifacts there.\n", res.Branch))
 	if outcomePath != "" {
@@ -688,6 +690,76 @@ func nonAsksSection(n *agent.NonAsks, verb string, maintain bool, scope *ticketS
 			"A `scope:` naming exactly one doc means the entry is in the wrong place.\n", n.Path)
 	}
 	return b.String()
+}
+
+// decisionsSection renders the standing-decision index (ORC-126).
+//
+// An index and not the text, because the text does not fit: Catapult's
+// `## Standing decisions` sections alone are 362KB, and one doc's is
+// 80KB. What is inlined is the headings and bullet leads — enough to
+// know a decision exists and which file states it — and the docs are in
+// the checkout, so the pass reads the one it needs.
+//
+// This is the difference between it and the non-asks section above,
+// which inlines whole entries: that document is written to be inlined
+// and these are not. The framing is otherwise the same, including the
+// part that matters most — a filtered list that does not say it is
+// filtered reads as the whole corpus, and then "the docs say nothing
+// about this" becomes a conclusion the pass had no grounds for.
+func decisionsSection(d *agent.Decisions, scope *ticketScope) string {
+	if d == nil || (len(d.Docs) == 0 && len(d.Unreadable) == 0) {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Already decided — read before deciding it again (DESIGN 4)\n\n")
+	b.WriteString("Headings and decision leads from this project's screen and system docs. This is an index, not the text: it tells you a decision exists and where it is stated. Open the file before you contradict one, and cite it when you build on one.\n\n")
+	b.WriteString("A design pass once spent a full run re-verifying a fact two of these docs already stated in near-identical words. Re-deriving a settled decision is not a cheap mistake — it arrives at Design review looking like new work.\n")
+
+	var shown, rest []decisions.Doc
+	if scope != nil {
+		shown, rest = decisions.Select(d.Docs, scope.Labels, scope.Text)
+	} else {
+		shown = d.Docs
+	}
+	if len(d.Unreadable) > 0 {
+		fmt.Fprintf(&b, "\n**Not read this run:** %s. That is NOT the same as those docs deciding nothing — treat them as unknown.\n", strings.Join(backtickList(d.Unreadable), ", "))
+	}
+	if len(d.Docs) == 0 {
+		return b.String()
+	}
+	if len(shown) == 0 {
+		b.WriteString("\nNone of this project's docs are named by this ticket. That is a selection, not an empty tree: it has docs, and none of them match what this ticket names.\n")
+	}
+	for _, doc := range shown {
+		if len(doc.Entries) == 0 {
+			fmt.Fprintf(&b, "\n### `%s`\n\nNo headings or decision bullets — a stub, or front matter only.\n", doc.Path)
+			continue
+		}
+		fmt.Fprintf(&b, "\n### `%s`\n\n", doc.Path)
+		for _, e := range doc.Entries {
+			fmt.Fprintf(&b, "- %s\n", e)
+		}
+	}
+	// The rest by name and count. A pass whose work reaches further than
+	// the selection should not have to guess whether a doc exists — the
+	// count is what says "there is something in there to read".
+	if len(rest) > 0 {
+		var names []string
+		for _, doc := range rest {
+			names = append(names, fmt.Sprintf("`%s` (%d)", doc.Path, len(doc.Entries)))
+		}
+		fmt.Fprintf(&b, "\n**%d of %d docs**, selected by this ticket's scope. The rest, with their entry counts: %s. They are in the checkout — read one if your work reaches it.\n",
+			len(shown), len(d.Docs), strings.Join(names, ", "))
+	}
+	return b.String()
+}
+
+func backtickList(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, "`"+s+"`")
+	}
+	return out
 }
 
 // assembleBoundaryPrompt: the milestone, what already ran, and the
@@ -884,6 +956,13 @@ func cmdAgentFinish(args []string) error {
 	// whose work was fine.
 	commits := fs.Int("commits", -1, "commits on the branch that main does not have (dev); 0 parks the ticket as scope-satisfied")
 	changedPath := fs.String("changed-files", "", "file with one changed path per line; what a reported mutex label (dev) and the design ownership boundary (design) are checked against")
+	// Everything the branch changed against main, which is not what
+	// --changed-files holds: that one is scoped to the run, deliberately,
+	// so an ownership stray is billed to the pass that wrote it. Releasing
+	// a mutex label asks the other question — is the *branch* done with
+	// this system — and answering it from one pass's files would release a
+	// label an earlier pass's commits still need.
+	branchPath := fs.String("branch-files", "", "file with one path per line: everything the branch changes against main; what releasing a stale mutex label is checked against (design)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -914,6 +993,10 @@ func cmdAgentFinish(args []string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	branchFiles, err := readPathList(*branchPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	if res.Mode == "reconcile" {
 		if *verdict == "" {
@@ -941,7 +1024,7 @@ func cmdAgentFinish(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed); err != nil {
+		if err := agent.FinishDesign(context.Background(), p, h, res, o, *previewURL, *baseSHA, changed, branchFiles); err != nil {
 			return err
 		}
 		if err := postFindings(p, res.TicketID, *findings); err != nil {
@@ -987,8 +1070,8 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "pushback, failed, needs-setup or scope-satisfied")
-	message := fs.String("message", "", "the argument (required for pushback and needs-setup)")
+	reason := fs.String("reason", "failed", "one of protocol.AbortReasons: pushback, failed, needs-setup, author-only, scope-satisfied or prerequisite")
+	message := fs.String("message", "", "the argument (required for every reason but failed)")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
