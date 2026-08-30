@@ -141,13 +141,28 @@ func promotable(s *Snapshot, t *Ticket) bool {
 // sat in `Boundary review` behind thirteen of them, and the report said
 // only that the queue was paused.
 //
-// `Urgent` is not a second exemption here, though it is one at pickup
-// (§8). There it means finishing work already designed; a ticket still in
-// `Todo` is undesigned whatever its priority, and §8's answer for a true
-// stop-the-world fix is to bypass the pipeline rather than to widen this.
+// `Urgent` is the second exemption, and it is the same one pickup already
+// grants: anything urgent enough to carry the flag outranks the pause
+// wherever the pause would hold it. The flag means one thing across the
+// pipeline rather than one thing at pickup and another here, which is
+// what an author reaching for it is entitled to assume.
+//
+// The narrower reading — that dev under `Urgent` is finishing work already
+// designed while promotion would start work that is not — is true and is
+// not the point. An urgent ticket in `Todo` has never been designed, so
+// under it the pickup override was unreachable for exactly the tickets
+// that needed it: the ticket could not reach `Ready for dev`, which is the
+// only queue pickup can see. It bought no scope freeze either, because the
+// ticket ran the moment the boundary closed.
+//
+// This does cost something, and the cost is real rather than notional: an
+// urgent promotion adds artifacts and mutex labels to a milestone mid-
+// audit, which is the thing the pause exists to prevent. It is accepted
+// because `Urgent` is the author's own declaration that this ticket
+// outranks the ordering, and the boundary pass is theirs to run.
 func pausedFor(s *Snapshot, t *Ticket) bool {
 	b := s.boundaryTicket()
-	return b != nil && !b.Resolved() && !blocks(t, b.ID)
+	return b != nil && !b.Resolved() && !t.Urgent() && !blocks(t, b.ID)
 }
 
 // blockedBeforeMerge reports whether any blocker has yet to reach `Merged`.

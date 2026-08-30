@@ -1,5 +1,5 @@
 {
-  "name": "urgent overrides the boundary pause; boundary agent waits for open blockers (DESIGN 8, 10)",
+  "name": "urgent overrides the boundary pause at design and at dev, but not the milestone; boundary agent waits for open blockers (DESIGN 8, 10)",
   "steps": [
     {"kind": "milestone", "name": "M1"},
     {"kind": "seed", "key": "T1", "state": "done", "milestone": "M1"},
@@ -13,6 +13,23 @@
     {"kind": "seed", "key": "T2", "state": "ready_for_dev", "milestone": "M2", "priority": 1},
     {"kind": "sweep"},
     {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true},
+
+    {"kind": "seed", "key": "U1", "state": "todo", "milestone": "M1", "priority": 1},
+    {"kind": "seed", "key": "U2", "state": "todo", "milestone": "M1", "createdAgo": "4h"},
+    {"kind": "seed", "key": "U3", "state": "todo", "milestone": "M2", "priority": 1},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "U1", "state": "ready_for_design"},
+    {"kind": "expect", "key": "U2", "state": "todo"},
+    {"kind": "expect", "key": "U3", "state": "todo"},
+
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "U1", "runKind": "design", "runLive": true},
+    {"kind": "expect", "key": "U2", "state": "todo"},
+    {"kind": "expect", "key": "U3", "state": "todo"},
+
+    {"kind": "transition", "key": "U1", "to": "designing", "actor": "design"},
+    {"kind": "run-end", "key": "U1"},
+    {"kind": "transition", "key": "U1", "to": "design_review", "actor": "design"},
 
     {"kind": "seed", "key": "T3", "state": "ready_for_dev", "milestone": "M1", "blocks": ["B-M1"]},
     {"kind": "advance", "by": "1m"},

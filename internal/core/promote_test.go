@@ -116,20 +116,44 @@ func TestNoCurrentMilestonePromotesNothing(t *testing.T) {
 	}
 }
 
-// The pause is per ticket, and the exception is the tickets marked as
-// blocking the boundary — the milestone's remaining scope, which the
-// author committed to by filing them there (DESIGN §8, §10).
-//
-// Urgent is in this case to pin the half that did not move: it overrides
-// the pause at dev pickup, where it means finishing work already designed,
-// and a ticket in Todo is undesigned whatever its priority.
-func TestOnlyBoundaryBlockersPromoteWhilePaused(t *testing.T) {
+// The pause is per ticket, and blocking the boundary is one of its two
+// exemptions — the milestone's remaining scope, which the author committed
+// to by filing it there (DESIGN §8, §10).
+func TestABoundaryBlockerPromotesWhilePaused(t *testing.T) {
 	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
 	blocker := tk("T1", protocol.Todo, func(t *Ticket) { t.Blocks = []string{"B1"} })
-	urgent := tk("T2", protocol.Todo, func(t *Ticket) { t.Priority = 1 })
-	got := promotions(snap(b, urgent, blocker))
+	ordinary := tk("T2", protocol.Todo)
+	got := promotions(snap(b, ordinary, blocker))
 	if len(got) != 1 || got[0] != "T1" {
-		t.Errorf("promoted %v during the boundary pause, want T1 alone", got)
+		t.Errorf("promoted %v during the boundary pause, want the blocker T1 alone", got)
+	}
+}
+
+// Urgent is the other, and it is the same exemption pickup already grants:
+// the flag means one thing across the pipeline. Under the narrower reading
+// the pickup override was unreachable for an urgent ticket in Todo, which
+// can never reach Ready for dev without a design pass.
+func TestUrgentPromotesWhilePaused(t *testing.T) {
+	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	urgent := tk("T1", protocol.Todo, func(t *Ticket) { t.Priority = 1 })
+	ordinary := tk("T2", protocol.Todo)
+	got := promotions(snap(b, ordinary, urgent))
+	if len(got) != 1 || got[0] != "T1" {
+		t.Errorf("promoted %v during the boundary pause, want the urgent T1 alone", got)
+	}
+}
+
+// Urgent clears the pause and nothing else. The milestone condition is a
+// commitment the author makes by assigning it, not an ordering the flag
+// outranks — so an urgent ticket in a later milestone still waits, pause
+// or no pause, and reading "urgent overrides" as "urgent promotes" would
+// start work on a milestone nobody has pulled.
+func TestUrgentDoesNotOverrideTheMilestoneCommitment(t *testing.T) {
+	b := tk("B1", protocol.Todo, func(t *Ticket) { t.Labels = []string{LabelBoundary} })
+	later := tk("T1", protocol.Todo, func(t *Ticket) { t.Priority = 1; t.Milestone = "M2" })
+	bare := tk("T2", protocol.Todo, func(t *Ticket) { t.Priority = 1; t.Milestone = "" })
+	if got := promotions(snap(b, later, bare)); len(got) != 0 {
+		t.Errorf("promoted %v, want nothing — Urgent clears the pause, not the milestone", got)
 	}
 }
 
