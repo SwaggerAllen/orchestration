@@ -82,6 +82,11 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	// Read before proposing (DESIGN §4), and written back to in the same
 	// artifacts commit when a push-back establishes a new refusal.
 	res.NonAsks = ClaimNonAsks(p.Config)
+	// What the project's own docs have already settled (ORC-126). Read
+	// here beside the non-asks, and for the same reason: both are files
+	// in the checkout the pass could open, and both are the inputs a
+	// pass skips when nothing puts them in front of it.
+	res.Decisions = ClaimDecisions(p.Config)
 	if pr := p.PRForTicket(ctx, t.Key); pr != nil {
 		res.Branch = pr.Branch
 		res.PRNumber = pr.Number

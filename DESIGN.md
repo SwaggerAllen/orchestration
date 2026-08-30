@@ -320,6 +320,29 @@ system owns. One doc per system for the same reason as one doc per screen: a mon
 architecture document goes stale as a whole, and nobody can tell which ticket last verified
 which paragraph. No inventory of what the code contains — the code is that inventory.
 
+**The design prompt carries an index of what those docs already decided.** Every heading and
+every top-level bullet's lead from `systems/*.md` and `screens/*.md`, selected by the ticket's
+scope with the rule the non-asks selection uses, with the unselected docs named and counted so
+a pass reaching further knows they are there. Catapult's `ORC-126` is the measurement: a design
+pass spent a full run re-verifying "no assignee or role-holder projection exists", which
+`systems/dashboard.md` and `screens/my-queue.md` already stated in near-identical words, with
+the same evidence and the same conclusion. Nothing put those in front of it, and a re-derived
+decision arrives at Design review looking like new work.
+
+An index rather than the text, and that is a measurement too: the `## Standing decisions`
+sections in Catapult's system docs come to 362KB, one of them 80KB on its own, against 25.6KB
+for the whole index. What is inlined is enough to know a decision exists and which file states
+it; the docs are in the checkout. So this is the non-asks argument — a prompt whose most
+important input is "go read this file" is a prompt whose most important input is optional —
+answered at the size the input actually is.
+
+It indexes headings *and* bullet leads because both are how these docs carry a decision, read
+off the tree rather than assumed: all of Catapult's system docs put theirs in a
+`## Standing decisions` bullet list, and none of its screen docs do — a screen doc's headings
+*are* its decisions. Needing no rule about which heading counts is the part worth having: it is
+a prompt input rather than a gate, so nothing here can report a decision the doc does not
+contain, and the worst a bad entry costs is a line.
+
 A design pass's structural output — **the sketch** — is a *diff against these docs*, committed
 on the ticket branch like every other design artifact. A new system is a new doc; a moved
 boundary is a changed doc; a new table or dependency is named in the owning doc's diff. §1

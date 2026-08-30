@@ -222,6 +222,20 @@ func Select(entries []Entry, labels []string, ticketText string) []Entry {
 	return out
 }
 
+// ScopeMatches is Select's per-entry rule, exported because a second
+// caller needs the same question answered about a different thing: the
+// standing-decision index picks the docs a pass is shown by asking
+// whether this ticket names them (internal/decisions). Two copies of a
+// scope rule is two rules — this one over-selects on purpose, and a copy
+// that quietly stopped would hide exactly what it was written to show.
+func ScopeMatches(scope, labels []string, ticketText string) bool {
+	held := map[string]bool{}
+	for _, l := range labels {
+		held[strings.ToLower(l)] = true
+	}
+	return matches(scope, held, strings.ToLower(ticketText))
+}
+
 func matches(scope []string, held map[string]bool, text string) bool {
 	for _, s := range scope {
 		if held[strings.ToLower(s)] {

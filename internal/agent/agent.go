@@ -18,6 +18,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/decisions"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -111,6 +112,38 @@ type ClaimResult struct {
 	// the harness at claim. Rework mode only, and absent when the branch
 	// bounced for a reason other than red checks.
 	CIFailure *CIFailure `json:",omitempty"`
+	// Decisions indexes what this project's screen and system docs have
+	// already settled (ORC-126; internal/decisions). Design only: it is
+	// the pass that decides, and the pass that was found re-deciding.
+	Decisions *Decisions `json:",omitempty"`
+}
+
+// Decisions is the standing-decision index, read out of the project
+// checkout at claim time like the non-asks document beside it.
+type Decisions struct {
+	Docs []decisions.Doc `json:",omitempty"`
+	// Unreadable names the docs that could not be read. Reported rather
+	// than swallowed, for the reason NonAsks.Err is: "this project
+	// records no decision about that" and "I could not read what it
+	// records" license very different confidence in a pass that decides
+	// against the grain.
+	Unreadable []string `json:",omitempty"`
+}
+
+// ClaimDecisions reads the index. Never an error: it is a prompt input,
+// and failing a design run over an unreadable doc trades a run that is
+// shown less for no run at all.
+func ClaimDecisions(cfg *config.Config) *Decisions {
+	d := &Decisions{}
+	for _, dir := range []struct{ dir, prefix string }{
+		{"systems", protocol.SystemLabelPrefix},
+		{"screens", protocol.ScreenLabelPrefix},
+	} {
+		docs, bad := decisions.LoadDir(cfg.Root, dir.dir, dir.prefix)
+		d.Docs = append(d.Docs, docs...)
+		d.Unreadable = append(d.Unreadable, bad...)
+	}
+	return d
 }
 
 // CIFailure is the evidence behind a rework. The failure comment is the

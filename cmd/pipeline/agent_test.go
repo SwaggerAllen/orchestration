@@ -9,6 +9,7 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/decisions"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 )
@@ -783,5 +784,62 @@ func TestDesignRolePromptBoundsWhoMayWidenTheTicket(t *testing.T) {
 		if !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
 			t.Errorf("prompts/design.md does not mention %q", want)
 		}
+	}
+}
+
+// ORC-126: a design pass spent a full run re-verifying a fact that
+// systems/dashboard.md and screens/my-queue.md already stated in
+// near-identical words. Nothing put those in front of it.
+func TestDesignPromptIndexesWhatTheDocsAlreadyDecided(t *testing.T) {
+	got := assembleDesignPrompt("ROLE", &agent.ClaimResult{
+		TicketKey: "DUM-1", Title: "Assignee projection for the dashboard",
+		Mode: "design", Branch: "b",
+		Decisions: &agent.Decisions{Docs: []decisions.Doc{
+			{Path: "systems/dashboard.md", Name: "dashboard", Label: "system:dashboard",
+				Entries: []string{"No assignee or role-holder projection exists"}},
+			{Path: "systems/delivery.md", Name: "delivery", Label: "system:delivery",
+				Entries: []string{"Ports with fakes, exactly like the Go pipeline"}},
+		}},
+	}, "/tmp/outcome.json")
+
+	if !strings.Contains(got, "No assignee or role-holder projection exists") {
+		t.Error("the decision the pass would re-derive is not in the prompt")
+	}
+	if !strings.Contains(got, "systems/dashboard.md") {
+		t.Error("the index names the decision but not the file it is in — the pass cannot read further")
+	}
+	if strings.Index(got, "No assignee or role-holder") > strings.Index(got, "## Mechanics") {
+		t.Error("the index lands after the mechanics; it is an input to the work, not a footnote")
+	}
+	// Selected by the ticket's own words, since a first design pass
+	// carries no mutex labels (DESIGN §6).
+	if strings.Contains(got, "Ports with fakes") {
+		t.Error("an unselected doc's entries were inlined — the whole corpus does not fit")
+	}
+	if !strings.Contains(got, "`systems/delivery.md` (1)") {
+		t.Error("an unselected doc must still be named with its count: a pass reaching further should not have to guess it exists")
+	}
+	if !strings.Contains(got, "1 of 2 docs") {
+		t.Error("a filtered list that does not say it is filtered reads as the whole corpus")
+	}
+}
+
+// "This project decided nothing about that" and "I could not read what
+// it decided" license very different confidence in a pass deciding
+// against the grain — the same three-empty-states discipline the
+// non-asks section keeps.
+func TestTheDecisionIndexSaysWhatItCouldNotRead(t *testing.T) {
+	got := decisionsSection(&agent.Decisions{Unreadable: []string{"systems/engine.md"}}, nil)
+	if !strings.Contains(got, "systems/engine.md") || !strings.Contains(got, "NOT the same") {
+		t.Errorf("an unreadable doc went unreported: %q", got)
+	}
+	if decisionsSection(nil, nil) != "" {
+		t.Error("a project with no docs gets no section rather than an empty heading")
+	}
+	empty := decisionsSection(&agent.Decisions{Docs: []decisions.Doc{
+		{Path: "systems/engine.md", Name: "engine", Label: "system:engine", Entries: []string{"Ports with fakes"}},
+	}}, &ticketScope{Text: "Bump the CI runner image"})
+	if !strings.Contains(empty, "That is a selection, not an empty tree") {
+		t.Errorf("an empty selection reads as a project that decided nothing: %q", empty)
 	}
 }

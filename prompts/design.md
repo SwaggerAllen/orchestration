@@ -191,6 +191,18 @@ never committed.
   branch's storybook export and puts the URL on the ticket when it asks
   for review, so your summary does not need to say where to look — say
   what to look *at*, and why it is drawn that way.
+- **Check what has already been decided before you decide it.** The
+  prompt carries an index of the headings and decision leads in this
+  project's screen and system docs, selected by this ticket's scope. It
+  is an index, not the text — the docs are in the checkout, so open the
+  one that matters. A pass once spent its whole run re-verifying a fact
+  two of those docs already stated in near-identical words, with the
+  same evidence and the same conclusion; it arrived at Design review
+  looking like new work.
+
+  Cite the decision when you build on one, and say so explicitly when
+  you contradict one — a reversal the author cannot see is a reversal
+  they cannot review.
 - **A problem with the pipeline goes in the harness findings**, not in
   your summary and not into `non-asks.md`. The non-asks file records
   what the author does not want built; a harness finding records what
