@@ -660,10 +660,21 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 	// bound is needed all the same: without one, an active main and a
 	// slow ticket loop between Reconciling and the queue forever, with
 	// each pass burning a full agent run.
-	if t.State == protocol.ReadyForRework && len(markersOf(t, marker.MergeConflict)) >= 3 {
-		return block(t,
-			&marker.Marker{Kind: marker.MergeConflict, Fields: map[string]string{"escalated": "true"}},
-			"This branch has failed to merge three times: every reconciliation passed and every merge hit a conflict with work that landed first. That is a sequencing problem rather than a problem with the ticket — hold the competing work, or land this by hand (DESIGN §12).",
+	//
+	// Counted against what has already been escalated rather than against
+	// the state, for the reason the bounce rule below gives: the author
+	// is free to send this back to Ready for rework and the conflicts do
+	// not go away when they do. Here that mattered twice over, because
+	// the escalation used to post its own marker under `merge-conflict` —
+	// the kind it was counting — so one escalation took a ticket from
+	// three conflicts to four and the rule re-read its own output as a
+	// fourth. It posts a `blocked` marker now.
+	if n := len(markersOf(t, marker.MergeConflict)); t.State == protocol.ReadyForRework &&
+		n >= 3 && !alreadyEscalatedAt(t, "conflicts", n) {
+		return block(t, &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{
+			"conflicts": strconv.Itoa(n),
+		}},
+			"This branch has failed to merge three times: every reconciliation passed and every merge hit a conflict with work that landed first. That is a sequencing problem rather than a problem with the ticket — hold the competing work, or land this by hand. Sending it back to `Ready for rework` for another attempt is a legitimate answer too, and it will not be escalated again unless a fourth conflict lands (DESIGN §12).",
 			"third merge conflict")
 	}
 
@@ -676,9 +687,9 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 	// the ticket to Ready for rework — a state DESIGN §12 explicitly
 	// leaves them free to choose — left the two markers in place, so the
 	// next sweep re-read them and blocked it again. See
-	// alreadyEscalatedBounce for the ticket that measured it.
+	// alreadyEscalatedAt for the ticket that measured it.
 	if n := len(markersOf(t, marker.ReconcileBounce)); t.State == protocol.ReadyForRework &&
-		n >= 2 && !alreadyEscalatedBounce(t, n) {
+		n >= 2 && !alreadyEscalatedAt(t, "bounces", n) {
 		return block(t, &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{
 			"bounces": strconv.Itoa(n),
 		}},

@@ -63,8 +63,9 @@ func alreadyReportedCIRed(t *Ticket, runURL string, runAttempt int) bool {
 	return false
 }
 
-// alreadyEscalatedBounce reports whether the second-bounce escalation has
-// already fired at this many reconcile bounces.
+// alreadyEscalatedAt reports whether a marker-counted escalation has
+// already fired at this count, reading the count it recorded on the
+// `blocked` marker's own field.
 //
 // The escalation used to be a fact about state alone — `Ready for rework`
 // plus two bounce markers — which made it a trap rather than a rule. Only
@@ -83,14 +84,21 @@ func alreadyReportedCIRed(t *Ticket, runURL string, runAttempt int) bool {
 // information and escalates; the author deciding to try once more is not,
 // and stands.
 //
-// A marker written before this field existed carries no count, so it
+// A marker written before its field existed carries no count, so it
 // suppresses nothing — deliberately, since the alternative reads every
 // older block as an escalation at the current count and would swallow a
-// genuine third bounce. A ticket already parked at two escalates once
-// more, and then holds.
-func alreadyEscalatedBounce(t *Ticket, bounces int) bool {
+// genuine further failure. A ticket already parked at the threshold
+// escalates once more, and then holds.
+//
+// One function for both marker-counted escalations, because they share
+// the defect as well as the shape: the merge-conflict rule had it too,
+// and worse. It wrote its own escalation under `merge-conflict`, the
+// very kind it was counting, so escalating once took a ticket from three
+// conflicts to four and the rule then re-read its own output as a fourth.
+// A marker's kind is what happened, and an escalation is not a conflict.
+func alreadyEscalatedAt(t *Ticket, field string, count int) bool {
 	for _, m := range markersOf(t, marker.Blocked) {
-		if v, err := strconv.Atoi(m.Fields["bounces"]); err == nil && v >= bounces {
+		if v, err := strconv.Atoi(m.Fields[field]); err == nil && v >= count {
 			return true
 		}
 	}
