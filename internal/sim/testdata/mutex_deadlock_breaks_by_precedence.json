@@ -1,0 +1,22 @@
+{
+  "name": "two idle queued tickets sharing a system label do not stall each other: precedence picks one, and the loser waits for real work rather than for a hand (DESIGN 6, 7)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_rework", "labels": ["system:delivery"]},
+    {"kind": "seed", "key": "T2", "state": "ready_for_rework", "labels": ["system:delivery"]},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "runKind": "dev", "runLive": true},
+    {"kind": "expect", "key": "T2", "state": "ready_for_rework", "runLive": false},
+
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "state": "ready_for_rework", "runLive": false},
+
+    {"kind": "ci", "key": "T1", "status": "green", "run": "https://ci/1"},
+    {"kind": "sweep"},
+    {"kind": "transition", "key": "T1", "to": "merged", "actor": "reconcile"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true}
+  ]
+}

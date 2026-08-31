@@ -112,7 +112,10 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 		if t.HasLabel(LabelReEvaluate) {
 			return refuse("pickup %s: re-evaluate blocks pickup until design clears it (DESIGN §7)", t.Key)
 		}
-		if other, mine := MutexHolder(s, t); other != nil {
+		// MutexBlocker, matching the dispatcher exactly: this is the
+		// same "may work start now" question, and the two answering it
+		// differently is the failure the shared function exists to stop.
+		if other, mine := MutexBlocker(s, t); other != nil {
 			return refuse("pickup %s: mutex label %q already in flight on %s (DESIGN §6)", t.Key, mine, other.Key)
 		}
 		if blockedByOpen(s, t) {

@@ -207,8 +207,10 @@ A `prerequisite` pass declares no screens and no systems, and the harness refuse
 it does. This is where it differs from the decisionless exception, which still declares its
 systems: a decisionless pass read the scope and knows what it will touch, while a prerequisite
 pass is reporting that it could not read the scope, so its touch list is a guess. `Blocked` is
-in flight as far as the mutex is concerned (§6), so a guessed label there locks every other
-ticket naming that system out until a human moves this one.
+not in flight and does not hold the mutex (§6) — which is what makes moving a ticket there the
+manual release when one is stuck — so a guessed label locks nobody out while it sits. It takes
+effect against every other ticket naming that system the moment a human moves this one back
+into a queue.
 
 **Design gets a queue state for the same reason dev has one, and did not have one for far too
 long.** `Designing` used to mean both "queued for design" and "a design agent is working on
@@ -778,13 +780,41 @@ a queue held by a ticket that was finished. If the deploy fails and the author s
 it re-enters the queue and re-takes the mutex then, which is ordinary contention rather than a
 special case.
 
+**An idle queued holder yields to a ticket that precedes it.** The rule is enforced at three
+doors and only one of them is preventive, so the state it guards against arrives anyway: a
+CI-red bounce lands a ticket in `Ready for rework` whether or not another already holds its
+label, and the author moving one out of `Blocked` does the same. Two tickets that arrive that
+way are each other's holder, so neither dispatches and neither can be picked up — the mutex
+stops serializing them and stalls both, with the dev agent idle and the sweep planning nothing.
+Catapult's `ORC-171` and `ORC-174` share `system:delivery` and `system:platform_content` and
+sat in `Ready for rework` together from 03:37:28Z to 05:12:52Z on 2026-08-31 — an hour and
+thirty-five minutes, ended only by the author moving one to `Blocked` by hand, after which the
+other started `Reworking` seventy-seven seconds later.
+
+So a holder that is *waiting* — in `Ready for dev` or `Ready for rework` with no run live on it
+— does not block a ticket that precedes it (§7). Precedence is a total order, so exactly one of
+any set of idle tickets sharing a label is free and the rest are held by it; the winner's claim
+writes its working state, which is not waiting, and from that beat it holds the label
+unconditionally. Two agents are never in one system at one time, which is what this section is
+for. What changes is that "both waiting" no longer reads as "both working". The tie-break only
+ever unblocks: it can free a ticket that was stuck, never start a second agent.
+
 **The dispatcher asks the same question the pickup assertion does**, through the same
 function. It used not to ask at all, so a ticket whose label was held was dispatched into an
 assertion that could only refuse — and because the refusal leaves the ticket in the queue, the
 next beat did it again. Each of those was a full billed job with a checkout, a toolchain and a
 service container, spent to be told no. Two places asking one question is exactly the shape
-that drifts, so there is one `MutexHolder` and three callers: the promotion revert, the
-pickup assertion, and the dispatcher.
+that drifts, so there is one `MutexBlocker` and two callers: the pickup assertion and the
+dispatcher. Both ask whether work may *start* now, and the tie-break is part of that answer.
+
+**The promotion revert asks a different question and gets the strict answer.** May this ticket
+*enter* the queue is not may work start on it, so that door calls `MutexHolder`, which applies
+no tie-break: every in-flight holder short of `Merged` blocks. It is the preventive half of
+this section, and the deadlock does not arrive through it — both tickets above reached `Ready
+for rework` by bouncing, a path this door never sees — so relaxing it would widen what may
+queue on one system while rescuing nothing already stuck. The two functions share one loop, so
+the set of holders and the label reported cannot drift apart; the tie-break is the whole
+difference between them.
 
 **Agent singularity is enforced twice, at two different moments, and both halves are load
 bearing.** Everything that asks "is this agent kind busy" reads the agent-run list, and a run
@@ -1269,7 +1299,8 @@ revert is real, and it is closed from the other side — every agent's pickup as
 re-verifies these invariants before acting, so a state the control plane is about to undo is
 one no agent will act on.
 
-- promotion into `Ready for dev` while the screen label is already in flight → reverted
+- promotion into `Ready for dev` while a mutex label is already in flight → reverted, on the
+  strict reading with no tie-break (§6)
 - any forward transition while `re-evaluate` is set → reverted
 - `Designing` → `Ready for dev` without passing through `Design review`, or a sign-off not made
   by the author → reverted — unless the design agent's marker comment declares a decisionless
