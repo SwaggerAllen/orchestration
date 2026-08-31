@@ -8,6 +8,7 @@ package core
 import (
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -194,6 +195,11 @@ type Ticket struct {
 	// completion because nothing could see them both.
 	LiveRuns  []Run
 	CreatedAt time.Time
+	// HandMerges are merges found on the host that this ticket carries no
+	// `merged` marker for. Filled by the snapshot build only where the
+	// answer is wanted, and read by exactly one rule, which writes the
+	// missing marker (DESIGN §11).
+	HandMerges []HandMerge
 }
 
 // Snapshot is everything one sweep may consider. Durations that would
@@ -437,6 +443,40 @@ func mutexHolder(s *Snapshot, t *Ticket, yieldIdle bool) (*Ticket, string) {
 // the files the label covers.
 func (t *Ticket) queuedIdle() bool {
 	return (t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && !t.LiveRun("")
+}
+
+// HandMerge is a merge the pipeline did not make: a PR the author
+// merged, found by looking the ticket's branch up on the host.
+type HandMerge struct {
+	SHA string
+	PR  string
+}
+
+// MergedSHAs returns the ticket's merge commits from its `merged`
+// markers, oldest first — the order the comments are in, which is the
+// order the commits landed.
+//
+// All of them, not just the newest: a ticket merged, reverted by hand
+// and merged again has two, and a caller carrying one would leave half
+// of it on main when the rehearsal reset ran.
+//
+// One reader, because there were three near-copies of this loop and
+// they did not agree — the retro note took every marker and the deploy
+// check took the last, which is a real difference worth keeping, but it
+// is now the difference between this function and its caller rather
+// than between two hand-written loops that could drift apart.
+func MergedSHAs(t *Ticket) []string {
+	var out []string
+	for _, c := range t.Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok || m.Kind != marker.Merged {
+			continue
+		}
+		if sha := m.Fields["sha"]; sha != "" {
+			out = append(out, sha)
+		}
+	}
+	return out
 }
 
 // LiveRun reports whether the ticket has a live agent run of the given

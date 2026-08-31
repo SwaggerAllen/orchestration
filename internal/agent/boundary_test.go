@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
@@ -948,4 +949,57 @@ func TestProposalKindsReachTheirLabels(t *testing.T) {
 			t.Errorf("kind %q filed with labels %v, want %q", kind, got, label)
 		}
 	}
+}
+
+// The sweep backfills a missing `merged` marker while a ticket sits in
+// Merged, but it has to catch it there — Catapult's ORC-181 was in
+// Merged for 28 seconds and a sweep beat is minutes. The archive step
+// asks the host again at the one moment the shas are needed, because the
+// note is the last record of them: the tickets are archived straight
+// after, so a miss here is never recoverable.
+func TestBoundaryArchiveFindsAHandMergeTheSweepNeverSaw(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	now := time.Now()
+
+	tr.AddMilestone(cfg.Tracker.ProjectID, "M1", 1)
+	// Done, no `merged` marker: the author merged its PR by hand, which
+	// is the systematic case for a design-only ticket — no dev pass, so
+	// no reconcile to write one.
+	landed := seed(t, tr, cfg, "Settle the derived default", "d", protocol.Done)
+	if err := tr.Mutate(landed.ID, func(i *tracker.Issue) { i.Milestone = "M1" }); err != nil {
+		t.Fatal(err)
+	}
+	// A real merge sha, because the note's own format constrains it:
+	// retro.Parse reads `(merged <hex>)` with 7 to 40 hex characters, so
+	// a made-up placeholder round-trips as an entry with no commits and
+	// the test passes on a note the reset could not use.
+	handSHA := "3f9a2c1e845b76d0c93e5a7b1f8d24906ce5b3a7"
+	h.MergedPRs = []host.MergedPR{
+		{Number: 102, Branch: strings.ToLower(landed.Key) + "-settle-the-derived-default", MergeSHA: handSHA},
+	}
+
+	boundary := seedBoundary(t, tr, cfg)
+	plan, err := ClaimBoundary(ctx, p, boundary.Key, "run_71", "u", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BoundaryArchive(ctx, p, h, plan, now); err != nil {
+		t.Fatal(err)
+	}
+
+	note, ok := h.Files["docs/retros/m1.md"]
+	if !ok {
+		t.Fatalf("no retro note; files = %v", h.Files)
+	}
+	for _, e := range retro.Parse(note) {
+		if e.Key != landed.Key {
+			continue
+		}
+		if len(e.SHAs) != 1 || e.SHAs[0] != handSHA {
+			t.Errorf("entry carries %v, want the hand merge the host knows about:\n%s", e.SHAs, note)
+		}
+		return
+	}
+	t.Errorf("no entry for %s:\n%s", landed.Key, note)
 }

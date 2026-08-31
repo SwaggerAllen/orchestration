@@ -21,6 +21,13 @@ type Memory struct {
 	JobLogs map[string][]JobLog
 	// Merged records merged PRs: number -> merge SHA.
 	Merged map[int]string
+	// MergedPRs is the same merges with the branch kept, which is what
+	// correlates one back to its ticket. MergePR appends here, so a test
+	// that merges through the normal path needs no second setup; a test
+	// for a PR the *author* merged appends directly, because that merge
+	// never went through MergePR at all — which is the whole defect the
+	// backfill exists for.
+	MergedPRs []MergedPR
 	// Ancestry scripts IsAncestor: "ancestor..descendant" -> true.
 	// Identical SHAs are always ancestors, as in git.
 	Ancestry map[string]bool
@@ -94,6 +101,26 @@ func (m *Memory) ListOpenPRs(_ context.Context) ([]PR, error) {
 	defer m.mu.Unlock()
 	out := make([]PR, len(m.PRs))
 	copy(out, m.PRs)
+	return out, nil
+}
+
+// MergedPRsFor answers from MergedPRs, in insertion order — which is
+// merge order, so the port's "oldest merge first" holds without the fake
+// inventing timestamps to sort by.
+//
+// It filters by the same key-in-branch rule the real adapter uses rather
+// than returning whatever it holds: a fake that answers a question the
+// real one would refuse is how a caller passing the wrong key still
+// passes its test.
+func (m *Memory) MergedPRsFor(_ context.Context, ticketKey string) ([]MergedPR, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []MergedPR
+	for _, p := range m.MergedPRs {
+		if BranchBelongsTo(p.Branch, ticketKey) {
+			out = append(out, p)
+		}
+	}
 	return out, nil
 }
 
@@ -189,6 +216,12 @@ func (m *Memory) MergePR(_ context.Context, number int) (string, error) {
 		if p.Number == number {
 			sha := fmt.Sprintf("merge_%d", number)
 			m.Merged[number] = sha
+			m.MergedPRs = append(m.MergedPRs, MergedPR{
+				Number: number, Branch: p.Branch, MergeSHA: sha,
+			})
+			// Out of the open list, as on the real host: a merged PR is
+			// closed, so ListOpenPRs must stop returning it or the
+			// snapshot correlates a ticket to a PR that is gone.
 			m.PRs = append(m.PRs[:i], m.PRs[i+1:]...)
 			return sha, nil
 		}

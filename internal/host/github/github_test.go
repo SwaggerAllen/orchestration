@@ -605,3 +605,50 @@ func TestListAgentRunsFailsOnAWorkflowFileThatIsNotThere(t *testing.T) {
 		t.Errorf("error = %v, want it to name the workflow file the config got wrong", err)
 	}
 }
+
+// The adapter reads `merged_at`, not `state`. A PR closed without
+// merging is `state: "closed"` with `merged_at: null` and no commit
+// behind it — reporting one as a merge would put a SHA that never
+// landed into the retro note and hand the rehearsal reset a commit to
+// revert that does not exist.
+func TestMergedPRsForReadsMergedAtNotState(t *testing.T) {
+	var gotQuery string
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		gotQuery = r.URL.RawQuery
+		// Newest first, which is what the query asks for
+		// (sort=updated&direction=desc) and therefore what the real
+		// endpoint returns. An ascending fixture would leave the sort
+		// below untested — it did, and the probe that removed the sort
+		// printed ok.
+		return 200, []map[string]any{
+			{"number": 10, "merged_at": "2026-08-31T07:37:16Z", "merge_commit_sha": "newer",
+				"head": map[string]any{"ref": "orc-199-second-go"}},
+			// Closed, never merged: no commit to report.
+			{"number": 8, "merged_at": nil, "merge_commit_sha": "",
+				"head": map[string]any{"ref": "orc-199-abandoned"}},
+			// Another ticket's merge.
+			{"number": 9, "merged_at": "2026-08-31T06:00:00Z", "merge_commit_sha": "not-ours",
+				"head": map[string]any{"ref": "orc-200-different"}},
+			{"number": 7, "merged_at": "2026-08-31T05:29:08Z", "merge_commit_sha": "older",
+				"head": map[string]any{"ref": "orc-199-first-go"}},
+		}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).MergedPRsFor(t.Context(), "ORC-199")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotQuery, "state=closed") {
+		t.Errorf("query = %q, want the closed PRs — an open one has not merged", gotQuery)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %+v, want only ORC-199's two real merges", got)
+	}
+	if got[0].MergeSHA != "older" || got[1].MergeSHA != "newer" {
+		t.Errorf("got %q then %q, want oldest merge first", got[0].MergeSHA, got[1].MergeSHA)
+	}
+	if got[0].Number != 7 || got[0].Branch != "orc-199-first-go" {
+		t.Errorf("first merge = %+v, want PR 7 on its own branch", got[0])
+	}
+}

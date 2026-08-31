@@ -216,7 +216,30 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 			// tickets first, so a reset run after one found no tickets,
 			// produced an empty merge list, and left the last
 			// rehearsal's commits on main while reporting a green run.
-			entries = append(entries, retro.Entry{Key: t.Key, Title: t.Title, SHAs: mergedSHAs(t)})
+			shas := core.MergedSHAs(t)
+			if len(shas) == 0 {
+				// The sweep backfills a missing `merged` marker while
+				// the ticket sits in Merged (DESIGN §11), but it has to
+				// catch it there: Catapult's ORC-181 was in Merged for
+				// 28 seconds, and a sweep beat is minutes. This is the
+				// same lookup at the one moment the SHAs are actually
+				// needed, over the tickets being archived rather than
+				// the whole board.
+				//
+				// The note is the last record of these commits — the
+				// step archives the tickets straight after — so a miss
+				// here is not recoverable later, and the reset that
+				// reads it leaves the commits on main while reporting a
+				// green run.
+				merged, err := h.MergedPRsFor(ctx, t.Key)
+				if err != nil {
+					return fmt.Errorf("boundary archive: merged PRs for %s: %w", t.Key, err)
+				}
+				for _, m := range merged {
+					shas = append(shas, m.MergeSHA)
+				}
+			}
+			entries = append(entries, retro.Entry{Key: t.Key, Title: t.Title, SHAs: shas})
 			toArchive = append(toArchive, t.ID)
 		}
 	}
@@ -252,25 +275,6 @@ func BoundaryArchive(ctx context.Context, p *plane.Plane, h host.Host, plan *Bou
 		prose += "\n\n" + carried
 	}
 	return stepDone(ctx, p, plan, StepArchive, prose)
-}
-
-// mergedSHAs reads a ticket's merge commits off its `merged` markers,
-// oldest first — the order the comments are in, which is the order the
-// commits landed. All of them, not just the newest: a ticket merged,
-// reverted by hand and merged again has two, and a note carrying one
-// would leave half of it on main when the reset ran.
-func mergedSHAs(t *core.Ticket) []string {
-	var out []string
-	for _, c := range t.Comments {
-		m, ok, err := marker.Parse(c.Body)
-		if err != nil || !ok || m.Kind != marker.Merged {
-			continue
-		}
-		if sha := m.Fields["sha"]; sha != "" {
-			out = append(out, sha)
-		}
-	}
-	return out
 }
 
 // Proposal is one debt-scan or grooming finding headed for Triage.

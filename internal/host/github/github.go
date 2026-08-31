@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -357,6 +358,49 @@ func (c *Client) ListOpenPRs(ctx context.Context) ([]host.PR, error) {
 			Draft: p.Draft, URL: p.HTMLURL,
 		})
 	}
+	return out, nil
+}
+
+// MergedPRsFor lists closed PRs and keeps the merged ones whose head
+// branch belongs to this ticket, oldest merge first.
+//
+// `state=closed` rather than a commit search: the merge commit's subject
+// is whatever the person merging typed, while the head branch is named
+// by the pipeline and carries the key by construction (DESIGN §5). One
+// page of 100, newest-updated first, because this is asked only about a
+// ticket the sweep is looking at now — a PR that fell off that page
+// belongs to a milestone archived long ago.
+func (c *Client) MergedPRsFor(ctx context.Context, ticketKey string) ([]host.MergedPR, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=closed&sort=updated&direction=desc&per_page=100", c.owner, c.repo)
+	var data []struct {
+		Number         int        `json:"number"`
+		MergedAt       *time.Time `json:"merged_at"`
+		MergeCommitSHA string     `json:"merge_commit_sha"`
+		Head           struct {
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := c.rest(ctx, http.MethodGet, path, nil, &data); err != nil {
+		return nil, err
+	}
+	var out []host.MergedPR
+	for _, p := range data {
+		// merged_at nil is a PR closed without merging: no commit, so
+		// nothing to report. Reading `state` alone would count those,
+		// which is the `status`-is-not-`conclusion` mistake in another
+		// costume.
+		if p.MergedAt == nil || p.MergeCommitSHA == "" {
+			continue
+		}
+		if !host.BranchBelongsTo(p.Head.Ref, ticketKey) {
+			continue
+		}
+		out = append(out, host.MergedPR{
+			Number: p.Number, Branch: p.Head.Ref,
+			MergeSHA: p.MergeCommitSHA, MergedAt: *p.MergedAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].MergedAt.Before(out[j].MergedAt) })
 	return out, nil
 }
 

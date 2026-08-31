@@ -8,6 +8,7 @@ package host
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -34,6 +35,49 @@ type PR struct {
 	HeadSHA string
 	Draft   bool
 	URL     string
+}
+
+// BranchBelongsTo reports whether a branch names this ticket: the
+// lowercased key appearing in it as a whole token, not as a substring.
+//
+// The token check is the whole point. `orc-1` is a prefix of `orc-19`
+// and of `orc-181`, so a plain Contains would route ORC-19's PR to
+// ORC-1 — and with three digits in play that is not a corner case, it
+// is most of the board.
+//
+// One rule, and the callers that had been asking it separately now
+// share it: the open-PR correlation in the snapshot build and the
+// merged-PR lookup behind the hand-merge backfill. They are the same
+// question about the same convention (DESIGN §5) and drift between
+// them would route a ticket's PR one way and its merge commit another.
+func BranchBelongsTo(branch, ticketKey string) bool {
+	lb, lk := strings.ToLower(branch), strings.ToLower(ticketKey)
+	if lk == "" {
+		return false
+	}
+	for idx := 0; ; {
+		j := strings.Index(lb[idx:], lk)
+		if j < 0 {
+			return false
+		}
+		start, end := idx+j, idx+j+len(lk)
+		if (start == 0 || !isAlnum(lb[start-1])) && (end == len(lb) || !isAlnum(lb[end])) {
+			return true
+		}
+		idx = end
+	}
+}
+
+func isAlnum(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z'
+}
+
+// MergedPR is a PR that landed, and the commit it landed as.
+type MergedPR struct {
+	Number   int
+	Branch   string
+	MergeSHA string
+	MergedAt time.Time
 }
 
 // MergeState is whether a PR's branch can land on its base.
@@ -185,6 +229,18 @@ type Host interface {
 	// Returns an error wrapping ErrNotMergeable when the branch conflicts
 	// with its base, which is an ordinary outcome rather than a failure.
 	MergePR(ctx context.Context, number int) (string, error)
+	// MergedPRsFor returns the merged PRs belonging to a ticket, oldest
+	// merge first, with their merge commit SHAs.
+	//
+	// Closed PRs, which is why ListOpenPRs cannot answer it: the case
+	// this exists for is a PR the author merged by hand, and by the time
+	// anything asks, it is closed and gone from that list.
+	//
+	// Correlated by the ticket key in the head branch, the same routing
+	// DESIGN §5 already relies on — deriveBranch puts the lowercased key
+	// at the front of every branch the pipeline names, so the key is the
+	// join and nothing has to parse a commit subject to find it.
+	MergedPRsFor(ctx context.Context, ticketKey string) ([]MergedPR, error)
 	// IsAncestor reports whether ancestor is reachable from descendant:
 	// the real meaning of the design's `>=` (DESIGN §13).
 	IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error)

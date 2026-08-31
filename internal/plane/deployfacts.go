@@ -7,7 +7,6 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/deploy"
-	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -82,17 +81,14 @@ func (p *Plane) attachDeployFacts(ctx context.Context, tickets []*core.Ticket) e
 	return nil
 }
 
-// mergedSHA reads the newest merged marker on the ticket.
+// mergedSHA is the newest merged marker on the ticket. The deploy check
+// compares the latest commit, unlike the retro note, which needs every
+// one — that difference is the last line here rather than a second copy
+// of the parse loop (core.MergedSHAs).
 func mergedSHA(t *core.Ticket) string {
-	sha := ""
-	for _, c := range t.Comments {
-		m, ok, err := marker.Parse(c.Body)
-		if err != nil || !ok || m.Kind != marker.Merged {
-			continue
-		}
-		if s := m.Fields["sha"]; s != "" {
-			sha = s
-		}
+	shas := core.MergedSHAs(t)
+	if len(shas) == 0 {
+		return ""
 	}
-	return sha
+	return shas[len(shas)-1]
 }
