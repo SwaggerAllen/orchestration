@@ -72,6 +72,14 @@ func (p *Plane) Execute(ctx context.Context, acts []core.Action, log io.Writer) 
 					return fmt.Errorf("execute: %s: comment: %w", a, err)
 				}
 			}
+		case core.ActAdopt:
+			// The record and nothing else. Every other case writes the
+			// tracker and records ahead of it; this one exists because
+			// the author is doing the writing and the record has to
+			// follow (DESIGN §9).
+			if err := p.record(ctx, a.TicketID, a.To, core.RoleControlPlane); err != nil {
+				return fmt.Errorf("execute: adopt %s: %w", a.TicketID, err)
+			}
 		case core.ActComment:
 			if err := p.Tracker.CommentOnIssue(ctx, a.TicketID, commentBody(a)); err != nil {
 				return fmt.Errorf("execute: %s: %w", a, err)

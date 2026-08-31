@@ -977,8 +977,32 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
 | `prerequisite` | The scope depends on something not on `main` and not this ticket's to write. Written by `abort --reason prerequisite` (§3, §12, §13), and the outcome a design pass reports it with. Land the other change, then return the ticket to its queue. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
+| `resync` | The pipeline's idea of where this ticket is has come apart from the tracker's, and the author is repairing it by hand. Routes around it exactly as `author-only` does — with one addition that is the whole point, below. Temporary: removed when the repair is done. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
 | `milestone-boundary` | Pipeline machinery. Routes the ticket to the boundary agent and away from the dev agent (§10). |
+
+**`resync` exists because hands-off is not enough to repair a record.** The pipeline records
+only its own writes (§9), so an author move it merely permits leaves the record where the
+pipeline last wrote — and the writer matrix judges the *standing* divergence between record and
+tracker rather than the move that caused it, so it re-fires on every sweep until the two agree.
+Borrowing `author-only` for the repair therefore does not work, and was measured before this
+label was added: it suppresses the judgement while it is on, the record still does not move, and
+removing it re-exposes the identical divergence to the identical revert. The ticket lands back
+where it started.
+
+So a `resync` ticket has its current state **adopted into the record** on every sweep — the
+pipeline agreeing with where the ticket already is, rather than moving it there. That is the
+only action in the system that writes the record and touches nothing else; every other one
+records write-ahead of a move it is about to make, which is precisely what a ticket under repair
+must not get, because the author is doing the moving and the record has to follow rather than
+lead. When the label comes off, the record and the tracker agree, and ordinary judgement resumes
+from wherever the author left it.
+
+One deliberate difference from `author-only`: **a `resync` ticket keeps its mutex.** The label
+repairs where the pipeline thinks the ticket is and says nothing about the branch it may still
+have open on that system, so releasing the mutex would let a second ticket start on the same
+files while the first one's work is still out there. `author-only` releases it because no agent
+is ever coming for such a ticket at all, which is a different fact.
 
 **`author-only` exists because some tickets have no agent-legal path to completion.** The
 quality gates live in `pipeline.config.json` and `ci.yml`, both author-owned (§5), so a ticket
@@ -2123,6 +2147,28 @@ period set in the project config — moves to `Blocked` with a comment naming th
 dead run. Detected rather than waited out because at one dev agent a stuck claim halts the
 entire queue. Recovery is the normal `Blocked` rule — the author chooses the state — and for
 the boundary ticket that is exactly the resume path §10 already defines.
+
+**A run whose outcome the host reports skips the grace entirely.** The wait exists to separate
+"the run died" from "the run is slow to say it finished", which only time can tell apart when
+the host offers nothing but *completed*. A **cancelled** or **failed** conclusion tells them
+apart directly: nothing further is coming from either, so the ticket parks on the next poll.
+Waiting on a cancellation is worse than idle — the author stopped the run deliberately and the
+pipeline spends twenty minutes declining to notice, while every attempt to move the ticket out
+by hand is reverted *and* restarts the clock, because the grace measures from the later of the
+run's death and the state entry. Catapult's ORC-181 is where that was found.
+
+A **successful** conclusion keeps the grace: a run that finished cleanly and left the ticket in
+its claim may not have written the move yet, which is the case the wait was built for. So does
+any conclusion the adapter has not measured — an unrecognised outcome must behave exactly as no
+outcome did, or a widened adapter reaches a rule that was never taught what the new value means.
+
+**The park is what makes the author's own recovery work**, and that is not incidental. The
+pipeline records only its own writes (§9), so a `Blocked` the *author* passes through on the way
+to somewhere else is never recorded, and the move after it is judged from wherever the pipeline
+last left the ticket — a hand-made `Designing` → `Blocked` → `Done` is read as `Designing` →
+`Done` and reverted by the writer matrix. A `Blocked` the pipeline writes is recorded, so the
+move out of it is judged as leaving `Blocked` and the author may choose any state, `Done`
+included.
 
 ---
 

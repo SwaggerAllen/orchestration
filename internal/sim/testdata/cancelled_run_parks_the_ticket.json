@@ -1,0 +1,20 @@
+{
+  "name": "a cancelled agent run parks the ticket at once, and the author's close out of Blocked then stands (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "runKind": "design", "runLive": true},
+
+    {"kind": "transition", "key": "T1", "to": "designing", "actor": "design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "designing"},
+
+    {"kind": "run-end", "key": "T1", "outcome": "cancelled"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"stale-claim": 1}},
+
+    {"kind": "transition", "key": "T1", "to": "done", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "done"}
+  ]
+}

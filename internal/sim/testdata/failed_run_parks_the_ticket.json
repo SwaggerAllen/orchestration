@@ -1,0 +1,17 @@
+{
+  "name": "a failed agent run parks the ticket at once rather than waiting out the grace (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_dev"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "runKind": "dev", "runLive": true},
+
+    {"kind": "transition", "key": "T1", "to": "in_progress", "actor": "dev"},
+    {"kind": "run-end", "key": "T1", "outcome": "failed"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"stale-claim": 1}},
+
+    {"kind": "transition", "key": "T1", "to": "ready_for_dev", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_dev", "runKind": "dev", "runLive": true}
+  ]
+}

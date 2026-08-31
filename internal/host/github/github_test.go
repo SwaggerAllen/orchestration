@@ -89,6 +89,54 @@ func TestListAgentRunsParsesConvention(t *testing.T) {
 	}
 }
 
+// The conclusion is the whole reason a cancellation is legible at all,
+// and it is read from the same listing that already carried it — the
+// adapter simply never looked. The JSON below is the shape measured on
+// Catapult's own design-agent runs on 2026-08-31: a cancelled run and a
+// failed one are both `status: "completed"`, exactly like a successful
+// one, and only `conclusion` separates them.
+//
+// The unmapped case is the point of the last row. GitHub documents
+// conclusions this project has never seen (`neutral`, `skipped`,
+// `stale`, `timed_out`, `startup_failure`, `action_required`), and a
+// mapping that guessed at them would be a claim about the API nobody
+// measured. They arrive as OutcomeUnknown, which no rule acts on.
+func TestListAgentRunsReadsTheConclusion(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		return http.StatusOK, map[string]any{"workflow_runs": []map[string]any{
+			{"id": 1, "display_title": "pipeline: design PIPE-1", "status": "completed", "conclusion": "cancelled", "updated_at": "2026-01-01T01:00:00Z"},
+			{"id": 2, "display_title": "pipeline: design PIPE-2", "status": "completed", "conclusion": "failure", "updated_at": "2026-01-01T01:00:00Z"},
+			{"id": 3, "display_title": "pipeline: design PIPE-3", "status": "completed", "conclusion": "success", "updated_at": "2026-01-01T01:00:00Z"},
+			{"id": 4, "display_title": "pipeline: design PIPE-4", "status": "in_progress", "conclusion": nil, "updated_at": "2026-01-01T01:00:00Z"},
+			{"id": 5, "display_title": "pipeline: design PIPE-5", "status": "completed", "conclusion": "timed_out", "updated_at": "2026-01-01T01:00:00Z"},
+		}}
+	})
+	defer srv.Close()
+	runs, err := client(t, srv).ListAgentRuns(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []host.RunOutcome{
+		host.OutcomeCancelled, host.OutcomeFailed, host.OutcomeSucceeded,
+		host.OutcomeUnknown, host.OutcomeUnknown,
+	}
+	if len(runs) != len(want) {
+		t.Fatalf("runs = %+v, want %d", runs, len(want))
+	}
+	for i, w := range want {
+		if runs[i].Outcome != w {
+			t.Errorf("run %d (%s): outcome = %q, want %q", i, runs[i].TicketKey, runs[i].Outcome, w)
+		}
+	}
+	// All three completed rows are equally not-live, which is precisely
+	// why `status` alone could not tell a cancellation from a success.
+	for i := 0; i < 3; i++ {
+		if runs[i].Live {
+			t.Errorf("run %d reads as live", i)
+		}
+	}
+}
+
 func TestChecksForAggregates(t *testing.T) {
 	cases := []struct {
 		name string

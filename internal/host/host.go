@@ -21,6 +21,10 @@ type AgentRun struct {
 	Live      bool
 	EndedAt   time.Time
 	URL       string
+	// Outcome is how the run ended, for the runs whose conclusion this
+	// project has measured. OutcomeUnknown for everything else,
+	// including a run still live.
+	Outcome RunOutcome
 }
 
 // PR is one open pull request.
@@ -48,6 +52,35 @@ const (
 	MergeClean   MergeState = "clean"
 	// MergeConflicted: the branch conflicts with its base.
 	MergeConflicted MergeState = "conflicted"
+)
+
+// RunOutcome is how an agent run ended, where the host can say.
+//
+// Measured against the live API on 2026-08-31, over Catapult's own
+// design-agent runs: GitHub reports a cancelled run as `status:
+// "completed"` with `conclusion: "cancelled"`, and a failed one the
+// same way with `"failure"`. Before this existed the adapter read
+// `status` alone, so all three of success, failure and cancellation
+// reached the plane as the single fact `Live: false` — the run you had
+// just stopped by hand was indistinguishable from one that finished
+// cleanly.
+//
+// Deliberately not the whole of GitHub's vocabulary. It also documents
+// `neutral`, `skipped`, `stale`, `timed_out`, `startup_failure` and
+// `action_required`, none of which has been seen on this project's
+// runs, and a fake or a mapping that enumerates what the real system
+// may return is a claim about the real system. So the unmeasured ones
+// map to OutcomeUnknown and are treated exactly as a run with no
+// conclusion always was.
+type RunOutcome string
+
+const (
+	// OutcomeUnknown: the host said nothing, or said something no one
+	// here has measured. Never acted on.
+	OutcomeUnknown   RunOutcome = ""
+	OutcomeSucceeded RunOutcome = "succeeded"
+	OutcomeFailed    RunOutcome = "failed"
+	OutcomeCancelled RunOutcome = "cancelled"
 )
 
 // CheckStatus aggregates a commit's check runs.

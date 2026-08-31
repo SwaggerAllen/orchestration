@@ -292,6 +292,7 @@ func (c *Client) agentRunsAt(ctx context.Context, path string) ([]host.AgentRun,
 			ID           int64     `json:"id"`
 			DisplayTitle string    `json:"display_title"`
 			Status       string    `json:"status"`
+			Conclusion   string    `json:"conclusion"`
 			UpdatedAt    time.Time `json:"updated_at"`
 			HTMLURL      string    `json:"html_url"`
 		} `json:"workflow_runs"`
@@ -310,9 +311,29 @@ func (c *Client) agentRunsAt(ctx context.Context, path string) ([]host.AgentRun,
 			Live:    r.Status != "completed",
 			EndedAt: r.UpdatedAt,
 			URL:     r.HTMLURL,
+			Outcome: outcomeOf(r.Conclusion),
 		})
 	}
 	return out, nil
+}
+
+// outcomeOf maps GitHub's `conclusion` onto the port's vocabulary.
+//
+// Only the three values seen on this project's own runs are mapped;
+// GitHub's remaining conclusions fall to OutcomeUnknown on purpose,
+// which is the value that changes no behaviour. Widening this is a
+// claim about the API and belongs with the measurement that supports
+// it (host.RunOutcome).
+func outcomeOf(conclusion string) host.RunOutcome {
+	switch conclusion {
+	case "success":
+		return host.OutcomeSucceeded
+	case "failure":
+		return host.OutcomeFailed
+	case "cancelled":
+		return host.OutcomeCancelled
+	}
+	return host.OutcomeUnknown
 }
 
 func (c *Client) ListOpenPRs(ctx context.Context) ([]host.PR, error) {
