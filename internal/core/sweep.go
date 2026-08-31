@@ -1000,14 +1000,17 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 			if blockedByOpen(s, t) {
 				continue
 			}
-			// The same question the pickup assertion asks. Asked here too
-			// because the dispatcher used not to: it would send a ticket
-			// whose screen or system was held straight into an assertion
-			// that could only refuse, and since the refusal leaves the
-			// ticket in the queue, it did it again on the next beat, and
-			// the next. Each of those was a full job — checkout,
-			// toolchain, services — spent to be told no.
-			if other, _ := MutexHolder(s, t); other != nil {
+			// The same question the pickup assertion asks, through the
+			// same function. Asked here too because the dispatcher used
+			// not to: it would send a ticket whose screen or system was
+			// held straight into an assertion that could only refuse, and
+			// since the refusal leaves the ticket in the queue, it did it
+			// again on the next beat, and the next. Each of those was a
+			// full job — checkout, toolchain, services — spent to be told
+			// no. Blocker rather than Holder: this asks whether work may
+			// start now, so an idle queued holder yields to a ticket that
+			// precedes it instead of the pair stalling each other.
+			if other, _ := MutexBlocker(s, t); other != nil {
 				continue
 			}
 			// During the pause: only tickets blocking the boundary ticket,

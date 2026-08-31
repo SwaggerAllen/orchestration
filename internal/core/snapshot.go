@@ -354,17 +354,73 @@ func (t *Ticket) HoldsMutex() bool {
 }
 
 // MutexHolder returns another ticket holding a mutex label this one
-// carries, and the label, or nil.
+// carries, and the label, or nil. This is the strict reading of DESIGN
+// §6's invariant — every in-flight ticket short of Merged holds — and it
+// is what the promotion door asks: may this ticket *enter* the queue.
 //
-// One function, three callers — the promotion revert (DESIGN §6), the
-// pickup assertion, and the dispatcher — because they are the same
-// question and they must not answer it differently. They did: the
-// dispatcher never asked at all, so the sweep dispatched a ticket whose
-// label was held straight into a pickup assertion that refused it, every
-// beat, at a full billed job each time.
+// MutexBlocker is what the dispatcher and the pickup assertion ask: may
+// work *start* on it now. The two questions differ by the tie-break
+// below, and nothing else: they share this loop, so the set of holders
+// and the label reported can never drift apart.
+//
+// Those two in particular must agree, and once did not — the dispatcher
+// never asked at all, so the sweep dispatched a ticket whose label was
+// held straight into a pickup assertion that could only refuse, every
+// beat, at a full billed job each time. That is why they call one
+// function rather than two, and why the tie-break lives here rather than
+// at either call site.
 func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
+	return mutexHolder(s, t, false)
+}
+
+// MutexBlocker is MutexHolder with the deadlock tie-break applied: an
+// idle queued holder yields to a ticket that precedes it.
+//
+// Without it a pair of tickets sharing a label and both sitting in a
+// queue are each other's holder, so neither dispatches and neither can
+// ever be picked up — the mutex stops serializing them and starts
+// stalling both. The invariant is enforced at exactly one door, the
+// promotion revert, and nothing guards the others: a CI-red bounce lands
+// a ticket in Ready for rework whether or not another already holds its
+// label, and the author moving one out of Blocked does the same.
+//
+// Measured on Catapult, not reproduced from the rule: ORC-171 and
+// ORC-174 share system:delivery and system:platform_content, and both sat
+// in Ready for rework from 2026-08-31T03:37:28Z to 05:12:52Z — an hour
+// and thirty-five minutes with the dev agent idle and the sweep planning
+// nothing. It broke when the author moved ORC-171 to Blocked at 05:12:52,
+// taking it out of the in-flight set; ORC-174 started Reworking 77
+// seconds later, on the next sweep.
+//
+// The tie-break only ever unblocks, and it serializes rather than
+// widening: precedence is a total order (Precedes falls through to the
+// key), so of any set of idle queued tickets sharing a label exactly one
+// is free and the rest are held by it. The winner's claim writes its
+// working state, which is not idle, so from the next beat it holds the
+// label against the others unconditionally. Two agents are never in one
+// system at one time, which is what DESIGN §6 is for; what changes is
+// that "both waiting" no longer reads as "both working".
+//
+// The promotion door keeps the strict reading deliberately. It is the
+// preventive half of §6 and the deadlock does not arrive through it —
+// both tickets above reached Ready for rework by bouncing, a path that
+// door never sees — so relaxing it would widen what may queue on one
+// system while rescuing nothing.
+func MutexBlocker(s *Snapshot, t *Ticket) (*Ticket, string) {
+	return mutexHolder(s, t, true)
+}
+
+func mutexHolder(s *Snapshot, t *Ticket, yieldIdle bool) (*Ticket, string) {
 	for _, other := range s.Tickets {
 		if other.ID == t.ID || !other.HoldsMutex() {
+			continue
+		}
+		// The tie-break. Tested on the holder alone, never on t: at
+		// pickup the claiming run is already live on t, so a condition
+		// reading t.queuedIdle() would be true at dispatch and false at
+		// pickup — the two answering differently again, through a door
+		// built to stop exactly that.
+		if yieldIdle && other.queuedIdle() && Precedes(t, other) {
 			continue
 		}
 		for _, mine := range t.MutexLabels() {
@@ -374,6 +430,13 @@ func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
 		}
 	}
 	return nil, ""
+}
+
+// queuedIdle reports a ticket waiting in a dev queue with no agent on it:
+// in flight for the mutex, but with nothing running that could be editing
+// the files the label covers.
+func (t *Ticket) queuedIdle() bool {
+	return (t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && !t.LiveRun("")
 }
 
 // LiveRun reports whether the ticket has a live agent run of the given

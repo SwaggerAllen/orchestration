@@ -1855,3 +1855,102 @@ func TestTheSameAttemptOfTheSameRunStaysSilent(t *testing.T) {
 		t.Errorf("recorded red re-fired: %v", *a)
 	}
 }
+
+// Two tickets in a queue sharing a mutex label were each other's holder,
+// so the sweep planned nothing and the dev agent sat idle — the mutex
+// stalling both instead of serializing them. Measured on Catapult:
+// ORC-171 and ORC-174 share system:delivery and both sat in Ready for
+// rework from 2026-08-31T03:37:28Z to 05:12:52Z, an hour and thirty-five
+// minutes, until the author moved one to Blocked by hand.
+func TestIdleQueuedTicketsBreakTheTieByPrecedence(t *testing.T) {
+	first := tk("T1", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	second := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	s := snap(first, second)
+	if !Precedes(first, second) {
+		t.Fatal("precondition: T1 must precede T2 for this test to say what it means")
+	}
+
+	if d := find(Sweep(s), ActDispatch, "T1"); d == nil {
+		t.Error("the ticket precedence picks was not dispatched: the pair is still deadlocked")
+	}
+	if d := find(Sweep(s), ActDispatch, "T2"); d != nil {
+		t.Errorf("both tickets dispatched — the mutex stopped serializing them: %v", *d)
+	}
+
+	// The dispatcher and the pickup assertion must agree, in both
+	// directions. Disagreement is a full billed job spent to be refused.
+	if err := VerifyPickup(s, first.ID, AgentDev, "r1"); err != nil {
+		t.Errorf("dispatched T1 into a pickup that refuses it: %v", err)
+	}
+	if err := VerifyPickup(s, second.ID, AgentDev, "r2"); err == nil {
+		t.Error("T2 was not dispatched but its pickup would have allowed it")
+	}
+}
+
+// The tie-break yields to precedence only for a holder that is waiting.
+// A holder with an agent on it, or one past the queues, still blocks
+// unconditionally — that is the invariant DESIGN §6 exists for, and
+// widening the tie-break to cover it would put two agents in one system.
+func TestAWorkingHolderStillBlocksWhoeverPrecedesIt(t *testing.T) {
+	queued := tk("T1", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	for _, st := range []protocol.State{
+		protocol.InProgress, protocol.Reworking, protocol.Checks, protocol.Reconciling,
+	} {
+		holder := tk("T2", st, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+		s := snap(queued, holder)
+		if !Precedes(queued, holder) && st != protocol.InProgress {
+			// Precedence favours the further-along ticket, so the queued
+			// one loses anyway; the case worth pinning is the one where
+			// it wins the tie-break and must still be refused.
+			continue
+		}
+		if other, _ := MutexBlocker(s, queued); other == nil {
+			t.Errorf("a holder in %s yielded to a ticket that precedes it", st)
+		}
+	}
+	// And a holder that is idle but in the queue with a live run on it —
+	// dispatched, not yet claimed — is working, not waiting.
+	live := tk("T2", protocol.ReadyForRework, func(t *Ticket) {
+		t.Labels = []string{"system:delivery"}
+		t.LiveRuns = []Run{{ID: "r9", Kind: AgentDev, Live: true}}
+		t.Run = &Run{ID: "r9", Kind: AgentDev, Live: true}
+	})
+	if other, _ := MutexBlocker(snap(queued, live), queued); other == nil {
+		t.Error("a queued holder with a live run yielded: two dev agents in one system")
+	}
+}
+
+// The promotion door keeps the strict reading of §6 deliberately: it is
+// the preventive half, and the deadlock does not arrive through it. Both
+// Catapult tickets reached Ready for rework by bouncing off CI, a path
+// this door never sees, so relaxing it would widen what may queue on one
+// system while rescuing nothing already stuck.
+func TestPromotionDoorKeepsTheStrictReading(t *testing.T) {
+	first := tk("T1", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	second := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	s := snap(first, second)
+	if other, _ := MutexHolder(s, first); other == nil {
+		t.Error("the promotion door stopped seeing an idle queued holder")
+	}
+	// The author promoting past it is still reverted — and the promoted
+	// ticket is Urgent deliberately. Ready for rework outranks Ready for
+	// dev in precedenceRank (70 to 40), so an ordinary promotion loses
+	// the tie-break to any idle holder and the door's choice of function
+	// changes nothing: the first version of this test asserted the revert
+	// on a non-urgent ticket, and relaxing the door to MutexBlocker left
+	// it passing. Urgent is the case where the promoting ticket wins
+	// precedence, so it is the only one that tells the two apart.
+	promoted := tk("T3", protocol.ReadyForDev, func(t *Ticket) {
+		t.Labels = []string{"system:delivery"}
+		t.Priority = urgentPriority
+	}, arrived(protocol.DesignReview, RoleAuthor))
+	held := tk("T4", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
+	if !Precedes(promoted, held) {
+		t.Fatal("precondition: T3 must win the tie-break or this asserts nothing")
+	}
+	acts := Sweep(snap(promoted, held))
+	rev := find(acts, ActTransition, "T3")
+	if rev == nil || rev.To != protocol.DesignReview {
+		t.Errorf("the author's promotion past a held mutex was not reverted: %v", acts)
+	}
+}
