@@ -2087,6 +2087,13 @@ read and no author reliably remembers.
   marker**, so the three-conflict escalation counts them together — three conflicts on one
   ticket is a sequencing problem whichever half noticed them, and two counters would each stop
   at two.
+
+  **The escalation records its count on the `blocked` marker, not under the kind it counts**, and
+  fires once per count for the same reason the bounce rule does: another attempt is a legitimate
+  answer when the fix is to land ahead of the competing work. Writing it as a `merge-conflict`
+  marker had the rule counting its own output — one escalation took a ticket from three conflicts
+  to four — so it both re-blocked the author's return and inflated the number it re-blocked on. A
+  marker's kind is what happened, and an escalation is not a conflict.
 - **Second bounce from reconciliation on the same ticket → `Blocked`**, not rework again. Two
   failures to land the same scope is more often a design problem than an implementation one, and
   the author will usually route it to `Ready for design`. Counted the same way: reconciliation's
@@ -2102,7 +2109,7 @@ read and no author reliably remembers.
   twenty-seven seconds, twice posting the same comment, leaving the author no gesture the next
   tick would not reverse. This is the general shape of every marker-counted escalation: the count
   is evidence about the work, and re-reading old evidence as a new finding turns a rule into a
-  trap.
+  trap. The three-conflict rule above had the same defect and is fixed the same way.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
   redeploy, not a state change, which is why the author decides where it goes next.

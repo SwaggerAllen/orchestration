@@ -652,6 +652,69 @@ func TestThirdMergeConflictBlocks(t *testing.T) {
 	if !strings.Contains(a.Prose, "sequencing") {
 		t.Errorf("the comment blames the ticket rather than the ordering:\n%s", a.Prose)
 	}
+	// The escalation is not itself a conflict, and posting it under the
+	// kind being counted is what let one escalation take the ticket from
+	// three conflicts to four.
+	if a.Marker.Kind != marker.Blocked {
+		t.Errorf("escalation posted a %q marker; it inflates the count it reads", a.Marker.Kind)
+	}
+	if a.Marker.Fields["conflicts"] != "3" {
+		t.Errorf("want the escalation to record conflicts=3, got %v", a.Marker)
+	}
+}
+
+// The same rule as the bounce escalation, for the same reason: the author
+// chooses the state out of Blocked (DESIGN §12), and another attempt is a
+// legitimate choice when the fix is to land ahead of the competing work.
+func TestTheAuthorsReturnAfterAConflictBlockIsNotReEscalated(t *testing.T) {
+	conflict := func(n string) func(*Ticket) {
+		return withComment(marker.MergeConflict, map[string]string{"pr": "5", "attempt": n})
+	}
+	s := snap(tk("T1", protocol.ReadyForRework, conflict("1"), conflict("2"), conflict("3"),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_rework", "conflicts": "3"})))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil && a.To == protocol.Blocked {
+		t.Errorf("re-blocked the author's return with no new conflict: %v", *a)
+	}
+	if a := find(Sweep(s), ActDispatch, "T1"); a == nil || a.Agent != AgentDev {
+		t.Errorf("no dev run dispatched for the returned ticket: %v", Sweep(s))
+	}
+}
+
+// A fourth conflict is new information: main moved again, and the author
+// is owed the same stop the third gave them.
+func TestAFourthConflictEscalatesAgain(t *testing.T) {
+	conflict := func(n string) func(*Ticket) {
+		return withComment(marker.MergeConflict, map[string]string{"pr": "5", "attempt": n})
+	}
+	s := snap(tk("T1", protocol.ReadyForRework, conflict("1"), conflict("2"), conflict("3"),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_rework", "conflicts": "3"}),
+		conflict("4")))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want a fourth conflict -> Blocked, got %v", a)
+	}
+	if a.Marker.Fields["conflicts"] != "4" {
+		t.Errorf("want the escalation to record conflicts=4, got %v", a.Marker)
+	}
+}
+
+// The count is conflict events, so one escalation must not advance it.
+// Measured before the fix: three conflicts plus the escalation's own
+// merge-conflict marker read as four, which is how the rule re-fired on
+// its own output.
+func TestTheConflictEscalationDoesNotInflateItsOwnCount(t *testing.T) {
+	conflict := func(n string) func(*Ticket) {
+		return withComment(marker.MergeConflict, map[string]string{"pr": "5", "attempt": n})
+	}
+	tick := tk("T1", protocol.ReadyForRework, conflict("1"), conflict("2"), conflict("3"))
+	a := find(Sweep(snap(tick)), ActTransition, "T1")
+	if a == nil || a.Marker == nil {
+		t.Fatalf("no escalation to check: %v", a)
+	}
+	tick.Comments = append(tick.Comments, Comment{Body: a.Marker.Format(), Actor: RoleControlPlane, At: t0})
+	if n := len(markersOf(tick, marker.MergeConflict)); n != 3 {
+		t.Errorf("the escalation moved the conflict count to %d; it counts other people's merges, and it did not merge anything", n)
+	}
 }
 
 // The hole this closes. A conflicted PR gets no CI run at all — GitHub

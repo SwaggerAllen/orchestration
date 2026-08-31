@@ -1,0 +1,28 @@
+{
+  "name": "third merge conflict: Blocked once, and the author's return for another attempt stands (DESIGN 12)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "checks"},
+
+    {"kind": "ci", "key": "T1", "status": "", "mergeable": "conflicted"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "markers": {"merge-conflict": 1}},
+
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "", "mergeable": "conflicted"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "markers": {"merge-conflict": 2}},
+
+    {"kind": "transition", "key": "T1", "to": "reworking", "actor": "dev"},
+    {"kind": "transition", "key": "T1", "to": "checks", "actor": "dev"},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "ci", "key": "T1", "status": "", "mergeable": "conflicted"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "blocked", "markers": {"merge-conflict": 3}},
+
+    {"kind": "transition", "key": "T1", "to": "ready_for_rework", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "ready_for_rework", "runKind": "dev", "runLive": true, "markers": {"merge-conflict": 3}}
+  ]
+}
