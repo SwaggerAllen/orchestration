@@ -79,7 +79,7 @@ func queueHolder(s *Snapshot) *Ticket {
 		if t.State != protocol.ReadyForDesign {
 			continue
 		}
-		if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+		if t.IsBoundary() || t.Unmanaged() {
 			continue
 		}
 		return t
@@ -94,7 +94,7 @@ func promotable(s *Snapshot, t *Ticket) bool {
 	if t.State != protocol.Todo {
 		return false
 	}
-	if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+	if t.IsBoundary() || t.Unmanaged() {
 		return false
 	}
 	if pausedFor(s, t) {
@@ -205,7 +205,7 @@ func onMain(t *Ticket) bool {
 func heldBack(s *Snapshot, ordered []*Ticket) string {
 	var paused, blocked, uncommitted, elsewhere, total int
 	for _, t := range ordered {
-		if t.State != protocol.Todo || t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+		if t.State != protocol.Todo || t.IsBoundary() || t.Unmanaged() {
 			continue
 		}
 		total++

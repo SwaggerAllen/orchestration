@@ -76,6 +76,14 @@ func Sweep(s *Snapshot) []Action {
 		w.fold(a, moved)
 	}
 
+	// Record repair first, and outside the `unmoved` chain below. A
+	// resync ticket is driven by nothing else in this function —
+	// Unmanaged() takes it out of every rule — so the adopt is the whole
+	// of what a sweep does for it, and doing it first means the record
+	// is level from the same pass the label went on.
+	for _, t := range tickets {
+		plan(adoptFor(w, t))
+	}
 	for _, t := range tickets {
 		if a, ok := revertFor(w, t); ok {
 			plan(a)
@@ -178,6 +186,16 @@ func (w *Snapshot) fold(acts []Action, moved map[string]bool) {
 			w.Recorded[a.TicketID] = RecordedMove{From: t.State, To: a.To, Role: RoleControlPlane}
 			t.State = a.To
 			t.StateSince = w.Now
+		case ActAdopt:
+			t := w.ticket(a.TicketID)
+			if t == nil {
+				continue
+			}
+			// No origin — the pipeline did not make this move — and no
+			// entry in `moved`, because adopting is not moving. Folded
+			// all the same, or a convergent sweep plans the same adopt
+			// on every pass and never reaches a fixpoint.
+			w.Recorded[a.TicketID] = RecordedMove{To: t.State, Role: RoleControlPlane}
 		case ActRemoveLabel:
 			t := w.ticket(a.TicketID)
 			if t == nil {
@@ -254,7 +272,7 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 		// The boundary ticket has its own state meanings and its own
 		// owner; the matrix below would misjudge it (DESIGN §10).
 		return nil, false
-	case t.HasLabel(LabelAuthorOnly):
+	case t.Unmanaged():
 		// An author-only ticket is the author's from Todo to Done, and
 		// the matrix below has no row for that: it would revert their
 		// close as a done-writer violation, every sweep, because the
@@ -449,7 +467,7 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 	// back to where it came from, which is the more precise answer. A
 	// run means an agent is either working (leave it) or dead (the
 	// stale-claim rule's), and neither is this.
-	if q, ok := queueFeeding(t.State); ok && t.Run == nil && !t.IsBoundary() && !t.HasLabel(LabelAuthorOnly) {
+	if q, ok := queueFeeding(t.State); ok && t.Run == nil && !t.IsBoundary() && !t.Unmanaged() {
 		if _, known := arrival(s, t); !known {
 			acts = append(acts, Action{
 				Kind: ActTransition, TicketID: t.ID, To: q,
@@ -560,7 +578,7 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 	// is sitting in Checks the author put it there by hand; dispatching
 	// reconcile against it would spend a model pass judging a diff no
 	// agent wrote against a scope no agent was given.
-	if t.HasLabel(LabelAuthorOnly) {
+	if t.Unmanaged() {
 		return nil
 	}
 	// A conflicted branch is checked first, and before CI, because it is
@@ -729,6 +747,34 @@ func postDeployFor(s *Snapshot, t *Ticket) []Action {
 		}
 	}
 	return nil
+}
+
+// adoptFor keeps the move record level with a ticket the author is
+// repairing by hand (DESIGN §9).
+//
+// The record is the pipeline's account of its own writes, so an author
+// move it permits leaves the two diverged — and the writer matrix judges
+// the *standing* divergence, not the move that caused it, so it re-fires
+// every sweep until they agree. That is what makes a hands-off label
+// alone useless for repair: suppressing the judgement changes nothing
+// about the gap it will resume judging. Adopting closes the gap instead.
+//
+// Only when they actually differ, or every poll writes the record it
+// just wrote. And `From` is left empty deliberately: the pipeline did
+// not make this move and has no origin to claim, which is the same
+// shape ingest writes for an adopted ticket and which arrival already
+// declines to judge.
+func adoptFor(s *Snapshot, t *Ticket) []Action {
+	if !t.HasLabel(LabelResync) {
+		return nil
+	}
+	if rec, ok := s.Recorded[t.ID]; ok && rec.From == "" && rec.To == t.State {
+		return nil
+	}
+	return []Action{{
+		Kind: ActAdopt, TicketID: t.ID, To: t.State,
+		Reason: "resync: the author is repairing this ticket's state, so the record follows it (DESIGN §9)",
+	}}
 }
 
 // agentOwner maps each agent-owned state to who should be running it, for
@@ -914,7 +960,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 	// design is the thread that clears it (DESIGN §7).
 	if !s.agentBusy(AgentDesign) {
 		for _, t := range ordered {
-			if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) || t.LiveRun("") {
+			if t.IsBoundary() || t.Unmanaged() || t.LiveRun("") {
 				continue
 			}
 			switch {
@@ -948,7 +994,7 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 				continue
 			}
 			if t.IsBoundary() || t.HasLabel(LabelBoundary) || t.HasLabel(LabelReEvaluate) ||
-				t.HasLabel(LabelAuthorOnly) || t.LiveRun("") {
+				t.Unmanaged() || t.LiveRun("") {
 				continue
 			}
 			if blockedByOpen(s, t) {
@@ -1115,7 +1161,7 @@ func devBusy(s *Snapshot) bool {
 		if t.LiveRun(AgentDev) {
 			return true
 		}
-		if t.IsBoundary() || t.HasLabel(LabelAuthorOnly) {
+		if t.IsBoundary() || t.Unmanaged() {
 			continue
 		}
 		if t.State == protocol.InProgress || t.State == protocol.Reworking {

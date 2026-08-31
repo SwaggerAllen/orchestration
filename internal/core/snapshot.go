@@ -258,6 +258,20 @@ func (t *Ticket) HasLabel(name string) bool {
 // special-cased in eight places (DESIGN §10).
 func (t *Ticket) IsBoundary() bool { return t.HasLabel(LabelBoundary) }
 
+// Unmanaged reports a ticket the pipeline does not drive: it neither
+// dispatches against it, promotes it, corrects its state, nor judges how
+// it arrived where it is.
+//
+// One predicate over two labels because the question every caller asks
+// is the same one, and a rule stated in more than one place is a rule
+// that gets amended in one of them. The reasons differ — author-only is
+// work the author owns end to end (DESIGN §8), resync is a record being
+// repaired (DESIGN §9) — and the answer to "does the pipeline drive
+// this" does not.
+func (t *Ticket) Unmanaged() bool {
+	return t.HasLabel(LabelAuthorOnly) || t.HasLabel(LabelResync)
+}
+
 // MutexLabels returns the ticket's mutex labels — screen: and system:
 // alike, one rule for both kinds (DESIGN §6).
 func (t *Ticket) MutexLabels() []string {
@@ -326,6 +340,13 @@ type RecordedMove struct {
 // counting one would park every ticket sharing its screen or system
 // behind work the pipeline is not doing and cannot observe finishing.
 func (t *Ticket) HoldsMutex() bool {
+	// Author-only, not Unmanaged: a resync ticket keeps its mutex. The
+	// label repairs where the pipeline thinks the ticket is, and says
+	// nothing about the branch it may still have open on that system —
+	// releasing the label here would let a second ticket start on the
+	// same files while the first one's work is still out there. An
+	// author-only ticket has no agent coming for it at all, which is a
+	// different fact and the one that exclusion rests on.
 	if t.HasLabel(LabelAuthorOnly) {
 		return false
 	}
@@ -435,6 +456,27 @@ const (
 	// the work is, and the ticket still moves through the ordinary states
 	// as the author does it.
 	LabelAuthorOnly = "author-only"
+	// LabelResync hands one ticket back to the author to repair its
+	// state by hand, and is the only way out of a state mix-up the
+	// rules cannot untangle themselves.
+	//
+	// Functionally close to author-only and semantically not: author-only
+	// says "this work is the author's, end to end" and is a property of
+	// the ticket; resync says "the pipeline's idea of where this ticket
+	// is has come apart from the tracker's, and I am fixing it" — a
+	// temporary state of the *record*, removed when the repair is done.
+	//
+	// The half that makes it work is not the hands-off part. The
+	// pipeline records only its own writes (DESIGN §9), so an author
+	// move it merely permits leaves the record where the pipeline last
+	// wrote — and the next move is then judged from that stale origin.
+	// Author-only alone is no help here, and was tried: it suppresses
+	// the judgement while it is on, the record still does not move, and
+	// taking it off re-exposes the identical divergence to the identical
+	// revert. So a resync ticket has its current state adopted into the
+	// record on every sweep, which is what leaves the pipeline agreeing
+	// with the tracker at the moment the label comes off.
+	LabelResync = "resync"
 	// LabelPrerequisite: the ticket's scope depends on something that is
 	// not on main and is not this ticket's to write, so there is nothing
 	// the pass can decide yet.

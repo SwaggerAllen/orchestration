@@ -1,0 +1,24 @@
+{
+  "name": "resync: the record follows the author's repair, and the ticket stays where they put it (DESIGN 9)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "ready_for_design"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "runKind": "design", "runLive": true},
+    {"kind": "transition", "key": "T1", "to": "designing", "actor": "design"},
+
+    {"kind": "transition", "key": "T1", "to": "done", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "designing"},
+
+    {"kind": "label", "key": "T1", "add": ["resync"]},
+    {"kind": "transition", "key": "T1", "to": "done", "actor": "author"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "done", "hasLabels": ["resync"]},
+
+    {"kind": "label", "key": "T1", "remove": ["resync"]},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "done", "lacksLabels": ["resync"]},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "done"}
+  ]
+}

@@ -164,6 +164,14 @@ func (w *World) apply(acts []core.Action) error {
 			} else if a.Prose != "" {
 				t.Comments = append(t.Comments, core.Comment{Body: a.Prose, Actor: core.RoleControlPlane, At: w.Clock})
 			}
+		case core.ActAdopt:
+			t, err := w.ticket(a.TicketID)
+			if err != nil {
+				return err
+			}
+			// The record only, with no origin, exactly as Execute does
+			// it — the ticket does not move and nothing is posted.
+			w.Record(t.ID, core.RecordedMove{To: t.State, Role: core.RoleControlPlane})
 		case core.ActComment:
 			t, err := w.ticket(a.TicketID)
 			if err != nil {

@@ -426,6 +426,106 @@ func TestAnOutcomeOnAnotherKindOfRunIsNotThisClaims(t *testing.T) {
 	}
 }
 
+// author-only cannot be borrowed as a pass for one move, which is the
+// obvious thing to reach for and was measured before resync was built.
+// The label suppresses the judgement while it is on; the record does not
+// move; taking it off re-exposes the identical divergence to the
+// identical revert.
+func TestAuthorOnlyIsNotAPassForOneMove(t *testing.T) {
+	inDesigning := RecordedMove{From: protocol.ReadyForDesign, To: protocol.Designing, Role: RoleDesign}
+
+	labelled := tk("T1", protocol.Done, func(x *Ticket) { x.Labels = []string{LabelAuthorOnly} })
+	s := snap(labelled)
+	s.Recorded["T1"] = inDesigning
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil {
+		t.Errorf("reverted while labelled: %v", *a)
+	}
+
+	// The label comes off and the gap is still there to be judged.
+	bare := tk("T1", protocol.Done)
+	s = snap(bare)
+	s.Recorded["T1"] = inDesigning
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Designing {
+		t.Fatalf("want the revert once the label is off, got %v", a)
+	}
+}
+
+// resync closes the gap instead of hiding it: the record follows the
+// ticket, so there is nothing left to judge when the label comes off.
+// This is ORC-181's repair, start to finish.
+func TestResyncAdoptsTheTicketsStateIntoTheRecord(t *testing.T) {
+	// Stuck: the pipeline thinks Designing, the author has moved it to
+	// Done, and the writer matrix reverts that every sweep.
+	tick := tk("T1", protocol.Done, func(x *Ticket) { x.Labels = []string{LabelResync} })
+	s := snap(tick)
+	s.Recorded["T1"] = RecordedMove{From: protocol.ReadyForDesign, To: protocol.Designing, Role: RoleDesign}
+
+	acts := Sweep(s)
+	if a := find(acts, ActTransition, "T1"); a != nil {
+		t.Errorf("reverted a ticket under repair: %v", *a)
+	}
+	a := find(acts, ActAdopt, "T1")
+	if a == nil || a.To != protocol.Done {
+		t.Fatalf("want the record adopted at done, got %v", a)
+	}
+	// And with the record level, removing the label leaves nothing to
+	// judge — the half author-only could never reach.
+	settled := tk("T1", protocol.Done)
+	s2 := snap(settled)
+	s2.Recorded["T1"] = RecordedMove{To: protocol.Done, Role: RoleControlPlane}
+	if a := find(Sweep(s2), ActTransition, "T1"); a != nil {
+		t.Errorf("reverted after the repair settled: %v", *a)
+	}
+}
+
+// Adopting is not a move, so it must stop once the record agrees or a
+// convergent sweep never reaches a fixpoint.
+func TestResyncAdoptsOnlyWhileTheRecordDisagrees(t *testing.T) {
+	tick := tk("T1", protocol.Done, func(x *Ticket) { x.Labels = []string{LabelResync} })
+	s := snap(tick)
+	s.Recorded["T1"] = RecordedMove{To: protocol.Done, Role: RoleControlPlane}
+	if a := find(Sweep(s), ActAdopt, "T1"); a != nil {
+		t.Errorf("re-adopted a record that already agrees: %v", *a)
+	}
+}
+
+// Hands off while the label is on, or an agent starts on a ticket being
+// repaired mid-repair.
+func TestResyncKeepsTheAgentsOff(t *testing.T) {
+	queued := tk("T1", protocol.ReadyForDesign, func(x *Ticket) { x.Labels = []string{LabelResync} })
+	if a := find(Sweep(snap(queued)), ActDispatch, "T1"); a != nil {
+		t.Errorf("dispatched design against a ticket under repair: %v", *a)
+	}
+	dev := tk("T2", protocol.ReadyForDev, func(x *Ticket) { x.Labels = []string{LabelResync} })
+	if a := find(Sweep(snap(dev)), ActDispatch, "T2"); a != nil {
+		t.Errorf("dispatched dev against a ticket under repair: %v", *a)
+	}
+	// And a ticket in an agent state is not corrected back to its queue,
+	// which would undo the very move being made.
+	stuck := tk("T3", protocol.Designing, func(x *Ticket) { x.Labels = []string{LabelResync} })
+	s := snap(stuck)
+	delete(s.Recorded, "T3")
+	if a := find(Sweep(s), ActTransition, "T3"); a != nil {
+		t.Errorf("corrected a ticket under repair back to its queue: %v", *a)
+	}
+}
+
+// The mutex is deliberately not released. The label repairs the record;
+// it says nothing about the branch the ticket may still have open, and
+// letting a second ticket start on the same system is the wrong risk to
+// take for a temporary, author-attended label.
+func TestResyncStillHoldsItsMutex(t *testing.T) {
+	repairing := tk("T1", protocol.ReadyForRework, func(x *Ticket) {
+		x.Labels = []string{LabelResync, "system:delivery"}
+	})
+	other := tk("T2", protocol.ReadyForDev, func(x *Ticket) { x.Labels = []string{"system:delivery"} })
+	s := snap(repairing, other)
+	if holder, _ := MutexHolder(s, other); holder == nil {
+		t.Error("a ticket under repair released its system mutex")
+	}
+}
+
 func TestPrecedenceOrdersDispatch(t *testing.T) {
 	older := tk("T1", protocol.ReadyForDev, func(t *Ticket) { t.CreatedAt = t0.Add(-3 * time.Hour) })
 	rework := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.CreatedAt = t0.Add(-time.Hour) })

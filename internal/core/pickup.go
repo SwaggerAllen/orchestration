@@ -55,6 +55,9 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 	if t.HasLabel(LabelAuthorOnly) {
 		return refuse("pickup %s: labelled %s — the author owns this one end to end (DESIGN §8)", t.Key, LabelAuthorOnly)
 	}
+	if t.HasLabel(LabelResync) {
+		return refuse("pickup %s: labelled %s — the author is repairing this ticket's state by hand (DESIGN §9)", t.Key, LabelResync)
+	}
 	// Singularity, asked here because the dispatcher cannot answer it in
 	// time. The sweep's guard reads Run.Live, and that marker is posted
 	// by the claim — which happens inside the dispatched job, after

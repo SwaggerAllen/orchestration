@@ -25,6 +25,16 @@ const (
 	ActDispatch ActionKind = "dispatch"
 	// ActCreateBoundary creates the milestone boundary ticket (DESIGN §10).
 	ActCreateBoundary ActionKind = "create-boundary"
+	// ActAdopt writes the ticket's current state into the move record
+	// without touching the tracker — the pipeline agreeing with where
+	// the ticket already is, rather than moving it there.
+	//
+	// The only action that writes the record and nothing else. Every
+	// other one records write-ahead as a consequence of a move it is
+	// about to make, which is exactly what a ticket under repair must
+	// not get: the author is moving it, and the record has to follow
+	// rather than lead (DESIGN §9).
+	ActAdopt ActionKind = "adopt"
 )
 
 // Action is one planned effect. The sweep returns these; adapters (or the
@@ -47,6 +57,8 @@ func (a Action) String() string {
 	switch a.Kind {
 	case ActTransition:
 		return fmt.Sprintf("transition %s -> %s (%s)", a.TicketID, a.To, a.Reason)
+	case ActAdopt:
+		return fmt.Sprintf("adopt %s at %s (%s)", a.TicketID, a.To, a.Reason)
 	case ActComment:
 		return fmt.Sprintf("comment %s %s (%s)", a.TicketID, a.Marker.Kind, a.Reason)
 	case ActRemoveLabel:
