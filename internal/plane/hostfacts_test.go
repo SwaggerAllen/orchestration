@@ -27,6 +27,44 @@ func TestPRMatchingIsKeyBoundarySafe(t *testing.T) {
 	}
 }
 
+// The outcome has to survive the crossing from the port's vocabulary to
+// the core's, and nothing else asserts that it does. The adapter test
+// proves GitHub's conclusion is read; the core tests prove the rule acts
+// on it; this is the link between them, and a probe that removed the
+// mapping here left every other test passing.
+func TestHostFactsCarryTheRunOutcomeAcross(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	h := host.NewMemory()
+	p.WithHost(h)
+
+	i := seedIssue(t, tr, cfg, "Cancelled design", protocol.Designing)
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	h.Runs = []host.AgentRun{
+		{ID: "20", Kind: "design", TicketKey: i.Key, Live: false, EndedAt: old,
+			Outcome: host.OutcomeCancelled},
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cand := range snap.Tickets {
+		if cand.ID != i.ID {
+			continue
+		}
+		if cand.Run == nil {
+			t.Fatalf("no run on %s", i.Key)
+		}
+		if cand.Run.Outcome != core.OutcomeCancelled {
+			t.Errorf("outcome = %q, want %q — the rule that parks the ticket reads this",
+				cand.Run.Outcome, core.OutcomeCancelled)
+		}
+		return
+	}
+	t.Fatalf("ticket %s not in the snapshot", i.Key)
+}
+
 func TestHostFactsPopulateRunsAndChecks(t *testing.T) {
 	ctx := context.Background()
 	tr, cfg, p := world(t)

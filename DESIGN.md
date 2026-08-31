@@ -2124,6 +2124,28 @@ dead run. Detected rather than waited out because at one dev agent a stuck claim
 entire queue. Recovery is the normal `Blocked` rule — the author chooses the state — and for
 the boundary ticket that is exactly the resume path §10 already defines.
 
+**A run whose outcome the host reports skips the grace entirely.** The wait exists to separate
+"the run died" from "the run is slow to say it finished", which only time can tell apart when
+the host offers nothing but *completed*. A **cancelled** or **failed** conclusion tells them
+apart directly: nothing further is coming from either, so the ticket parks on the next poll.
+Waiting on a cancellation is worse than idle — the author stopped the run deliberately and the
+pipeline spends twenty minutes declining to notice, while every attempt to move the ticket out
+by hand is reverted *and* restarts the clock, because the grace measures from the later of the
+run's death and the state entry. Catapult's ORC-181 is where that was found.
+
+A **successful** conclusion keeps the grace: a run that finished cleanly and left the ticket in
+its claim may not have written the move yet, which is the case the wait was built for. So does
+any conclusion the adapter has not measured — an unrecognised outcome must behave exactly as no
+outcome did, or a widened adapter reaches a rule that was never taught what the new value means.
+
+**The park is what makes the author's own recovery work**, and that is not incidental. The
+pipeline records only its own writes (§9), so a `Blocked` the *author* passes through on the way
+to somewhere else is never recorded, and the move after it is judged from wherever the pipeline
+last left the ticket — a hand-made `Designing` → `Blocked` → `Done` is read as `Designing` →
+`Done` and reverted by the writer matrix. A `Blocked` the pipeline writes is recorded, so the
+move out of it is judged as leaving `Blocked` and the author may choose any state, `Done`
+included.
+
 ---
 
 ## 13. Automation surface

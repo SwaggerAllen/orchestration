@@ -338,6 +338,94 @@ func TestStaleClaimBlocksAfterGrace(t *testing.T) {
 	}
 }
 
+// A conclusion the host reported answers the question the grace period
+// is waiting to answer, so the wait is skipped. Catapult's ORC-181 sat
+// in Designing after its design run was cancelled by hand, and every
+// attempt to move it out was reverted — while the twenty-minute clock it
+// was waiting on restarted with each attempt, because the grace measures
+// from the later of the run's death and the state entry.
+func TestAStoppedRunParksTheTicketWithoutWaiting(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		outcome RunOutcome
+		field   string
+	}{
+		{"cancelled", OutcomeCancelled, "cancelled"},
+		{"failed", OutcomeFailed, "failed"},
+	} {
+		// Well inside the grace: the run ended a minute ago.
+		tick := tk("T1", protocol.Designing, func(t *Ticket) {
+			t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: false,
+				EndedAt: t0.Add(-time.Minute), Outcome: c.outcome}
+		})
+		a := find(Sweep(snap(tick)), ActTransition, "T1")
+		if a == nil || a.To != protocol.Blocked {
+			t.Fatalf("%s: want Blocked without waiting out the grace, got %v", c.name, a)
+		}
+		if a.Marker == nil || a.Marker.Fields["outcome"] != c.field {
+			t.Errorf("%s: want outcome=%s recorded, got %v", c.name, c.field, a.Marker)
+		}
+		// The ordinary stale-claim prose sends the reader hunting a
+		// dispatch that never happened, which is the wrong hunt here.
+		if strings.Contains(a.Prose, "never dispatched") || strings.Contains(a.Prose, "missing secret") {
+			t.Errorf("%s: prose blames the dispatch:\n%s", c.name, a.Prose)
+		}
+	}
+}
+
+// A clean finish keeps the grace. The run may simply not have written
+// its move yet, which is the case the wait was built for.
+func TestASucceededRunStillWaitsOutTheGrace(t *testing.T) {
+	tick := tk("T1", protocol.Designing, func(t *Ticket) {
+		t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: false,
+			EndedAt: t0.Add(-time.Minute), Outcome: OutcomeSucceeded}
+	})
+	if a := find(Sweep(snap(tick)), ActTransition, "T1"); a != nil {
+		t.Errorf("parked a cleanly-finished run inside the grace: %v", *a)
+	}
+}
+
+// An outcome nobody has measured must change nothing, or a widened
+// adapter reaches a rule that has not been taught what the value means.
+func TestAnUnmeasuredOutcomeChangesNothing(t *testing.T) {
+	tick := tk("T1", protocol.Designing, func(t *Ticket) {
+		t.Run = &Run{ID: "r1", Kind: AgentDesign, Live: false,
+			EndedAt: t0.Add(-time.Minute), Outcome: OutcomeUnknown}
+	})
+	if a := find(Sweep(snap(tick)), ActTransition, "T1"); a != nil {
+		t.Errorf("acted on an unmeasured outcome inside the grace: %v", *a)
+	}
+}
+
+// The run correlated to a ticket is the newest of any kind, so a
+// conclusion on the wrong kind describes some other run. Reading it as
+// this state's claim produces exactly the false sentence the mismatch
+// branch exists to avoid — and that branch, which names the dispatch,
+// is the honest reading here.
+func TestAnOutcomeOnAnotherKindOfRunIsNotThisClaims(t *testing.T) {
+	// Designing expects a design run; the newest is a cancelled dev one.
+	tick := tk("T1", protocol.Designing, func(t *Ticket) {
+		t.Run = &Run{ID: "r1", Kind: AgentDev, Live: false,
+			EndedAt: t0.Add(-time.Minute), Outcome: OutcomeCancelled}
+	})
+	if a := find(Sweep(snap(tick)), ActTransition, "T1"); a != nil {
+		t.Errorf("read another kind's cancellation as this claim's: %v", *a)
+	}
+	// Past the grace it still parks, by the mismatch branch, saying so.
+	old := tk("T2", protocol.Designing, func(t *Ticket) {
+		t.StateSince = t0.Add(-time.Hour)
+		t.Run = &Run{ID: "r2", Kind: AgentDev, Live: false,
+			EndedAt: t0.Add(-30 * time.Minute), Outcome: OutcomeCancelled}
+	})
+	a := find(Sweep(snap(old)), ActTransition, "T2")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want the mismatch branch to park it, got %v", a)
+	}
+	if a.Marker.Fields["dispatched"] != string(AgentDev) {
+		t.Errorf("want the mismatch branch's diagnosis, got %v", a.Marker)
+	}
+}
+
 func TestPrecedenceOrdersDispatch(t *testing.T) {
 	older := tk("T1", protocol.ReadyForDev, func(t *Ticket) { t.CreatedAt = t0.Add(-3 * time.Hour) })
 	rework := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.CreatedAt = t0.Add(-time.Hour) })

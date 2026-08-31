@@ -52,6 +52,22 @@ const (
 	CIRed     CIStatus = "red"
 )
 
+// RunOutcome is how an agent run ended, as the adapter reports it. The
+// adapter owns the mapping from its host's vocabulary, the same way it
+// does for CIStatus.
+type RunOutcome string
+
+const (
+	// OutcomeUnknown is a run still live, one whose host said nothing,
+	// or one whose conclusion the adapter has not measured. It is the
+	// value that changes no behaviour, and every rule here must leave it
+	// alone.
+	OutcomeUnknown   RunOutcome = ""
+	OutcomeSucceeded RunOutcome = "succeeded"
+	OutcomeFailed    RunOutcome = "failed"
+	OutcomeCancelled RunOutcome = "cancelled"
+)
+
 // DeployStatus is the adapter's judgment of a Merged ticket's deployment:
 // it owns the ancestry comparison and the surface check (DESIGN §11, §13),
 // so the core only reads the verdict.
@@ -80,6 +96,11 @@ type Run struct {
 	Kind    AgentKind
 	Live    bool
 	EndedAt time.Time
+	// Outcome is how the run ended. Absent it, the stale-claim rule had
+	// only "not live" to reason from and had to wait out a grace period
+	// to guess at the difference between a run that died and one that is
+	// slow to report finishing (DESIGN §12).
+	Outcome RunOutcome
 }
 
 // Comment is one tracker comment, marker or prose.

@@ -759,6 +759,38 @@ func staleClaimFor(s *Snapshot, t *Ticket) []Action {
 	if !owned || t.Run == nil || t.Run.Live {
 		return nil
 	}
+	// A conclusion the host reported settles what the grace period is
+	// there to wait out, so it is answered now rather than in twenty
+	// minutes.
+	//
+	// The grace exists to separate "the run died" from "the run is slow
+	// to say it finished" — a distinction only time can draw when the
+	// host offers nothing but `completed`. `failed` and `cancelled` draw
+	// it directly: nothing further is coming from either. Waiting on
+	// them is the grace period re-asking a question already answered,
+	// and on a cancellation it is worse than idle — the author stopped
+	// the run deliberately, and the pipeline spent the next twenty
+	// minutes declining to notice.
+	//
+	// Only where the run is the kind this state expects. The run
+	// correlated to a ticket is the newest of *any* kind, so on a
+	// mismatch the conclusion describes some other run entirely and the
+	// branch below has the honest reading — saying "you cancelled the
+	// design run" about a cancelled dev run is the same class of false
+	// sentence the mismatch branch itself exists to avoid.
+	//
+	// `succeeded` deliberately keeps the grace: a run that finished
+	// cleanly and left the ticket in its claim may simply not have
+	// written the move yet, which is the case the wait was built for.
+	if t.Run.Kind == kind {
+		if prose, reason, known := stoppedRun(t.Run.Outcome, kind); known {
+			return block(t, &marker.Marker{Kind: marker.StaleClaim, Fields: map[string]string{
+				"run":     t.Run.ID,
+				"outcome": string(t.Run.Outcome),
+			}}, prose, reason)
+		}
+	}
+
 	// Measure from whichever is later: the run's death or the state entry.
 	since := t.Run.EndedAt
 	if t.StateSince.After(since) {
@@ -793,6 +825,39 @@ func staleClaimFor(s *Snapshot, t *Ticket) []Action {
 	return block(t, m,
 		fmt.Sprintf("The %s run claiming this ticket is no longer live and the grace period passed. At one agent a stuck claim halts the queue, so it is detected rather than waited out (DESIGN §12).", kind),
 		"stale claim")
+}
+
+// stoppedRun reports a run whose outcome means nothing further is
+// coming, with the sentence to say about it.
+//
+// Same marker kind as every other stale claim, with the outcome as a
+// field — following the mismatch branch above, which varies its prose
+// on the same marker rather than minting a kind. The arrival is
+// identical (Blocked, out of an agent state, because the claim has
+// nothing behind it); only the diagnosis differs, and the diagnosis is
+// exactly what the field and the prose carry.
+//
+// The prose matters more than usual here. The ordinary stale-claim
+// sentence sends the reader looking for a workflow file that failed to
+// parse or a missing secret, which is the right hunt for a claim that
+// died silently and precisely the wrong one for a run the author
+// stopped on purpose or one that ran and reported a failure. This
+// file's own history is the argument: a stale-claim comment asserting
+// something false about a run cost a wrong diagnosis once already.
+func stoppedRun(outcome RunOutcome, kind AgentKind) (prose, reason string, known bool) {
+	switch outcome {
+	case OutcomeCancelled:
+		return fmt.Sprintf(
+			"The %s run claiming this ticket was cancelled, so nothing further is coming. Parked here rather than waited out, because the cancellation is already the decision (DESIGN §12).\n\n"+
+				"Only you move a ticket out of Blocked, and you choose the state — any state, including Done.",
+			kind), "run cancelled", true
+	case OutcomeFailed:
+		return fmt.Sprintf(
+			"The %s run claiming this ticket failed, so nothing further is coming. Parked here rather than waited out, because the failure is already the answer (DESIGN §12).\n\n"+
+				"The run's own logs carry the cause; nothing on this ticket does. Only you move it out of Blocked, and you choose the state — a retry means sending it back to the queue that feeds this agent.",
+			kind), "run failed", true
+	}
+	return "", "", false
 }
 
 // boundaryFor creates the boundary ticket when the last milestone ticket

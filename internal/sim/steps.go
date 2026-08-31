@@ -307,6 +307,11 @@ func (w *World) stepDeploy(raw json.RawMessage) error {
 func (w *World) stepRunEnd(raw json.RawMessage) error {
 	var p struct {
 		Key string `json:"key"`
+		// Outcome is how the run ended, for scenarios that turn on it.
+		// Omitted means the host said nothing, which is what every
+		// scenario written before outcomes existed meant and still
+		// means — the grace period decides.
+		Outcome string `json:"outcome"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
@@ -320,6 +325,21 @@ func (w *World) stepRunEnd(raw json.RawMessage) error {
 	}
 	t.Run.Live = false
 	t.Run.EndedAt = w.Clock
+	switch p.Outcome {
+	case "":
+		t.Run.Outcome = core.OutcomeUnknown
+	case "succeeded":
+		t.Run.Outcome = core.OutcomeSucceeded
+	case "failed":
+		t.Run.Outcome = core.OutcomeFailed
+	case "cancelled":
+		t.Run.Outcome = core.OutcomeCancelled
+	default:
+		// Refused rather than defaulted, for the reason the step
+		// dispatcher gives: a scenario written for a newer harness must
+		// not silently pass on an older one.
+		return fmt.Errorf("run-end %s: unknown outcome %q", p.Key, p.Outcome)
+	}
 	return nil
 }
 

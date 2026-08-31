@@ -24,6 +24,28 @@ import (
 // down with it. That distinction is the whole of the rule; the reason
 // it is written here is that it was not obeyed and the failure looked
 // like something else entirely (see the verdict read below).
+// runOutcome carries the port's vocabulary across to the core's, the
+// same crossing hostfacts already makes for CIStatus. Two enums rather
+// than one shared string because the core is host-agnostic by
+// construction: the sim drives it with no GitHub anywhere, and a core
+// that matched on GitHub's own conclusion strings would make every
+// scenario speak them too.
+//
+// An unrecognised value maps to OutcomeUnknown rather than being passed
+// through, so a widened port cannot reach a core rule that has not been
+// taught what the new value means.
+func runOutcome(o host.RunOutcome) core.RunOutcome {
+	switch o {
+	case host.OutcomeSucceeded:
+		return core.OutcomeSucceeded
+	case host.OutcomeFailed:
+		return core.OutcomeFailed
+	case host.OutcomeCancelled:
+		return core.OutcomeCancelled
+	}
+	return core.OutcomeUnknown
+}
+
 func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) error {
 	if p.Host == nil {
 		return nil
@@ -52,6 +74,11 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 		// one. Two boundary runs on ORC-45 each read the collapsed Run,
 		// each recognised it as its own, and both scanned the tree.
 		if r.Live {
+			// No outcome here, deliberately. A live run has not
+			// concluded, so the host has nothing to report about how it
+			// ended — carrying the field would be one nothing can set
+			// and nothing reads, and a line no probe can break is a line
+			// no test is covering.
 			liveRuns[r.TicketKey] = append(liveRuns[r.TicketKey],
 				core.Run{ID: r.ID, Kind: core.AgentKind(r.Kind), Live: true, EndedAt: r.EndedAt})
 		}
@@ -59,7 +86,8 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 
 	for _, t := range tickets {
 		if r, ok := latestRun[t.Key]; ok {
-			t.Run = &core.Run{ID: r.ID, Kind: core.AgentKind(r.Kind), Live: r.Live, EndedAt: r.EndedAt}
+			t.Run = &core.Run{ID: r.ID, Kind: core.AgentKind(r.Kind), Live: r.Live, EndedAt: r.EndedAt,
+				Outcome: runOutcome(r.Outcome)}
 		}
 		t.LiveRuns = liveRuns[t.Key]
 		pr := prForTicket(prs, t.Key)
