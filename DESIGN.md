@@ -2088,9 +2088,21 @@ read and no author reliably remembers.
   ticket is a sequencing problem whichever half noticed them, and two counters would each stop
   at two.
 - **Second bounce from reconciliation on the same ticket → `Blocked`**, not rework again. Two
-  failures to land the same scope is a design problem, not an implementation one, and the
-  author will usually route it to `Ready for design`. Counted the same way: reconciliation's bounce
-  comments carry a marker.
+  failures to land the same scope is more often a design problem than an implementation one, and
+  the author will usually route it to `Ready for design`. Counted the same way: reconciliation's
+  bounce comments carry a marker.
+
+  **"Usually" is the whole of it — the escalation recommends a destination, it does not enforce
+  one.** Sending the ticket back to `Ready for rework` for one more pass is a legitimate answer
+  and the rule above must not undo it. So the escalation fires **once per bounce count** rather
+  than once per sweep in the state: it records the count on the `blocked` marker, and re-fires
+  only when reconciliation bounces the ticket past that count. A third bounce is new information;
+  the author's decision to try again is not. Enforcing it instead was a live defect rather than a
+  hypothetical — Catapult's ORC-174 went `Blocked` → `Ready for rework` → `Blocked` in
+  twenty-seven seconds, twice posting the same comment, leaving the author no gesture the next
+  tick would not reverse. This is the general shape of every marker-counted escalation: the count
+  is evidence about the work, and re-reading old evidence as a new finding turns a rule into a
+  trap.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
   redeploy, not a state change, which is why the author decides where it goes next.

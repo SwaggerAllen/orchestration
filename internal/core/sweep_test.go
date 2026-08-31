@@ -245,7 +245,51 @@ func TestSecondReconcileBounceBlocks(t *testing.T) {
 		withComment(marker.ReconcileBounce, map[string]string{"n": "2"})))
 	a := find(Sweep(s), ActTransition, "T1")
 	if a == nil || a.To != protocol.Blocked {
-		t.Errorf("want second bounce -> Blocked, got %v", a)
+		t.Fatalf("want second bounce -> Blocked, got %v", a)
+	}
+	// The count rides on the marker, or the escalation cannot tell its
+	// own work from a fresh bounce on the next sweep.
+	if a.Marker == nil || a.Marker.Fields["bounces"] != "2" {
+		t.Errorf("want the escalation to record bounces=2, got %v", a.Marker)
+	}
+}
+
+// Only the author moves a ticket out of Blocked and they choose the state
+// (DESIGN §12). Ready for rework is one of the states they may choose —
+// sometimes the fix really is one more pass — and the escalation must not
+// undo that choice on the next tick. Catapult's ORC-174 went Blocked ->
+// Ready for rework -> Blocked in twenty-seven seconds, posting the same
+// comment twice with no reconciliation between them.
+func TestTheAuthorsReturnToReworkIsNotReEscalated(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForRework,
+		withComment(marker.ReconcileBounce, map[string]string{"n": "1"}),
+		withComment(marker.ReconcileBounce, map[string]string{"n": "2"}),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_rework", "bounces": "2"})))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil && a.To == protocol.Blocked {
+		t.Errorf("re-blocked the author's return with no new bounce: %v", *a)
+	}
+	// And the ticket is not merely left alone — it goes back to work,
+	// which is the whole point of the author's choice.
+	if a := find(Sweep(s), ActDispatch, "T1"); a == nil || a.Agent != AgentDev {
+		t.Errorf("no dev run dispatched for the returned ticket: %v", Sweep(s))
+	}
+}
+
+// A third bounce is new information, so it escalates again. Suppressing
+// it would be the opposite failure: an author who tried once more and was
+// bounced once more is owed the same stop the second bounce gave them.
+func TestAThirdBounceEscalatesAgain(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForRework,
+		withComment(marker.ReconcileBounce, map[string]string{"n": "1"}),
+		withComment(marker.ReconcileBounce, map[string]string{"n": "2"}),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_rework", "bounces": "2"}),
+		withComment(marker.ReconcileBounce, map[string]string{"n": "3"})))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want a third bounce -> Blocked, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Fields["bounces"] != "3" {
+		t.Errorf("want the escalation to record bounces=3, got %v", a.Marker)
 	}
 }
 

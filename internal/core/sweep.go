@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -650,9 +651,6 @@ func ciFor(s *Snapshot, t *Ticket) []Action {
 // escalationsFor applies the marker-counted escalations that are not CI
 // (DESIGN §12).
 func escalationsFor(s *Snapshot, t *Ticket) []Action {
-	// Second bounce from reconciliation: the queue ticket carries two
-	// bounce markers, and two failures to land the same scope is a design
-	// problem, not an implementation one.
 	// A branch that cannot land three times is not a stale branch any
 	// more: main is moving faster than this ticket can, and the fix is
 	// sequencing, which is the author's. Deliberately looser than the
@@ -669,9 +667,22 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 			"third merge conflict")
 	}
 
-	if t.State == protocol.ReadyForRework && len(markersOf(t, marker.ReconcileBounce)) >= 2 {
-		return block(t, nil,
-			"Second bounce from reconciliation on the same ticket. This is a design problem, not an implementation one — Designing is the usual route from here (DESIGN §12).",
+	// Second bounce from reconciliation: the queue ticket carries two
+	// bounce markers, and two failures to land the same scope is more
+	// often a design problem than an implementation one.
+	//
+	// Counted against what has already been escalated, not against the
+	// state alone. The state alone made this a trap: the author returning
+	// the ticket to Ready for rework — a state DESIGN §12 explicitly
+	// leaves them free to choose — left the two markers in place, so the
+	// next sweep re-read them and blocked it again. See
+	// alreadyEscalatedBounce for the ticket that measured it.
+	if n := len(markersOf(t, marker.ReconcileBounce)); t.State == protocol.ReadyForRework &&
+		n >= 2 && !alreadyEscalatedBounce(t, n) {
+		return block(t, &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{
+			"bounces": strconv.Itoa(n),
+		}},
+			"Second bounce from reconciliation on the same ticket. Two failures to land the same scope is more often a design problem than an implementation one, so `Ready for design` is the usual route from here — but that is a recommendation, not a routing. Sending this back to `Ready for rework` for another pass is a legitimate answer, and it will not be escalated again unless reconciliation bounces it a third time (DESIGN §12).",
 			"second reconcile bounce")
 	}
 	return nil
