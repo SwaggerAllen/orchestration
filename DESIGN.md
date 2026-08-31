@@ -1479,6 +1479,9 @@ signal that was missing.
    ORC-1 and ORC-18 reverted, ORC-23 (PR #15) did not, with `retro: Rehearsal 1` sitting
    directly above it in the log.
 
+   A ticket whose PR the author merged by hand carries no `merged` marker to read, so this step
+   looks the merge up on the host for any entry that would otherwise go in with no shas (§11).
+
    The general rule, which this section now instances twice: **information that exists at
    exactly one moment is owned by the step that ends that moment.** Anything a later pass needs
    about archived work has to be in the note, because the note is the only thing that survives.
@@ -1812,6 +1815,43 @@ feature works — nothing here proves that, and a ticket that passes reconciliat
 anybody has tested. It is narrower than it sounds and worth doing anyway, because it is the one
 drift nobody else is positioned to notice: the author of the argument is the only one who can
 tell that the paragraph which landed isn't it.
+
+### The `merged` marker, and the merges the pipeline did not make
+
+Reconciliation writes a `merged` marker carrying the merge commit's sha the moment it merges
+the PR, and that marker is the pipeline's only record that a ticket landed. Three readers
+depend on it: the boundary's retro note (§10 step 6), the rehearsal reset that reads the note,
+and the post-deploy check that compares the sha against what the platform is running (§13).
+
+**A merge the pipeline did not make leaves no marker, and all three degrade in silence rather
+than failing.** The note records the ticket with no commit, the reset cannot revert what the
+note does not name, and the deploy check finds no sha to compare — so it leaves the ticket
+`Pending` and the deploy timeout escalates work that shipped fine to `Blocked`. Design-only
+tickets are the systematic case, because they have no dev pass and so never reach reconcile at
+all: on Catapult's tech-debt milestone six of twenty-six retro entries carry no sha, and five of
+those six touched only design-owned paths.
+
+**So the sweep backfills the marker from the host.** A ticket in `Merged` carrying no `merged`
+marker is looked up by the key in its branch — the same correlation §5 already routes PR events
+by — and every merged PR found is recorded with its merge commit. It is convergent: the comment
+it writes is the marker the next snapshot reads, so the ticket stops qualifying as soon as the
+write lands, and a failed write costs a beat.
+
+The lookup asks for **closed** PRs, because the PR in question is closed by definition, and it
+reads `merged_at` rather than `state`: a PR closed without merging has no commit behind it, and
+reporting one would put a sha that never landed into the note and hand the reset a commit to
+revert that does not exist.
+
+**The boundary's archive step asks the same question again**, over the tickets it is about to
+archive. Not redundancy: the sweep can only backfill a ticket it catches sitting in `Merged`,
+and a ticket can cross that state between two beats — Catapult's `ORC-181` was in `Merged` for
+28 seconds. The note is the last record of those commits, since the step archives the tickets
+immediately after, so a miss there is never recoverable.
+
+**What this does not cover: work that never had a PR.** Catapult's `ORC-131` landed as three
+direct commits on `main`, and no lookup keyed on a PR branch can find it. That is left visible
+rather than guessed at — matching commit subjects would make the record depend on whatever the
+person merging happened to type.
 
 ### Why it runs before the merge
 

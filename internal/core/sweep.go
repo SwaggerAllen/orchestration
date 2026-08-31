@@ -98,6 +98,10 @@ func Sweep(s *Snapshot) []Action {
 		}
 	}
 	unmoved(correctionsFor)
+	// Before the resolutions: the marker this writes is what the deploy
+	// check reads to decide a Merged ticket landed, and postDeployFor is
+	// that check's other half.
+	unmoved(mergeBackfillFor)
 	// Resolution first: a deploy that landed retires the ticket, which
 	// releases its mutex labels and clears it as a blocker for everything
 	// judged after this point.
@@ -324,6 +328,48 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 		return revert(rule, prose), true
 	}
 	return nil, false
+}
+
+// mergeBackfillFor writes the `merged` marker for a merge the pipeline
+// did not make.
+//
+// The marker is written at exactly one place otherwise — reconcile, once
+// it has merged the PR itself — so a PR the *author* merges by hand
+// leaves the ticket carrying no marker at all, and three readers then
+// degrade in silence rather than failing: the retro note records the
+// ticket with no commit, the rehearsal reset cannot revert what the note
+// does not name, and the deploy check finds no SHA to compare, leaves
+// the ticket Pending and lets the deploy timeout escalate a ticket that
+// shipped fine to Blocked.
+//
+// Design-only tickets are the systematic case, because there is no dev
+// pass and so no reconcile to reach: on Catapult's tech-debt milestone
+// six of twenty-six retro entries carry no SHA, and five of those six
+// touched only design-owned paths.
+//
+// Convergent, and that is what keeps it from re-firing: the comment it
+// plans is the marker the next snapshot reads, so the ticket stops
+// qualifying the moment the write lands. A failed write costs a beat.
+func mergeBackfillFor(_ *Snapshot, t *Ticket) []Action {
+	if len(t.HandMerges) == 0 {
+		return nil
+	}
+	var acts []Action
+	for _, hm := range t.HandMerges {
+		fields := map[string]string{"sha": hm.SHA}
+		if hm.PR != "" {
+			fields["pr"] = hm.PR
+		}
+		acts = append(acts, Action{
+			Kind:     ActComment,
+			TicketID: t.ID,
+			Marker:   &marker.Marker{Kind: marker.Merged, Fields: fields},
+			Prose: "This landed as a merge the pipeline did not make, so the record of it was missing. " +
+				"Recording it now, so the retro note, the rehearsal reset and the deploy check can all see the commit (DESIGN §11).",
+			Reason: "merge landed outside the pipeline; backfilling the marker (DESIGN §11)",
+		})
+	}
+	return acts
 }
 
 // arrival is the transition this sweep judges, and who made it.

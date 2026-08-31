@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
@@ -90,6 +89,33 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 				Outcome: runOutcome(r.Outcome)}
 		}
 		t.LiveRuns = liveRuns[t.Key]
+		// A merge the pipeline did not make leaves no `merged` marker,
+		// so the host is the only place the commit exists. Asked only
+		// for a ticket sitting in Merged that carries no marker — in the
+		// ordinary case that set is empty, and it can never be larger
+		// than the handful of tickets in one state, so the snapshot
+		// stays a bounded number of calls.
+		//
+		// The lookup goes before the open-PR correlation below and not
+		// after it, because the PR in question is closed: it is exactly
+		// the PR that is *not* in the list, and a `continue` on nil
+		// would skip every ticket this is for.
+		if t.State == protocol.Merged && !t.IsBoundary() && len(core.MergedSHAs(t)) == 0 {
+			merged, err := p.Host.MergedPRsFor(ctx, t.Key)
+			if err != nil {
+				// One ticket's missing commit, not the snapshot's. The
+				// cost of skipping is that the marker is backfilled a
+				// beat later; the cost of returning would be every
+				// other ticket's facts, which is the trade this file
+				// already settled for verdicts and merge states.
+				fmt.Fprintf(os.Stderr, "hostfacts: merged PRs for %s: %v\n", t.Key, err)
+			}
+			for _, m := range merged {
+				t.HandMerges = append(t.HandMerges, core.HandMerge{
+					SHA: m.MergeSHA, PR: fmt.Sprintf("%d", m.Number),
+				})
+			}
+		}
 		pr := prForTicket(prs, t.Key)
 		if pr == nil {
 			continue
@@ -155,28 +181,10 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 // case-insensitive and boundary-checked so PIPE-1 never matches a
 // pipe-12 branch.
 func prForTicket(prs []host.PR, key string) *host.PR {
-	lk := strings.ToLower(key)
 	for i := range prs {
-		lb := strings.ToLower(prs[i].Branch)
-		idx := 0
-		for {
-			j := strings.Index(lb[idx:], lk)
-			if j < 0 {
-				break
-			}
-			start := idx + j
-			end := start + len(lk)
-			beforeOK := start == 0 || !isAlnum(lb[start-1])
-			afterOK := end == len(lb) || !isAlnum(lb[end])
-			if beforeOK && afterOK {
-				return &prs[i]
-			}
-			idx = end
+		if host.BranchBelongsTo(prs[i].Branch, key) {
+			return &prs[i]
 		}
 	}
 	return nil
-}
-
-func isAlnum(b byte) bool {
-	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b >= 'A' && b <= 'Z'
 }

@@ -1954,3 +1954,70 @@ func TestPromotionDoorKeepsTheStrictReading(t *testing.T) {
 		t.Errorf("the author's promotion past a held mutex was not reverted: %v", acts)
 	}
 }
+
+// `merged` is written at one site — reconcile, after it merges the PR
+// itself — so a PR the author merges by hand leaves no marker, and three
+// readers degrade in silence: the retro note records no commit, the
+// rehearsal reset cannot revert what the note does not name, and the
+// deploy check finds no SHA and lets the timeout escalate a shipped
+// ticket to Blocked.
+func TestAHandMergeGetsItsMarkerBackfilled(t *testing.T) {
+	tk1 := tk("T1", protocol.Merged)
+	tk1.HandMerges = []HandMerge{{SHA: "abc123", PR: "42"}}
+	acts := Sweep(snap(tk1))
+
+	c := find(acts, ActComment, "T1")
+	if c == nil {
+		t.Fatalf("no marker backfilled for a hand-merged ticket: %v", acts)
+	}
+	if c.Marker == nil || c.Marker.Kind != marker.Merged {
+		t.Fatalf("backfilled the wrong marker: %+v", c.Marker)
+	}
+	if got := c.Marker.Fields["sha"]; got != "abc123" {
+		t.Errorf("marker carries sha %q, want abc123", got)
+	}
+	if got := c.Marker.Fields["pr"]; got != "42" {
+		t.Errorf("marker carries pr %q, want 42", got)
+	}
+
+	// Convergent: once the marker is on the ticket the build stops
+	// reporting a hand merge, so the rule cannot re-fire and comment
+	// every beat.
+	settled := tk("T2", protocol.Merged, withComment(marker.Merged, map[string]string{"sha": "abc123", "pr": "42"}))
+	if c := find(Sweep(snap(settled)), ActComment, "T2"); c != nil {
+		t.Errorf("re-commented a ticket that already carries its marker: %v", *c)
+	}
+}
+
+// A ticket merged, reverted by hand and merged again has two commits,
+// and a note carrying one would leave half of it on main when the reset
+// ran. Both are backfilled.
+func TestEveryHandMergeIsRecordedNotJustTheNewest(t *testing.T) {
+	tk1 := tk("T1", protocol.Merged)
+	tk1.HandMerges = []HandMerge{{SHA: "first", PR: "1"}, {SHA: "second", PR: "2"}}
+	var shas []string
+	for _, a := range Sweep(snap(tk1)) {
+		if a.Kind == ActComment && a.Marker != nil && a.Marker.Kind == marker.Merged {
+			shas = append(shas, a.Marker.Fields["sha"])
+		}
+	}
+	if len(shas) != 2 || shas[0] != "first" || shas[1] != "second" {
+		t.Errorf("backfilled %v, want both commits oldest first", shas)
+	}
+}
+
+// MergedSHAs is the one reader the retro note and the deploy check now
+// share, and they differ only in which end of it they take.
+func TestMergedSHAsReadsEveryMarkerInOrder(t *testing.T) {
+	ticket := tk("T1", protocol.Merged,
+		withComment(marker.Merged, map[string]string{"sha": "one"}),
+		withComment(marker.ReconcileBounce, map[string]string{"pr": "3"}),
+		withComment(marker.Merged, map[string]string{"sha": "two"}))
+	got := MergedSHAs(ticket)
+	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Errorf("MergedSHAs = %v, want [one two] — oldest first, other markers skipped", got)
+	}
+	if len(MergedSHAs(tk("T2", protocol.Merged))) != 0 {
+		t.Error("a ticket with no comments reported a merge")
+	}
+}
