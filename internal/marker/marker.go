@@ -110,7 +110,11 @@ const (
 	// a needs-setup block, setup=<what a human has to do>. Also
 	// pushed=<sha> when the run had already pushed the ticket branch
 	// before it failed, so the ticket says whether the work survived
-	// rather than leaving it to be read off the branch by hand.
+	// rather than leaving it to be read off the branch by hand. On the
+	// second-bounce escalation, bounces=<count> — the number of
+	// reconcile bounces it fired at, so a later sweep can tell its own
+	// escalation from a fresh one and the author's return to `Ready for
+	// rework` stands (DESIGN §12).
 	Blocked Kind = "blocked"
 	// Preview records where this design pass's storybook export was
 	// published. Design review is the author reading the rendered

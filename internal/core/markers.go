@@ -63,6 +63,40 @@ func alreadyReportedCIRed(t *Ticket, runURL string, runAttempt int) bool {
 	return false
 }
 
+// alreadyEscalatedBounce reports whether the second-bounce escalation has
+// already fired at this many reconcile bounces.
+//
+// The escalation used to be a fact about state alone — `Ready for rework`
+// plus two bounce markers — which made it a trap rather than a rule. Only
+// the author moves a ticket out of `Blocked` and they choose the state
+// (DESIGN §12), and `Ready for rework` is one of the states they may
+// legitimately choose: sometimes the fix really is one more pass. The
+// markers do not go away when they choose it, so the next sweep read the
+// same two bounces and blocked it again. Catapult's ORC-174 went
+// `Blocked` -> `Ready for rework` -> `Blocked` in twenty-seven seconds,
+// posting two identical `blocked` comments with no reconciliation between
+// them, and no gesture available to the author that the rule would not
+// undo on the next tick.
+//
+// So the escalation records the count it fired at and fires again only
+// when reconciliation bounces the ticket past it. A third bounce is new
+// information and escalates; the author deciding to try once more is not,
+// and stands.
+//
+// A marker written before this field existed carries no count, so it
+// suppresses nothing — deliberately, since the alternative reads every
+// older block as an escalation at the current count and would swallow a
+// genuine third bounce. A ticket already parked at two escalates once
+// more, and then holds.
+func alreadyEscalatedBounce(t *Ticket, bounces int) bool {
+	for _, m := range markersOf(t, marker.Blocked) {
+		if v, err := strconv.Atoi(m.Fields["bounces"]); err == nil && v >= bounces {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeRunAttempt reads an absent attempt as the first one.
 //
 // GitHub numbers attempts from 1, so a zero here never came from the
