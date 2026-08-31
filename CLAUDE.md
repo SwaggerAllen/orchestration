@@ -76,6 +76,19 @@ Removing the code a test *reads* is a weaker probe than breaking what it
 which proves only that the test mentions it; misspelling that field's
 JSON tag fails the test, which is the behaviour under test.
 
+**A probe that passes is a finding, not a formality**, and it is pointing
+at one of exactly two things. Either no test covers the line — which is
+the `awaitingDispatchOf` hole again, arriving through a different door —
+or the line is inert and should not be there. Both showed up in one
+probe. Breaking the host-to-core outcome mapping printed `ok` first
+because nothing asserted that crossing at all: the adapter test proved
+GitHub's conclusion was read, the core tests proved the rule acted on it,
+and the link between them was unasserted. Then the retry printed `ok`
+again because it had matched the *other* construction site, whose value
+no test could ever cover — a live run has not concluded, so the field was
+always the zero value. That line is gone rather than left. Read a passing
+probe as the question "which of those two is it", never as a green light.
+
 Measured 2026-08-23, because the folk version of this is wrong: the Go
 test cache does **not** serve a stale pass when you edit a file the test
 reads at runtime. Breaking `.github/actions/agent-dev/action.yml` after a
@@ -261,6 +274,31 @@ outside that event so the audit's gate skips and reports a green that
 checked nothing, and `runsForSHA` drops `workflow_dispatch` runs on
 purpose so the verdict would never be read.
 
+## `status` is not `conclusion`, and the adapter used to read only one
+
+Measured on Catapult's own design-agent runs, 2026-08-31:
+
+```
+33431474175  design ORC-181  status=completed  conclusion=cancelled
+33430600999  design ORC-177  status=completed  conclusion=success
+33429431365  design ORC-181  status=completed  conclusion=failure
+```
+
+A cancelled run, a failed one and a successful one are all
+`status: "completed"`. `agentRunsAt` read `status` alone, so all three
+reached the plane as the single fact `Live: false` and the stale-claim
+grace had to guess between them by waiting — while telling the reader to
+go looking for a workflow file that failed to parse or a missing secret,
+which is the wrong hunt for two of the three.
+
+Only `success`, `failure` and `cancelled` are mapped, because those are
+the three anyone here has seen. GitHub documents `neutral`, `skipped`,
+`stale`, `timed_out`, `startup_failure` and `action_required` as well;
+they map to `OutcomeUnknown`, which no rule acts on, so an unmeasured
+value behaves exactly as no value always did. Widening that mapping is a
+claim about the API and belongs with the measurement that supports it —
+the same rule the `tracker.Memory` section above states for fakes.
+
 ## The project repos are not this repo
 
 `pipeline.config.json` and `.github/workflows/**` are author-owned in
@@ -275,6 +313,33 @@ author's to make and belongs in its own change, ahead of this one.
 are what §9's revert rules read: on a solo workspace the harness writes as
 the author, so without them the sweep cannot tell the author's moves from
 the pipeline's.
+
+**Its own writes, literally — and this is where the author-facing
+surprises come from.** `Plane.record` has exactly one call site, inside
+the loop over the sweep's own actions, write-ahead of a move the sweep is
+about to make. A move the *author* makes is never recorded, even one the
+sweep looks at and permits. So the record sits where the pipeline last
+wrote, and `arrival` computes the edge to judge as "recorded position →
+tracker's current state".
+
+Two consequences that cost real time before they were written down.
+
+**The writer matrix judges a standing gap, not an event.** It re-fires on
+every sweep until record and tracker agree, so suppressing the judgement
+for one pass changes nothing about the gap it resumes judging. Borrowing
+`author-only` as a pass for a single move was tried and measured: the
+revert holds off while the label is on and lands the moment it comes off.
+`resync` exists because closing the gap — adopting the ticket's state
+into the record — is the only thing that works, and `ActAdopt` is the one
+action in the system that writes the record and touches nothing else.
+
+**An intermediate state the author passes through is invisible.** A
+hand-made `Designing` → `Blocked` → `Done` is read as `Designing` →
+`Done` and reverted by the done-writer rule, because the `Blocked` was
+never recorded and `arrival` never saw it. The same two moves work when
+the *pipeline* wrote the `Blocked` — which is why the cancelled-run rule
+parking a ticket is also what makes the author's own close land. Catapult
+ORC-181 spent an evening on the wrong side of this.
 
 `Reserve`/`Release` — and the Durable Object's `/reserve` compare-and-set
 behind them — landed as "Reservations: the storage half of closing the
