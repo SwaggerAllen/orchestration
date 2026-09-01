@@ -765,6 +765,17 @@ func TestDesignRolePromptScopesNeverDeleteToTheNonAsksFile(t *testing.T) {
 		{"cite a rule, never the shape of another document", "shape citations rot when the cited doc is edited"},
 		{"not only `docs/**`", "bundle content and code comments cite these docs and rot the same way"},
 		{"expiry you do not control", "\"not built\" outlives the condition, often within its own ticket"},
+		// ORC-214. The bullet above used to answer its own diagnosis with
+		// "name the ticket or phase that closes it", which relocates the
+		// expiry rather than removing it and hands the pass a sanctioned
+		// phrasing for scope narration — the shape Catapult's CLAUDE.md
+		// already calls the worst of three and still gets. One milestone
+		// produced five, across ORC-107, ORC-108 and ORC-109. These four
+		// are the replacement, and each closes a different door:
+		{"does not fix it", "or the naming escape hatch comes back as the remedy for its own defect"},
+		{"survives the merge", "the test that replaces the escape hatch; without it there is only a ban"},
+		{"attribution is not narration", "or the fix over-corrects and passes stop tagging decisions at all"},
+		{"an inline comment", "where a gap with no rule inside it goes, so the fix does not just delete information"},
 	} {
 		if !strings.Contains(lower, strings.ToLower(want.text)) {
 			t.Errorf("prompts/design.md does not carry %q — %s", want.text, want.why)

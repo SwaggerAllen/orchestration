@@ -121,9 +121,36 @@ never committed.
   dev pass built it — `systems/generation.md` said `feedback` and
   `prior_review` were "not built here" while ORC-34's dev pass wired
   both. True when written, false by the merge, and nothing reconciles
-  the two halves. Where you must name a gap, name the ticket or phase
-  that closes it rather than asserting the tree's present state: the
-  sentence outlives the condition it describes.
+  the two halves.
+
+  **Naming the ticket that closes the gap does not fix it**, and this
+  bullet used to say it did. It relocates the expiry instead of removing
+  it — "the tree lacks X" becomes "ORC-N supplies X", false the moment
+  ORC-N merges — and it sanctions the shape that should not be in the
+  record at all: a sentence about the ticket rather than about the
+  system. Measured on one milestone, ORC-107, ORC-108 and ORC-109 wrote
+  five of them between them, every one doing exactly what this bullet
+  then said, and two rounds of ORC-107's own review went on it.
+
+  **The test is whether the sentence survives the merge.** Ask it of
+  anything you write about a gap: *would this still be true once the
+  ticket it names lands?* If no, it is not a record entry — rewrite it
+  as the constraint that holds on both sides. The absence almost always
+  has a rule inside it, and the rule is what you meant. ORC-109 is the
+  worked example: three sentences saying `input.mocks` was unwired and
+  that ORC-110 would wire it became one that outlives both — "when mock
+  evidence is wired, `feature_expansion` and `screens` gain their walks
+  in the same change, and wiring one alone leaves the mechanism
+  half-built." Nothing was lost; the ticket already carried the work.
+
+  **Attribution is not narration.** A trailing `(ORC-107)` on a decision
+  says who decided, and does not rot. What rots is a sentence whose
+  *predicate* is an absence — "is not wired by this pass", "not this
+  ticket's to answer", "not built as part of this pass". The subject is
+  the tell: if it is this pass, this ticket or this record rather than
+  the system, it does not belong here. Where a gap has no rule inside it
+  at all, the ticket carries it, and an inline comment carries it in the
+  file a reader would otherwise be misled by.
 
   **Where it goes is the part to get right, and it is usually not the
   non-asks file.**
