@@ -760,6 +760,28 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 			"Second bounce from reconciliation on the same ticket. Two failures to land the same scope is more often a design problem than an implementation one, so `Ready for design` is the usual route from here — but that is a recommendation, not a routing. Sending this back to `Ready for rework` for another pass is a legitimate answer, and it will not be escalated again unless reconciliation bounces it a third time (DESIGN §12).",
 			"second reconcile bounce")
 	}
+
+	// Second decline from the record review on the same ticket: the
+	// design pass wrote pass narration into the record, was sent back
+	// with the passages named, and wrote it again. A reviewer and a
+	// writer that disagree twice running are not going to settle it on
+	// a third pass — either the finding is a false positive the writer
+	// is right to keep, or the prompt is not landing — and both are the
+	// author's to look at, not another dispatch's (DESIGN §4, §12).
+	//
+	// Counted the way the bounce rule is, and for its reason: the
+	// author may return the ticket to Ready for design for one more
+	// pass, the two declines do not go away when they do, and the
+	// escalation must not undo that choice on the next tick. It fires
+	// once per count and records the count on the `blocked` marker.
+	if n := recordDeclines(t); t.State == protocol.ReadyForDesign &&
+		n >= 2 && !alreadyEscalatedAt(t, "declines", n) {
+		return block(t, &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{
+			"declines": strconv.Itoa(n),
+		}},
+			"Second decline from the record review on the same ticket: the design pass was sent back for narrating passes or alternatives in the record, and the rewrite did it again. Two rounds of the same finding means either the reviewer is wrong to flag it — a reason attached to a rule is not narration, and the writer is allowed to keep one — or the design prompt is not landing the rule, and neither is a third pass's to settle. Read the two findings on this ticket and decide. Returning it to `Ready for design` is a legitimate answer, and it will not be escalated again unless the review declines it a third time (DESIGN §4, §12).",
+			"second record-review decline")
+	}
 	return nil
 }
 

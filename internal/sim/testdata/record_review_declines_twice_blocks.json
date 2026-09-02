@@ -1,0 +1,155 @@
+{
+  "name": "second record-review decline: Blocked, once per count — the author's return to the design queue stands (DESIGN 4, 12)",
+  "steps": [
+    {
+      "kind": "seed",
+      "key": "T1",
+      "state": "ready_for_design"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "T1",
+      "state": "ready_for_design",
+      "runKind": "design",
+      "runLive": true
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "designing",
+      "actor": "design"
+    },
+    {
+      "kind": "comment",
+      "key": "T1",
+      "marker": "record-review",
+      "fields": {
+        "verdict": "decline"
+      },
+      "prose": "systems/caps.md: “Design review threw the first draft back” — a review round, not a rule",
+      "actor": "design"
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "ready_for_design",
+      "actor": "design"
+    },
+    {
+      "kind": "run-end",
+      "key": "T1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "T1",
+      "state": "ready_for_design",
+      "runKind": "design",
+      "runLive": true,
+      "markers": {
+        "record-review": 1,
+        "blocked": 0
+      }
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "designing",
+      "actor": "design"
+    },
+    {
+      "kind": "comment",
+      "key": "T1",
+      "marker": "record-review",
+      "fields": {
+        "verdict": "decline"
+      },
+      "prose": "systems/caps.md: still the review round",
+      "actor": "design"
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "ready_for_design",
+      "actor": "design"
+    },
+    {
+      "kind": "run-end",
+      "key": "T1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "T1",
+      "state": "blocked",
+      "markers": {
+        "record-review": 2,
+        "blocked": 1
+      }
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "ready_for_design",
+      "actor": "author"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "T1",
+      "state": "ready_for_design",
+      "runKind": "design",
+      "runLive": true,
+      "markers": {
+        "blocked": 1
+      }
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "designing",
+      "actor": "design"
+    },
+    {
+      "kind": "comment",
+      "key": "T1",
+      "marker": "record-review",
+      "fields": {
+        "verdict": "decline"
+      },
+      "prose": "systems/caps.md: the review round, a third time",
+      "actor": "design"
+    },
+    {
+      "kind": "transition",
+      "key": "T1",
+      "to": "ready_for_design",
+      "actor": "design"
+    },
+    {
+      "kind": "run-end",
+      "key": "T1"
+    },
+    {
+      "kind": "sweep"
+    },
+    {
+      "kind": "expect",
+      "key": "T1",
+      "state": "blocked",
+      "markers": {
+        "record-review": 3,
+        "blocked": 2
+      }
+    }
+  ]
+}

@@ -144,7 +144,7 @@ and the drift shows up as agents disagreeing about what a state means.
 |---|---|---|
 | `Backlog` | Nobody. Not committed to. | author, grooming pass |
 | `Todo` | Nobody. Committed, not started. | author, milestone pull |
-| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8) |
+| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8), design (a record-review decline, §4) |
 | `Designing` | Design agent, now. | design (claim) |
 | `Design review` | **Author.** Artifacts ready, not yet approved. | design |
 | `Ready for dev` | The queue. Scope is the **description**. | author (sign-off) |
@@ -183,7 +183,9 @@ waiting on the author* as distinct from *design is still working*. Sign-off is t
 `Design review` → `Ready for design` with a comment**, for the same reason the dev agent's push-back
 carries its argument: a rejection without one is a rejection the next pass repeats. The author
 may route straight to `Ready for design` because they are the one who would notice a ticket going
-round; an agent's push-back parks instead (§2.7).
+round; an agent's push-back parks instead (§2.7). The record review declines by the same route,
+before `Design review` is ever entered (§4): its findings are the comment, and the harness makes
+the move from `Designing`.
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
@@ -446,6 +448,41 @@ grows with the number of reviews rather than the number of rules it states. Meas
 Catapult's ORC-115, where the prompt stated "never delete" ahead of the placement guidance and
 a pass reasonably read it as governing both: eight passages narrating prior passes across five
 design-owned docs, two of them section headings numbering the review round.
+
+**The record review holds the design pass to that rule, from outside it.** After a design pass
+commits, a second model run inside the same job reads exactly one thing — the pass's own diff to
+the record, walked the way the ownership audit walks it so a merge's doc edits are not billed to
+the pass — and the rule above, and nothing else: no ticket, no thread, no non-asks, no index. It
+answers `pass` or `decline`, and a decline names each passage that reads as narration rather than
+as a rule and its reason. The harness posts the findings under a `record-review` marker and moves
+the ticket to `Ready for design` — the author's own decline route (§3) — with no PR opened and no
+preview built, because nothing is ready to be looked at.
+
+Fresh, because the pass that wrote the narration is the wrong reader for it. It is at the end of
+a long run with the reasoning it just did as the freshest thing in its context, and the narration
+is that reasoning's residue; the rule forbidding it sits a hundred thousand tokens behind.
+Measured on Catapult, 2026-09-01: 90 of 284 standing-decision bullets carried pass narration,
+holding 59% of the text in those sections, every one written under a prompt that prohibits it in
+as many words and every one signed off at Design review. The design prompt already carried the
+rule; what was missing was a reader in a position to apply it. Reconcile is the same shape for the
+same reason — a diff against an argument, read cold.
+
+Detect there, fix here. The review has the distance to see narration; the design pass has the
+context to tell a load-bearing incident from an alternative it merely passed over, and from the
+diff alone the two look the same. A reviewer that rewrote would delete the reason with the
+narration, silently. So the findings go back to the writer as the newest comment, and the rewrite
+is the writer's. A finding the writer disputes is argued once in its summary and the passage left
+as it believes it should read; a second decline on the same ticket parks it for the author (§12),
+so the disagreement gets a person after two rounds rather than a loop.
+
+A proposal about the record, never a gate on the work. Nothing under `designOwnedPaths` changed
+means no review is owed and no model run. A reviewer that dies is said on the ticket and the pass
+proceeds, because a broken reviewer must not cost a good design — but a review that silently did
+not run is a gate that looks armed and is not, so the absence is never silent. And it is not a
+state: while it runs the ticket is still `Designing`, held by the same claim, and a dead reviewer
+is a dead design run to the stale-claim rule. Sign-off already refused a second consecutive review
+state because both would answer *who has the ball* with the author; this one answers it with the
+pipeline, inside a state that already does.
 
 **Two kinds have no such home, and they are what the file is for.** Refusals every pass must
 see, and refusals spanning systems — which a per-doc home could serve only by copying into each
@@ -2205,6 +2242,13 @@ read and no author reliably remembers.
   tick would not reverse. This is the general shape of every marker-counted escalation: the count
   is evidence about the work, and re-reading old evidence as a new finding turns a rule into a
   trap. The three-conflict rule above had the same defect and is fixed the same way.
+- **Second decline from the record review on the same ticket → `Blocked`** (§4). The design pass
+  wrote pass narration into the record, was sent back with the passages named, and wrote it again.
+  Either the finding is a false positive the writer is right to keep — a reason attached to a rule
+  is not narration — or the design prompt is not landing the rule, and neither is a third
+  dispatch's to settle. Counted the way the bounce rule is and firing once per count, with
+  `declines=<n>` on the `blocked` marker: the author may return the ticket to `Ready for design`
+  for one more pass, and the two declines do not go away when they do.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
   redeploy, not a state change, which is why the author decides where it goes next.
@@ -2283,6 +2327,7 @@ permanently idle is permanently dispatchable.
 |---|---|
 | Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused — or paused and either marked blocking the boundary ticket or `Urgent` | State → `Ready for design`, first by the precedence rule (§8) |
 | State → `Ready for design` | Design agent run; its claim writes `Designing` |
+| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job (§4); `decline` → `Ready for design` with the findings; a second decline on one ticket → `Blocked` (§12) |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
 | State → `In progress` / `Reworking` | Dev agent run |
@@ -2488,6 +2533,8 @@ without passing through `Design review`.
 | design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `clear` | unchanged | removes `re-evaluate` | — |
 | design | `demote` | `Ready for design` | — | — |
+| record review | `pass` | `Design review` (the artifacts pass proceeds) | — | record-review, `verdict=pass` |
+| record review | `decline` | **`Ready for design`** | — | record-review, `verdict=decline` |
 | reconcile | `pass` | `Merged` | — | merged |
 | reconcile | `fail` | `Ready for rework` | — | reconcile-bounce |
 | reconcile | `cannot-tell` | `Merged` | **`needs-review`** | merged |

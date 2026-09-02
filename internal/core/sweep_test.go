@@ -2021,3 +2021,67 @@ func TestMergedSHAsReadsEveryMarkerInOrder(t *testing.T) {
 		t.Error("a ticket with no comments reported a merge")
 	}
 }
+
+// The record review's second decline on one ticket (DESIGN §4, §12).
+// Mirrors the bounce trio above, because it is the same rule shape: a
+// marker-counted escalation that fires once per count and leaves the
+// author's return alone.
+
+func TestSecondRecordReviewDeclineBlocks(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForDesign,
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"})))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want second decline -> Blocked, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Fields["declines"] != "2" {
+		t.Errorf("want the escalation to record declines=2, got %v", a.Marker)
+	}
+}
+
+// A pass is posted under the same marker kind so the author can see the
+// review ran. It must not count: two checked passes are not two
+// disagreements.
+func TestRecordReviewPassesDoNotCountAsDeclines(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForDesign,
+		withComment(marker.RecordReview, map[string]string{"verdict": "pass"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "pass"})))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil && a.To == protocol.Blocked {
+		t.Errorf("escalated on one decline and two passes: %v", *a)
+	}
+	// One decline is the ordinary rework loop: the ticket is dispatched,
+	// not parked.
+	if a := find(Sweep(s), ActDispatch, "T1"); a == nil || a.Agent != AgentDesign {
+		t.Errorf("no design run dispatched after a single decline: %v", Sweep(s))
+	}
+}
+
+func TestTheAuthorsReturnToDesignAfterADeclineBlockIsNotReEscalated(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForDesign,
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_design", "declines": "2"})))
+	if a := find(Sweep(s), ActTransition, "T1"); a != nil && a.To == protocol.Blocked {
+		t.Errorf("re-blocked the author's return with no new decline: %v", *a)
+	}
+	if a := find(Sweep(s), ActDispatch, "T1"); a == nil || a.Agent != AgentDesign {
+		t.Errorf("no design run dispatched for the returned ticket: %v", Sweep(s))
+	}
+}
+
+func TestAThirdRecordReviewDeclineEscalatesAgain(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForDesign,
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"}),
+		withComment(marker.Blocked, map[string]string{"from": "ready_for_design", "declines": "2"}),
+		withComment(marker.RecordReview, map[string]string{"verdict": "decline"})))
+	a := find(Sweep(s), ActTransition, "T1")
+	if a == nil || a.To != protocol.Blocked {
+		t.Fatalf("want a third decline -> Blocked, got %v", a)
+	}
+	if a.Marker == nil || a.Marker.Fields["declines"] != "3" {
+		t.Errorf("want the escalation to record declines=3, got %v", a.Marker)
+	}
+}

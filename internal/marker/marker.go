@@ -136,6 +136,16 @@ const (
 	// minutes with no comment, until the stale-claim rule moved it and
 	// said only that a run had died.
 	ClaimFailed Kind = "claim-failed"
+	// RecordReview records the record review's verdict on a design
+	// pass's doc diff (DESIGN §4). Fields: verdict=pass|decline. On a
+	// decline the prose is the findings — which passages read as
+	// narration of passes or rejected alternatives rather than as a
+	// rule and its reason — and it reaches the next design pass through
+	// the thread, the way the author's own decline does. The sweep
+	// counts declines: the second on one ticket escalates to Blocked
+	// (DESIGN §12), because a reviewer and a writer that disagree twice
+	// running are not going to settle it on a third pass.
+	RecordReview Kind = "record-review"
 )
 
 // Marker is one parsed or to-be-formatted marker line.

@@ -180,6 +180,103 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 	return &o, nil
 }
 
+// RecordReview is the record review's verdict on what this pass wrote
+// to the record (DESIGN §4): a second, fresh model run inside the same
+// design job, holding nothing but the pass's own doc diff and the rule.
+//
+// Fresh on purpose. The design agent that writes pass narration is in
+// the worst position to apply the rule against it: at the end of a long
+// run, with the reasoning it just did as the freshest thing in its
+// context — and the narration *is* that reasoning's residue — while the
+// rule forbidding it sits a hundred thousand tokens behind. Measured on
+// Catapult, 2026-09-01: 90 of 284 standing-decision bullets carried
+// pass narration, every one written by a prompt that prohibits it in as
+// many words and every one signed off at Design review. A reader with
+// only the diff and the rule has none of that pressure; reconcile is the
+// same shape, for the same reason.
+//
+// Detect here, fix there. The reviewer has the distance to see
+// narration; the writer has the context to know which "Y" is a
+// load-bearing incident and which is an alternative it passed over. A
+// diff-only rewriter would delete the reason with the narration,
+// silently, because from the diff alone they look the same. So a
+// decline goes back to the design pass as feedback, through the
+// author's own decline shape (DESIGN §3), and the rewrite is the
+// writer's.
+type RecordReview struct {
+	// Verdict is "pass" or "decline" (protocol.RecordReviewVerdicts).
+	Verdict string `json:"verdict"`
+	// Findings are the passages sent back. Required on a decline —
+	// a decline with nothing to point at is a rejection the next pass
+	// repeats (DESIGN §3) — and permitted on a pass as callouts.
+	Findings []RecordFinding `json:"findings"`
+	// Summary is the reviewer's one-paragraph argument, optional.
+	Summary string `json:"summary"`
+}
+
+// RecordFinding is one passage the review sent back.
+type RecordFinding struct {
+	// File is the repo-relative document the passage is in.
+	File string `json:"file"`
+	// Quote is enough of the passage to find it — the opening words,
+	// not the whole bullet.
+	Quote string `json:"quote"`
+	// Why names what it reads as: a review round, a rejected
+	// alternative, a prior draft. The writer decides what to do about
+	// it; this only has to be findable.
+	Why string `json:"why"`
+}
+
+// LoadRecordReview reads and validates the review the model wrote.
+//
+// A missing file is an error to the caller, not a pass: the action
+// decides whether a review was owed at all, and a run that was owed one
+// and produced nothing is reported as such rather than read as clean.
+func LoadRecordReview(path string) (*RecordReview, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("record review: %w", err)
+	}
+	var r RecordReview
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, fmt.Errorf("record review %s: %w", path, err)
+	}
+	if !protocol.Known(protocol.RecordReviewVerdicts, r.Verdict) {
+		return nil, fmt.Errorf("record review: verdict %q is not one of %s", r.Verdict, strings.Join(protocol.RecordReviewVerdicts, ", "))
+	}
+	if r.Verdict == "decline" && len(r.Findings) == 0 {
+		return nil, fmt.Errorf("record review: a decline with no findings is a rejection the next pass repeats (DESIGN §3)")
+	}
+	for i, f := range r.Findings {
+		if strings.TrimSpace(f.File) == "" || strings.TrimSpace(f.Quote) == "" {
+			return nil, fmt.Errorf("record review: finding %d names no file or no passage — the writer has to be able to find it", i+1)
+		}
+	}
+	return &r, nil
+}
+
+// prose renders the findings for the ticket. The marker line above it
+// is for the sweep; this is for the next design pass, which reads the
+// thread as scope (DESIGN §2.3).
+func (r *RecordReview) prose() string {
+	var b strings.Builder
+	if r.Verdict == "decline" {
+		b.WriteString("The record review read what this pass wrote to the record and sent it back (DESIGN §4). Each passage below reads as narration — a review round, a draft that was thrown back, an alternative passed over — rather than as a rule and the reason it holds. Rewrite each as the rule it establishes, keeping the reason where there is one: the pass that wrote these has the context to tell a load-bearing incident from an alternative it merely considered, and this review deliberately does not.\n")
+	} else {
+		b.WriteString("The record review read what this pass wrote to the record and found nothing to send back.")
+		if len(r.Findings) > 0 {
+			b.WriteString(" Callouts, not blockers:\n")
+		}
+	}
+	for _, f := range r.Findings {
+		fmt.Fprintf(&b, "\n- `%s`: \u201c%s\u201d \u2014 %s", f.File, strings.TrimSpace(f.Quote), strings.TrimSpace(f.Why))
+	}
+	if s := strings.TrimSpace(r.Summary); s != "" {
+		b.WriteString("\n\n" + s)
+	}
+	return b.String()
+}
+
 // FinishDesign lands the outcome:
 //
 //   - artifacts     -> mutex labels ensured, draft PR opened, Design review
@@ -192,7 +289,18 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 //   - clear      -> re-evaluate removed with the reasoning
 //   - demote     -> back to Designing with the reasoning; the flag rides
 //     along and the live pass folds it in (DESIGN §7)
-func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string, changed, branchFiles []string) error {
+//
+// review is the record review's verdict on the pass's doc diff, nil when
+// none was owed (nothing under designOwnedPaths changed). On an
+// artifacts pass a decline takes the author's own decline route —
+// findings on the ticket, back to Ready for design — and opens no PR
+// and posts no preview: there is nothing to review yet. reviewErr is
+// what a reviewer that died left behind; it is posted and the pass
+// proceeds, because the review is a proposal about the record, never a
+// gate on the work (DESIGN §4), and a broken reviewer must not cost a
+// good design pass — but a review that silently did not run is a gate
+// that looks armed and is not, so it is never silent.
+func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimResult, o *DesignOutcome, previewURL, baseSHA string, changed, branchFiles []string, review *RecordReview, reviewErr string) error {
 	// The ownership boundary, held before anything else lands. A pass
 	// that wrote outside it does not get a draft PR and does not reach
 	// Design review: returning here fails the finish step, and the
@@ -233,8 +341,44 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 			return err
 		}
 	}
+	if strings.TrimSpace(reviewErr) != "" {
+		if err := p.CommentTicket(ctx, res.TicketID, "The record review did not run on this pass — its model run failed, and the pass proceeds without it rather than losing the design to a broken reviewer (DESIGN §4). What it printed:\n\n```\n"+strings.TrimSpace(reviewErr)+"\n```"); err != nil {
+			return err
+		}
+	}
+	// A decline is acted on only where there is a Design review to
+	// withhold. Every other outcome hands the ticket somewhere a decline
+	// has no meaning — decisionless goes to dev, prerequisite parks, the
+	// re-read modes never wrote docs — so the findings are recorded and
+	// nothing is swallowed, but the outcome stands.
+	if review != nil && review.Verdict == "decline" && o.Outcome != "artifacts" {
+		m := marker.Marker{Kind: marker.RecordReview, Fields: map[string]string{"verdict": "decline"}}
+		note := fmt.Sprintf("Recorded, not acted on: this pass's outcome is `%s`, which does not go to Design review, so there is nothing for a decline to withhold.\n\n", o.Outcome)
+		if err := p.CommentTicket(ctx, res.TicketID, m.Comment(note+review.prose())); err != nil {
+			return err
+		}
+	}
 	switch o.Outcome {
 	case "artifacts":
+		if review != nil && review.Verdict == "decline" {
+			// The summary first, then the decline: the next design pass
+			// reads the thread oldest-first and the newest comment is the
+			// scope (DESIGN §2.3), so the argument this pass made stays
+			// in the record and the findings are what it is handed.
+			if o.Summary != "" {
+				if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+					return err
+				}
+			}
+			m := marker.Marker{Kind: marker.RecordReview, Fields: map[string]string{"verdict": "decline"}}
+			if err := p.CommentTicket(ctx, res.TicketID, m.Comment(review.prose())); err != nil {
+				return err
+			}
+			// No PR, no preview, no label reconciliation: nothing here is
+			// ready to be reviewed, and the labels are the next pass's to
+			// declare. The queue, not Designing, for demote's reason.
+			return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDesign, core.RoleDesign)
+		}
 		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}
@@ -250,6 +394,16 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		}
 		if o.Summary != "" {
 			if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
+				return err
+			}
+		}
+		// Said rather than implied: a ticket with no review marker and
+		// one whose review passed look the same, and only one of them
+		// was checked. The author reading the thread at Design review
+		// can tell which.
+		if review != nil {
+			m := marker.Marker{Kind: marker.RecordReview, Fields: map[string]string{"verdict": "pass"}}
+			if err := p.CommentTicket(ctx, res.TicketID, m.Comment(review.prose())); err != nil {
 				return err
 			}
 		}

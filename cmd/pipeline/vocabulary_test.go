@@ -118,11 +118,12 @@ func TestDesignOutcomeTableMatchesTheVocabularies(t *testing.T) {
 	}
 
 	vocab := map[string][]string{
-		"boundary":   protocol.ProposalKinds,
-		"abort":      protocol.AbortReasons,
-		"design":     protocol.DesignOutcomes,
-		"reconcile":  append(append([]string{}, protocol.ReconcileOutcomes...), protocol.CollisionVerdicts...),
-		"live suite": protocol.LiveSuiteResults,
+		"boundary":      protocol.ProposalKinds,
+		"abort":         protocol.AbortReasons,
+		"design":        protocol.DesignOutcomes,
+		"reconcile":     append(append([]string{}, protocol.ReconcileOutcomes...), protocol.CollisionVerdicts...),
+		"live suite":    protocol.LiveSuiteResults,
+		"record review": protocol.RecordReviewVerdicts,
 	}
 	for emitter, values := range vocab {
 		for _, v := range values {

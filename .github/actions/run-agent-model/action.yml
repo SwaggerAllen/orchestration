@@ -33,6 +33,16 @@ inputs:
       run does not complete.
     required: false
     default: ""
+  log_dir:
+    description: >-
+      Where a failed run leaves its evidence (run-error.txt,
+      run-exit-code.txt) and the captured streams. Defaults to
+      $RUNNER_TEMP/pipeline, which is the directory the agent actions'
+      abort steps read. A second model run inside one job — the record
+      review inside a design job — passes its own directory, so its
+      death is not reported to the author as the first run's cause.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -50,6 +60,7 @@ runs:
         SUBSCRIPTION_TOKEN: ${{ inputs.claude_code_oauth_token }}
         API_KEY: ${{ inputs.anthropic_api_key }}
         PROMPT_PATH: ${{ inputs.prompt_path }}
+        LOG_DIR: ${{ inputs.log_dir }}
       run: |
         set -uo pipefail
 
@@ -62,7 +73,7 @@ runs:
         # an output on a failed step is not somewhere to bet a ticket
         # comment on, and the abort step runs precisely when this one
         # failed.
-        LOGDIR="$RUNNER_TEMP/pipeline"
+        LOGDIR="${LOG_DIR:-$RUNNER_TEMP/pipeline}"
         mkdir -p "$LOGDIR"
         ERRFILE="$LOGDIR/run-error.txt"
         CODEFILE="$LOGDIR/run-exit-code.txt"

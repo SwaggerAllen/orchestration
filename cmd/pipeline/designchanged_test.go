@@ -200,3 +200,68 @@ func TestAPassThatWritesImplementationStillFails(t *testing.T) {
 		t.Errorf("the finding does not name the file the pass wrote: %s", strays[0])
 	}
 }
+
+// recordCommand lifts the record review's extraction command out of the
+// design action, the way authoredCommand lifts changed.txt's: anchored
+// on the file it writes, walked back over the continuation lines,
+// never on a flag — the flags are what the test judges.
+func recordCommand(t *testing.T, base string) string {
+	t.Helper()
+	body := repoFile(t, filepath.Join(".github", "actions", "agent-design", "action.yml"))
+	all := strings.Split(body, "\n")
+	end := -1
+	for i, line := range all {
+		if strings.Contains(line, `> "$RUNNER_TEMP/pipeline/record-diff.patch"`) {
+			end = i
+		}
+	}
+	if end < 0 {
+		t.Fatal("the design action no longer writes the pass's record diff to record-diff.patch")
+	}
+	start := end
+	for start > 0 && strings.HasSuffix(strings.TrimSpace(all[start-1]), `\`) {
+		start--
+	}
+	var lines []string
+	for _, line := range all[start : end+1] {
+		lines = append(lines, strings.TrimSuffix(strings.TrimSpace(line), `\`))
+	}
+	cmd := strings.Join(lines, " ")
+	cmd = regexp.MustCompile(`\$\{\{[^}]*\}\}`).ReplaceAllString(cmd, base)
+	cmd = strings.ReplaceAll(cmd, `"$RUNNER_TEMP/pipeline/record-diff.patch"`, "/dev/stdout")
+	return cmd
+}
+
+// The record review reads what the pass wrote, not what its merge
+// brought in — the same first-parent discipline as changed.txt, one
+// level up, and asserted against the same repo shape. A range diff
+// would hand the reviewer main's doc edits as this pass's writing and
+// decline the pass for narration somebody else wrote.
+func TestTheRecordDiffIsThePassesOwnMarkdownAndNotItsMerges(t *testing.T) {
+	dir, base := orc116(t, "lib/catapult/hidden.ex")
+	c := exec.Command("bash", "-c", recordCommand(t, base))
+	c.Dir = dir
+	out, err := c.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running the action's command: %v\n%s", err, out)
+	}
+	got := string(out)
+	// The pass's own writing, in its own commits and in the merge
+	// commit's resolution, is all there.
+	for _, want := range []string{"+the pass's screen", "+the pass's edit", "+more of the pass's own work", "+resolved"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pass's own line %q is missing from the record diff:\n%s", want, got)
+		}
+	}
+	// Main's edit to the same file arrived through the merge and is
+	// not the pass's writing. It may appear as a removed line — the
+	// resolution replaced it — never as an addition.
+	if strings.Contains(got, "+main's edit") {
+		t.Errorf("a doc edit the merge brought in from main is billed to the pass as its own writing:\n%s", got)
+	}
+	// Markdown only: the implementation hidden in the merge commit is
+	// the ownership audit's to catch, not the record review's to read.
+	if strings.Contains(got, "hidden.ex") || strings.Contains(got, "workflow.ex") {
+		t.Errorf("the record diff carries non-markdown:\n%s", got)
+	}
+}

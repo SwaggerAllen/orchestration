@@ -310,6 +310,78 @@ runs:
         # releases nothing — a wiring gap must not read as permission.
         git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/branch.txt" 2>/dev/null || : > "$RUNNER_TEMP/pipeline/branch.txt"
 
+    # The record review (DESIGN §4): a second, fresh model run that reads
+    # only what this pass wrote to the record — the screen and system
+    # docs and the non-asks — and the rule it is judged by, and sends the
+    # pass back when a passage reads as narration of passes or
+    # alternatives rather than as a rule and its reason. Fresh because
+    # the design agent that wrote the narration is in the worst position
+    # to see it: see agent.RecordReview for the measurement.
+    #
+    # What it reads is the same first-parent walk changed.txt is built
+    # from, per commit, restricted to markdown: a plain range diff would
+    # include every doc edit a merge from main brought in and bill this
+    # pass for them — ORC-116's false report, one level up. Extracted
+    # after the push so it judges exactly what landed.
+    #
+    # `-I{}` rather than `-n1`, because a pathspec has to follow the
+    # commit: xargs appends its item last, which would put the sha after
+    # `--` and have git read it as a path.
+    - name: extract what this pass wrote to the record
+      shell: bash
+      run: |
+        git log --first-parent --format=%H "${{ steps.branch.outputs.before }}"..HEAD \
+          | xargs -r -I{} git show --format= --cc {} -- '*.md' \
+          > "$RUNNER_TEMP/pipeline/record-diff.patch"
+        wc -c "$RUNNER_TEMP/pipeline/record-diff.patch"
+
+    # Whether a review is owed is a config question — did the pass write
+    # markdown under designOwnedPaths — so the harness answers it, and a
+    # pass that wrote none gets no model run and says so. Talks to
+    # nothing: the config, changed.txt and the patch.
+    - name: assemble the record review
+      id: record
+      shell: bash
+      run: |
+        pipeline agent record-review \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --diff "$RUNNER_TEMP/pipeline/record-diff.patch" \
+          --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
+          --out "$RUNNER_TEMP/pipeline/review" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md" \
+          --outcome-path "$RUNNER_TEMP/pipeline/review/review.json"
+
+    # continue-on-error, and its own log directory. The review is a
+    # proposal about the record, never a gate on the work (DESIGN §4), so
+    # a reviewer that dies must not fail the design pass — and must not
+    # write its death rattle to the file the abort step reads as this
+    # run's cause. The finish step reads what it left in its own
+    # directory and says so on the ticket.
+    #
+    # The model runs with the permissions the design pass had and is
+    # told to edit nothing. If it edits anyway, nothing lands: the push
+    # already happened, and the finish step pushes nothing.
+    - name: run the record review
+      if: steps.record.outputs.reviewable == 'true'
+      continue-on-error: true
+      uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
+      with:
+        prompt_path: ${{ runner.temp }}/pipeline/review/prompt.md
+        log_dir: ${{ runner.temp }}/pipeline/review
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+
+    # Read here so the preview steps can skip on a decline: a ticket
+    # going back to the queue has nothing to preview, and a preview
+    # build installs a toolchain and spends a metered deployment. A
+    # review that did not run, or wrote nothing, reads as pass — the
+    # finish step is where that absence is judged and said.
+    - name: read the record review's verdict
+      id: verdict
+      shell: bash
+      run: |
+        echo "verdict=$(jq -r '.verdict // "pass"' "$RUNNER_TEMP/pipeline/review/review.json" 2>/dev/null || echo pass)" >> "$GITHUB_OUTPUT"
+
     # The branch preview, published by the harness rather than by a
     # workflow watching for a push. That watcher could never fire for
     # this push: GitHub does not start a workflow run from an event
@@ -323,7 +395,7 @@ runs:
     # project without previews wired yet still gets its agent runs, and
     # the step says which it did.
     - name: build the storybook export
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.verdict.outputs.verdict != 'decline'
       shell: bash
       run: |
         set -euo pipefail
@@ -333,7 +405,7 @@ runs:
 
     - name: read the preview target
       id: preview
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.verdict.outputs.verdict != 'decline'
       shell: bash
       run: |
         set -euo pipefail
@@ -346,7 +418,7 @@ runs:
 
     - name: publish the preview
       id: published
-      if: inputs.cloudflare_api_token != ''
+      if: inputs.cloudflare_api_token != '' && steps.verdict.outputs.verdict != 'decline'
       uses: cloudflare/wrangler-action@v3
       with:
         apiToken: ${{ inputs.cloudflare_api_token }}
@@ -384,6 +456,8 @@ runs:
           --base-sha "${{ steps.base.outputs.sha }}" \
           --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
           --branch-files "$RUNNER_TEMP/pipeline/branch.txt" \
+          --review "$RUNNER_TEMP/pipeline/review/review.json" \
+          --review-error "$RUNNER_TEMP/pipeline/review/run-error.txt" \
           --findings "$RUNNER_TEMP/pipeline/findings.json" \
           2> "$RUNNER_TEMP/pipeline/run-error.txt"
         rc=$?

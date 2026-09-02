@@ -125,3 +125,17 @@ func normalizeRunAttempt(n int) int {
 func hasDecisionlessPass(t *Ticket) bool {
 	return len(markersOf(t, marker.DecisionlessPass)) > 0
 }
+
+// recordDeclines counts the record review's declines on a ticket
+// (DESIGN §4). Declines only: a pass posts the same kind with
+// verdict=pass so the author can see the review ran, and counting those
+// would escalate a ticket for having been checked.
+func recordDeclines(t *Ticket) int {
+	n := 0
+	for _, m := range markersOf(t, marker.RecordReview) {
+		if m.Fields["verdict"] == "decline" {
+			n++
+		}
+	}
+	return n
+}
