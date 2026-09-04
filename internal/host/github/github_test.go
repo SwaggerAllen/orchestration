@@ -809,3 +809,31 @@ func TestErrorMarksAreBounded(t *testing.T) {
 		t.Errorf("got %d marks, want the bound %d", got, maxLogMarks)
 	}
 }
+
+// A detached live-suite run is not an agent run, and the name is what
+// says so. The plane correlates runs by name alone, so the detached
+// stub deliberately does NOT use the "pipeline: <kind> <ticket>" shape:
+// a run named "pipeline: live-suite " with nothing after it would be a
+// half-formed member of the convention rather than a non-member, and
+// `(\S+)` deciding it is the whole guard.
+//
+// Pinned here rather than left to the workflow, because the two live in
+// different files and only this one can fail.
+func TestADetachedLiveSuiteRunIsNotCorrelated(t *testing.T) {
+	for _, name := range []string{
+		"live suite (detached, no ticket)", // what the stub names it
+		"pipeline: live-suite ",            // the trailing-space shape it avoids
+		"pipeline: live-suite",
+	} {
+		if m := runNameRe.FindStringSubmatch(name); m != nil {
+			t.Errorf("run name %q correlated as kind %q ticket %q — a detached run must reach no ticket",
+				name, m[1], m[2])
+		}
+	}
+	// And the ticketed shape still does, or the boundary's own run stops
+	// being seen at all.
+	m := runNameRe.FindStringSubmatch("pipeline: live-suite ORC-217")
+	if m == nil || m[1] != "live-suite" || m[2] != "ORC-217" {
+		t.Errorf("the ticketed run name no longer correlates: %v", m)
+	}
+}

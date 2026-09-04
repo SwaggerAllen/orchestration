@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"os"
 	"path/filepath"
 	"strings"
@@ -388,5 +389,36 @@ func TestModelRunFollowsTheStableChannel(t *testing.T) {
 	// runs a different version from the one that was tested.
 	if n := strings.Count(body, `"@anthropic-ai/claude-code@$CLI_VERSION"`); n != 2 {
 		t.Errorf("the pin reaches %d attempt(s), want both", n)
+	}
+}
+
+// The stub and the correlation regexp live in different files, and only
+// one of them can fail a test. This reads the stub's own run-name and
+// checks the name it gives a detached run against the real regexp, so
+// renaming it to something that correlates is caught here rather than by
+// a detached run quietly attaching itself to the protocol.
+func TestTheStubsDetachedRunNameCannotCorrelate(t *testing.T) {
+	stub := repoFile(t, filepath.Join("examples", "stubs", "pipeline-live-suite.yml"))
+
+	// The literal the stub falls back to when no ticket is given. Pulled
+	// out of the file rather than restated, which is the whole point.
+	i := strings.Index(stub, "|| '")
+	if i < 0 {
+		t.Fatal("the stub's run-name has no `|| '<literal>'` no-ticket fallback. Either it lost one — a detached run would then be named \"pipeline: live-suite \" and half-match the convention — or the fallback is now an expression this test cannot read, in which case it also cannot check that it fails to correlate")
+	}
+	rest := stub[i+len("|| '"):]
+	j := strings.Index(rest, "'")
+	if j < 0 {
+		t.Fatal("could not read the fallback run name out of the stub")
+	}
+	detached := rest[:j]
+
+	if m := github.RunNameFields(detached); m != nil {
+		t.Errorf("the stub names a detached run %q, which correlates as kind %q ticket %q — it would reach the plane as an agent run",
+			detached, m[0], m[1])
+	}
+	// And the ticketed branch is still the exact convention.
+	if !strings.Contains(stub, "format('pipeline: live-suite {0}', inputs.ticket)") {
+		t.Error("the stub no longer builds the ticketed run name as \"pipeline: live-suite <ticket>\", which is the correlation")
 	}
 }

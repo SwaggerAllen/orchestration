@@ -2,18 +2,29 @@
 # ticket opens, before the author's pass: the once-per-milestone
 # real-network check. The run reports its own verdict, like every agent.
 #
+# It also runs detached, with no ticket, which is the author dispatching
+# it for themselves — see the `ticket` input. Detached, it is not part of
+# the boundary protocol: nothing is posted, no gate is satisfied, and the
+# run's status and job summary are the whole record.
+#
 # A composite action rather than a reusable workflow for the reason that
 # matters most here: the suite is the project's own test command, so the
 # project's toolchain has to be set up first, by steps only the calling
 # job can run. The old reusable workflow carried a comment saying the
 # toolchain "belongs in the stub" — which its own shape made impossible.
 name: pipeline live suite
-description: Run the project's live suite and report the result on the boundary ticket
+description: Run the project's live suite, reporting on the boundary ticket when one is given
 
 inputs:
   ticket:
-    description: Boundary ticket key
-    required: true
+    description: >-
+      Boundary ticket key. Optional: with no ticket the suite runs
+      detached — it reports nowhere, and the run's own status and job
+      summary are the whole record. That is for running the suite when
+      no boundary is open, and for re-running it without adding another
+      marker comment to a ticket whose verdict has not changed.
+    required: false
+    default: ""
   command:
     description: The project's live-suite command, e.g. "mix test --only live"
     required: true
@@ -89,7 +100,40 @@ runs:
           echo "result=fail" >> "$GITHUB_OUTPUT"
         fi
 
+    # Written before the report, and unconditionally: a detached run
+    # posts to no ticket, so without this its verdict exists only as a
+    # green or red job and the "no tests ran" case is invisible
+    # entirely. The step summary is where the author is already looking
+    # when they dispatched the run by hand.
+    - name: record the verdict on the run
+      shell: bash
+      env:
+        RESULT: ${{ steps.verdict.outputs.result }}
+        TICKET: ${{ inputs.ticket }}
+        LIVE_COMMAND: ${{ inputs.command }}
+      run: |
+        {
+          echo "## Live suite: $RESULT"
+          echo
+          echo '```'
+          echo "$LIVE_COMMAND"
+          echo '```'
+          if [ -n "$TICKET" ]; then
+            echo "Reported on $TICKET."
+          else
+            echo "Detached run — no ticket given, so nothing was posted to the tracker."
+            echo "This run is not part of the boundary protocol: it satisfies no gate and"
+            echo "clears no marker."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
     - name: report
+      # Only where there is a ticket to report on. A detached run is the
+      # author asking the question for themselves; the marker exists to
+      # move the boundary protocol along, and writing one from a run
+      # nobody's boundary asked for is the repeated-comment noise this
+      # input was made optional to stop.
+      if: inputs.ticket != ''
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}

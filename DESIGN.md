@@ -1385,6 +1385,24 @@ signal that was missing.
    non-deterministic check, once per milestone. The run posts a result marker on the ticket;
    the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
 
+   **The same workflow runs detached, with no ticket, and then is not part of this protocol.**
+   The ticket input is optional: given one, everything above holds; given none, the suite runs,
+   the job's status carries `pass`/`fail` as usual, the verdict goes to the run's job summary,
+   and *nothing* is written to the tracker — no marker, no gate satisfied, no `Blocked`. It
+   exists for the two cases the boundary shape cannot serve: running the suite when no boundary
+   ticket is open at all, and re-running it without adding another marker comment to a ticket
+   whose verdict has not changed. A marker is how the boundary protocol advances, so a run
+   nobody's boundary asked for must not write one.
+
+   **A detached run is invisible to the control plane, and its name is what makes it so.** Runs
+   are correlated by name alone — `pipeline: <kind> <ticket>` — so a detached run is named
+   outside that convention rather than with an empty ticket, which would be a half-formed
+   member of it. The consequence to know: the singularity check cannot see such a run, so it
+   neither blocks a boundary dispatch nor is blocked by one. Dispatching it by hand while a
+   boundary's own suite is live runs two live suites at once, against the same real services.
+   That is the author's to avoid; nothing in the plane can, because a run attached to no ticket
+   is a run no ticket's `LiveRun` reports.
+
    **A failure parks the ticket in `Blocked`, and the verdict gates the boundary agent.** The
    marker used to be the whole of it, on the reasoning that it "lands on the boundary ticket
    where the author is already looking". That assumption did not hold. A boundary ticket in
