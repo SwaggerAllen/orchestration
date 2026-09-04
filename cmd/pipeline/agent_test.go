@@ -854,3 +854,69 @@ func TestTheDecisionIndexSaysWhatItCouldNotRead(t *testing.T) {
 		t.Errorf("an empty selection reads as a project that decided nothing: %q", empty)
 	}
 }
+
+// The file is only useful if the prompt says it exists. ORC-224's rework
+// pass was handed 150 lines of post-job cleanup as its evidence and
+// bounced to Blocked twice; the tail alone could not have told it what
+// broke, and a file it is never told about is one it never opens.
+func TestCIFailureSectionPointsPastTheTail(t *testing.T) {
+	got := ciFailureSection(&agent.CIFailure{
+		RunURL: "https://ci/run/1",
+		Jobs: []host.JobLog{{
+			Name: "ci", URL: "https://ci/job/1", Log: "…post-job cleanup…",
+			LogPath: "/ws/.pipeline/ci-logs/1-ci.log", Lines: 1494,
+		}},
+	})
+	for _, want := range []struct{ text, why string }{
+		{"/ws/.pipeline/ci-logs/1-ci.log", "the agent cannot open a file it is not told about"},
+		{"1494", "how much the tail is not showing is what decides whether to open it"},
+		{"tail is often not the failure", "the reason to look, without which the path reads as noise"},
+		{"post-job cleanup", "names the shape the tail actually had on ORC-224"},
+	} {
+		if !strings.Contains(got, want.text) {
+			t.Errorf("the failing-build section omits %q — %s\n%s", want.text, want.why, got)
+		}
+	}
+}
+
+// A spill that failed is its own fact: the tail is still good, and only
+// the escape hatch is missing. Silence would leave the agent looking for
+// a file that is not there.
+func TestCIFailureSectionSaysWhenTheSpillFailed(t *testing.T) {
+	got := ciFailureSection(&agent.CIFailure{
+		SpillErr: "mkdir /ws/.pipeline/ci-logs: read-only file system",
+		Jobs:     []host.JobLog{{Name: "ci", Log: "tail only"}},
+	})
+	if !strings.Contains(got, "read-only file system") {
+		t.Errorf("a failed spill is not reported, so the agent hunts for a file that was never written:\n%s", got)
+	}
+	// The per-job line, not the word: the guidance paragraph above names
+	// `full log:` to explain what such a line means, and matching that
+	// would fail on prose that is doing its job. A spill can also fail
+	// for one job and succeed for another, so the claim under test is
+	// "no job was given a path", not "the phrase is absent".
+	for _, line := range strings.Split(got, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "full log: `") {
+			t.Errorf("named a full log after failing to write one: %q\n%s", line, got)
+		}
+	}
+}
+
+// The file the harness spills is only reachable if the role prompt tells
+// the agent it exists and when to reach for it. ORC-224's rework pass
+// had 150 lines of post-job cleanup as its whole evidence and bounced to
+// Blocked twice; a path in the failing-build section is worth nothing if
+// the prompt never says the tail is untrustworthy.
+func TestDevPromptSendsTheAgentPastTheTail(t *testing.T) {
+	dev := flat(repoFile(t, "prompts/dev.md"))
+	for _, want := range []struct{ text, why string }{
+		{"tail is often not the failure", "without the reason, a path reads as noise and goes unopened"},
+		{"post-job cleanup", "names the shape the tail actually takes when it is useless"},
+		{"full log:", "the literal marker the failing-build section prints, so the agent can find it"},
+		{"search the file", "the instruction; naming the file without it leaves the move implicit"},
+	} {
+		if !strings.Contains(dev, strings.ToLower(want.text)) {
+			t.Errorf("prompts/dev.md does not carry %q — %s", want.text, want.why)
+		}
+	}
+}

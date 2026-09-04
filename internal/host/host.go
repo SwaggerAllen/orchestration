@@ -170,6 +170,25 @@ type JobLog struct {
 	// setup and are long enough to crowd out the argument they are
 	// evidence for.
 	Log string
+	// Full is the whole log as fetched, for a caller that means to spill
+	// it somewhere the agent can read. Never serialized: the claim file
+	// is read by several things and a multi-megabyte log in it would be
+	// carried by all of them to be used by none.
+	//
+	// It exists because the tail is not always the failure. Actions
+	// appends post-job cleanup after the failing step, so the end of the
+	// log is where the *runner* stopped rather than where the build
+	// broke — measured on Catapult's ORC-224, whose last 150 lines are
+	// checkout teardown, a Postgres service-container dump and orphan
+	// cleanup, with no test output in them at all.
+	Full string `json:"-"`
+	// LogPath is where the caller wrote Full, as the caller named it, or
+	// "". The prompt names it so the agent can read past the tail.
+	LogPath string `json:",omitempty"`
+	// Lines is how many lines Full had, so the prompt can say how much
+	// the tail is not showing rather than leaving the agent to guess
+	// whether the file is worth opening.
+	Lines int `json:",omitempty"`
 }
 
 // ErrNotMergeable is returned by MergePR when the branch cannot merge

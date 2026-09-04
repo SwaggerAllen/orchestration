@@ -160,6 +160,10 @@ type CIFailure struct {
 	// nothing to say, and the agent would guess in exactly the case
 	// where guessing is worst.
 	Err string `json:",omitempty"`
+	// SpillErr is a failure to write the full logs to disk, which is a
+	// different fact from Err: the tail is still here and still good,
+	// and only the read-past-the-tail escape hatch is missing.
+	SpillErr string `json:",omitempty"`
 }
 
 // claimCIFailure fetches the failing jobs behind a rework. Failure to
@@ -191,6 +195,76 @@ func claimCIFailure(ctx context.Context, h host.Host, headSHA string) *CIFailure
 		return nil
 	}
 	return &CIFailure{RunURL: jobs[0].URL, Jobs: jobs}
+}
+
+// SpillCILogs writes each failing job's whole log under dir and records
+// where it went, so the prompt can point past the tail.
+//
+// The tail stays the evidence in the prompt: it is bounded, it is what
+// an unbounded prompt costs, and it is right most of the time. What it
+// is not is reliable. Actions appends post-job cleanup after the failing
+// step, so the last lines are where the *runner* stopped rather than
+// where the build broke. Measured on Catapult's ORC-224, run
+// 33917468841: its last 150 lines are checkout teardown, a Postgres
+// service-container dump and orphan-process cleanup, with no test output
+// among them — the ticket bounced to Blocked twice, the second time on a
+// rework pass that had been handed 150 lines of cleanup as its evidence.
+//
+// Raising the tail is the wrong repair, and that measurement is why: the
+// cleanup is appended, so a bigger tail is a bigger window on the same
+// wrong end of the file. The whole log is what closes it.
+//
+// Errors are recorded on the entry rather than returned. A log that
+// could not be spilled costs the agent the file and nothing else; the
+// tail is still in the prompt, and failing the claim over it would park
+// a ticket for the sake of an aid to reading.
+func SpillCILogs(f *CIFailure, dir string) {
+	if f == nil || dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		f.SpillErr = err.Error()
+		return
+	}
+	for i := range f.Jobs {
+		j := &f.Jobs[i]
+		if j.Full == "" {
+			continue
+		}
+		name := fmt.Sprintf("%d-%s.log", i+1, logSlug(j.Name))
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(j.Full), 0o644); err != nil {
+			f.SpillErr = err.Error()
+			continue
+		}
+		j.LogPath = path
+	}
+}
+
+// logSlug makes a job name safe for a filename. Job names carry spaces,
+// slashes and matrix brackets — "substrate suite", "test (1.17.3, 27)" —
+// and a slash in particular would write outside dir.
+func logSlug(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	for strings.Contains(out, "--") {
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	if out == "" {
+		return "job"
+	}
+	if len(out) > 60 {
+		out = strings.Trim(out[:60], "-")
+	}
+	return out
 }
 
 // NonAsks is the confirmed non-asks document as the claim found it.

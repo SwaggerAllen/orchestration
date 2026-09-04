@@ -630,6 +630,10 @@ func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobL
 				entry.Log = fmt.Sprintf("(could not read this job's log: %v)", err)
 			} else {
 				entry.Log = tail(log, maxLogTailLines, maxLogTailBytes)
+				// The whole log travels beside the tail. Costing nothing:
+				// it was already fetched and, until this, discarded here.
+				entry.Full = log
+				entry.Lines = strings.Count(strings.TrimRight(log, "\n"), "\n") + 1
 			}
 			out = append(out, entry)
 		}

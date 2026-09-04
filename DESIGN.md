@@ -2104,10 +2104,25 @@ read and no author reliably remembers.
   tail of each one's log and puts them in the prompt, fenced as evidence rather than
   instruction — a CI log carries whatever a test happened to print. The harness reads, the
   agent reasons, exactly as with the ticket body and the non-asks document; "let it read CI"
-  would be a credential, not a feature. Logs are bounded — three jobs, a tail each — because
-  a whole log is mostly setup and an unbounded one is an unbounded prompt. A fetch that fails
-  is stated in the prompt rather than swallowed: a rework with no evidence and a build with
-  nothing to say look identical, and only one of them licenses a confident fix.
+  would be a credential, not a feature. What goes *in the prompt* is bounded — three jobs, a
+  tail each — because an unbounded log is an unbounded prompt, which fails the run in a way
+  that looks like the model's fault.
+
+  **The tail is not reliably the failure, so the whole log is written to a file beside the
+  checkout and the prompt names it.** Actions appends post-job cleanup after the failing step,
+  so the end of a log is where the runner stopped rather than where the build broke: on
+  Catapult's `ORC-224` the last 150 lines were checkout teardown, a Postgres
+  service-container dump and orphan-process cleanup, with no test output among them, and the
+  ticket bounced to `Blocked` twice — the second time on a rework pass whose entire evidence
+  was those 150 lines. Raising the tail does not fix that and the measurement is why: the
+  cleanup is *appended*, so a larger tail is a larger window on the same wrong end of the
+  file. The log was already being fetched whole and truncated in-process, so spilling it
+  costs no extra call; the file goes under the pipeline checkout, which the branch step
+  already excludes from the commit, so it cannot ride into the PR. A spill that fails is its
+  own line in the prompt, distinct from a read that failed: the tail is still there and only
+  the escape hatch is missing. A fetch that fails is stated in the prompt rather than
+  swallowed: a rework with no evidence and a build with nothing to say look identical, and
+  only one of them licenses a confident fix.
 - **CI red twice on the same branch → `Blocked`.** The count is the count of the control
   plane's own failure-comment markers on the ticket — nothing else needs to be stored, and a
   marker can't be miscounted the way an agent's prose can. Two reds on one branch is rarely a
