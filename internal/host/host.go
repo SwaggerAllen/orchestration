@@ -189,6 +189,27 @@ type JobLog struct {
 	// the tail is not showing rather than leaving the agent to guess
 	// whether the file is worth opening.
 	Lines int `json:",omitempty"`
+	// Errors are the failing-step markers found in Full, with where they
+	// are. A path plus "go read it" is a worse prompt than a path plus a
+	// line number: it makes finding the failure the agent's search
+	// problem when the harness already holds the answer.
+	Errors []LogMark `json:",omitempty"`
+}
+
+// LogMark is one notable line in a job log: where it is, which step it
+// falls in, and what it says.
+//
+// Line is 1-based and counts lines of the log as written to disk, so it
+// is the number `grep -n` and an editor both report for that file. The
+// two agree by construction — the same string is scanned and spilled —
+// and a test pins it, because a line number that is off by a header is
+// worse than none.
+type LogMark struct {
+	Line int
+	// Step is the enclosing `##[group]`'s title, which is the step name
+	// as the workflow wrote it: "Run mix test", "Run mix credo --strict".
+	Step string `json:",omitempty"`
+	Text string
 }
 
 // ErrNotMergeable is returned by MergePR when the branch cannot merge

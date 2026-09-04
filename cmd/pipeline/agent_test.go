@@ -865,6 +865,10 @@ func TestCIFailureSectionPointsPastTheTail(t *testing.T) {
 		Jobs: []host.JobLog{{
 			Name: "ci", URL: "https://ci/job/1", Log: "…post-job cleanup…",
 			LogPath: "/ws/.pipeline/ci-logs/1-ci.log", Lines: 1494,
+			Errors: []host.LogMark{{
+				Line: 1341, Step: "Run pipeline audit",
+				Text: "Process completed with exit code 1.",
+			}},
 		}},
 	})
 	for _, want := range []struct{ text, why string }{
@@ -872,6 +876,14 @@ func TestCIFailureSectionPointsPastTheTail(t *testing.T) {
 		{"1494", "how much the tail is not showing is what decides whether to open it"},
 		{"tail is often not the failure", "the reason to look, without which the path reads as noise"},
 		{"post-job cleanup", "names the shape the tail actually had on ORC-224"},
+		// The anchor: the harness already knows where it broke, so
+		// finding it must not be left to the agent as a search problem.
+		{"failed at line 1341", "the line number the harness already holds"},
+		{`in step "Run pipeline audit"`, "which step, so the agent knows what it is reading"},
+		{"read upward from there", "an ##[error] says only that a step exited; the diagnosis is above it"},
+		// And the index, for the failures the markers do not pin.
+		{"grep -n", "the file needs a way in, not just a path"},
+		{`##\[group\]`, "the table of contents: every step, in order, with its line"},
 	} {
 		if !strings.Contains(got, want.text) {
 			t.Errorf("the failing-build section omits %q — %s\n%s", want.text, want.why, got)
@@ -913,7 +925,9 @@ func TestDevPromptSendsTheAgentPastTheTail(t *testing.T) {
 		{"tail is often not the failure", "without the reason, a path reads as noise and goes unopened"},
 		{"post-job cleanup", "names the shape the tail actually takes when it is useless"},
 		{"full log:", "the literal marker the failing-build section prints, so the agent can find it"},
-		{"search the file", "the instruction; naming the file without it leaves the move implicit"},
+		{"failed at line", "the anchor the harness prints; the prompt has to say it is there"},
+		{"grep -n", "the index, for the failures no marker pins"},
+		{"read upward", "an ##[error] marks the step, not the diagnosis"},
 	} {
 		if !strings.Contains(dev, strings.ToLower(want.text)) {
 			t.Errorf("prompts/dev.md does not carry %q — %s", want.text, want.why)

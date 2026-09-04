@@ -2116,7 +2116,13 @@ read and no author reliably remembers.
   ticket bounced to `Blocked` twice — the second time on a rework pass whose entire evidence
   was those 150 lines. Raising the tail does not fix that and the measurement is why: the
   cleanup is *appended*, so a larger tail is a larger window on the same wrong end of the
-  file. The log was already being fetched whole and truncated in-process, so spilling it
+  file — on that run the failing step's marker was four lines outside the window and the
+  violation explaining it three lines above that. **The file is indexed rather than read end
+  to end:** Actions marks the failing step with `##[error]` and every step with `##[group]`,
+  so the harness reports the line and step name it already found, and the prompt carries the
+  two greps for the cases it did not. An `##[error]` says only that a step exited non-zero,
+  so the rule the prompt states is to read *upward* from it. The log was already being
+  fetched whole and truncated in-process, so spilling it
   costs no extra call; the file goes under the pipeline checkout, which the branch step
   already excludes from the commit, so it cannot ride into the PR. A spill that fails is its
   own line in the prompt, distinct from a read that failed: the tail is still there and only

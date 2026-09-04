@@ -634,11 +634,91 @@ func (c *Client) FailedJobLogs(ctx context.Context, headSHA string) ([]host.JobL
 				// it was already fetched and, until this, discarded here.
 				entry.Full = log
 				entry.Lines = strings.Count(strings.TrimRight(log, "\n"), "\n") + 1
+				entry.Errors = errorMarks(log)
 			}
 			out = append(out, entry)
 		}
 	}
 	return out, nil
+}
+
+// Actions workflow-command markers, and what each is worth to a reader
+// looking for a failure. Measured on Catapult's ORC-224 (run
+// 33917468841, 1494 lines): 49 `##[group]`, 49 `##[endgroup]`, 16
+// `##[command]`, 8 `##[start-action]`/`##[end-action]`, 1 `##[warning]`
+// and exactly 1 `##[error]`.
+//
+// So `##[error]` is the anchor — one hit, on the step that failed — and
+// `##[group]` is the table of contents, one entry per step with its
+// name. On that run the marker sat at line 1341 and the tail this
+// package keeps begins at 1345: the failing step was four lines outside
+// the window, with the audit violation that explains it three lines
+// above that.
+const (
+	groupMarker = "##[group]"
+	errorMarker = "##[error]"
+)
+
+// maxLogMarks bounds what the prompt is asked to carry. A line each, and
+// a build with more failing steps than this has a problem the first ten
+// already describe. A bound rather than a measurement: the only figure
+// taken is ORC-224's one.
+const maxLogMarks = 10
+
+// errorMarks finds the failing-step markers in a job log and the step
+// each one falls in.
+//
+// Lines are numbered from 1 over the same string that gets spilled to
+// disk, so the number here is the number `grep -n` reports on that file.
+//
+// Actions prefixes every line with an RFC3339 timestamp, so the marker
+// is not at the start of the line and neither a prefix match nor an
+// anchored regexp finds it. The timestamp is dropped from the reported
+// text as well: it is noise in a prompt, and the line number is the part
+// that locates it.
+func errorMarks(log string) []host.LogMark {
+	var out []host.LogMark
+	step := ""
+	for i, line := range strings.Split(log, "\n") {
+		body := dropTimestamp(line)
+		switch {
+		case strings.HasPrefix(body, groupMarker):
+			step = strings.TrimSpace(strings.TrimPrefix(body, groupMarker))
+		case strings.HasPrefix(body, errorMarker):
+			if len(out) >= maxLogMarks {
+				return out
+			}
+			out = append(out, host.LogMark{
+				Line: i + 1,
+				Step: step,
+				Text: strings.TrimSpace(strings.TrimPrefix(body, errorMarker)),
+			})
+		}
+	}
+	return out
+}
+
+// dropTimestamp removes Actions' leading "2026-09-04T20:45:47.5102399Z "
+// if it is there, and returns the line unchanged if it is not — a log
+// fetched by some other route, or a line that simply does not carry one,
+// must not be truncated by this.
+func dropTimestamp(line string) string {
+	i := strings.IndexByte(line, ' ')
+	if i <= 0 {
+		return line
+	}
+	ts := line[:i]
+	// Cheap shape test rather than a parse: ends in Z, starts with four
+	// digits, and carries the date/time separator.
+	if len(ts) < 20 || ts[len(ts)-1] != 'Z' || !strings.Contains(ts, "T") {
+		return line
+	}
+	for _, r := range ts[:4] {
+		if r < '0' || r > '9' {
+			return line
+		}
+	}
+	return line[i+1:]
 }
 
 // failedConclusion reports whether a completed run or job counts as red.

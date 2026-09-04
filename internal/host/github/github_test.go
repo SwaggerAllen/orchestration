@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -661,7 +662,9 @@ func TestFailedJobLogsCarriesTheWholeLogBesideTheTail(t *testing.T) {
 	// More lines than the tail keeps, with the failure at the top and
 	// cleanup at the bottom — the shape ORC-224 actually had.
 	var sb strings.Builder
+	sb.WriteString("##[group]Run the gates\n")
 	sb.WriteString("FAILURE-AT-THE-TOP: test/foo_test.exs:12\n")
+	sb.WriteString("##[error]Process completed with exit code 1.\n")
 	for i := 0; i < maxLogTailLines+50; i++ {
 		fmt.Fprintf(&sb, "post-job cleanup line %d\n", i)
 	}
@@ -703,11 +706,106 @@ func TestFailedJobLogsCarriesTheWholeLogBesideTheTail(t *testing.T) {
 	if !strings.Contains(j.Full, "FAILURE-AT-THE-TOP") {
 		t.Error("the whole log does not carry the failure the tail cut off")
 	}
-	if want := maxLogTailLines + 51; j.Lines != want {
+	if want := maxLogTailLines + 53; j.Lines != want {
 		t.Errorf("Lines = %d, want %d — the prompt states this to say how much the tail hides", j.Lines, want)
+	}
+	// The wiring, not just the scanner: FailedJobLogs must fill Errors in,
+	// or the prompt's anchor is empty on every real build. Asserting
+	// errorMarks() alone left this crossing untested — a probe that
+	// nulled the field here printed ok.
+	if len(j.Errors) != 1 {
+		t.Fatalf("FailedJobLogs returned %d error marks, want the one in the log: %+v", len(j.Errors), j.Errors)
+	}
+	if j.Errors[0].Line != 3 || j.Errors[0].Step != "Run the gates" {
+		t.Errorf("error mark = %+v, want line 3 in %q", j.Errors[0], "Run the gates")
 	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The anchor, and the invariant that makes it usable: the line number
+// reported here is the line number `grep -n` and an editor report for
+// the file the harness writes. They agree because the same string is
+// scanned and spilled — this pins that, because a number off by a header
+// is worse than no number at all.
+func TestErrorMarksAgreeWithTheFileTheAgentWillGrep(t *testing.T) {
+	log := strings.Join([]string{
+		"2026-09-04T20:41:24.0000000Z ##[group]Run mix test",
+		"2026-09-04T20:41:25.0000000Z .....",
+		"2026-09-04T20:41:26.0000000Z ##[endgroup]",
+		"2026-09-04T20:45:44.0000000Z ##[group]Run pipeline audit",
+		"2026-09-04T20:45:46.0000000Z pipeline: audit: 1 violations",
+		"2026-09-04T20:45:47.5102399Z ##[error]Process completed with exit code 1.",
+		"2026-09-04T20:45:47.6000000Z Post job cleanup.",
+	}, "\n")
+
+	marks := errorMarks(log)
+	if len(marks) != 1 {
+		t.Fatalf("got %d marks, want the one ##[error]: %+v", len(marks), marks)
+	}
+	m := marks[0]
+	if m.Line != 6 {
+		t.Errorf("Line = %d, want 6", m.Line)
+	}
+	if m.Step != "Run pipeline audit" {
+		t.Errorf("Step = %q, want the enclosing group, not the earlier one", m.Step)
+	}
+	if strings.Contains(m.Text, "2026-09-04") {
+		t.Errorf("Text carries the timestamp, which is noise in a prompt: %q", m.Text)
+	}
+
+	// The invariant: that line of the written file is the marker.
+	path := filepath.Join(t.TempDir(), "job.log")
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	if got := lines[m.Line-1]; !strings.Contains(got, "##[error]") {
+		t.Errorf("line %d of the spilled file is %q, not the error the prompt points at", m.Line, got)
+	}
+}
+
+// A log with no timestamps must not be truncated by the timestamp strip,
+// and a line that merely contains a space is not a timestamped line.
+func TestErrorMarksReadLogsWithoutTimestamps(t *testing.T) {
+	marks := errorMarks("##[group]Run the gates\nsome output here\n##[error]it broke")
+	if len(marks) != 1 || marks[0].Line != 3 || marks[0].Text != "it broke" {
+		t.Fatalf("got %+v, want one mark at line 3 saying \"it broke\"", marks)
+	}
+	if marks[0].Step != "Run the gates" {
+		t.Errorf("Step = %q, want \"Run the gates\"", marks[0].Step)
+	}
+}
+
+// The shape check earns its keep separately from the digit check beside
+// it, and this is the case that tells them apart: a line beginning with
+// a bare year is not a timestamped line, and stripping its first token
+// would expose a marker that is really prose. Without the length/Z/T
+// test the digit test passes "2026" and the line is mangled.
+func TestDropTimestampLeavesAYearThatIsNotATimestamp(t *testing.T) {
+	if got := errorMarks("2026 ##[error]this is output, not a marker"); len(got) != 0 {
+		t.Errorf("got %+v, want none — the line is prose beginning with a year", got)
+	}
+	// And a real Actions timestamp is still stripped.
+	if got := errorMarks("2026-09-04T20:45:47.5102399Z ##[error]real"); len(got) != 1 {
+		t.Fatalf("got %+v, want the real marker", got)
+	}
+}
+
+// A prompt line each, so a pathological log cannot spend the prompt on
+// markers. The bound is a guard, not a measurement — ORC-224 had one.
+func TestErrorMarksAreBounded(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < maxLogMarks*3; i++ {
+		sb.WriteString("##[error]boom\n")
+	}
+	if got := len(errorMarks(sb.String())); got != maxLogMarks {
+		t.Errorf("got %d marks, want the bound %d", got, maxLogMarks)
+	}
+}
