@@ -170,6 +170,46 @@ type JobLog struct {
 	// setup and are long enough to crowd out the argument they are
 	// evidence for.
 	Log string
+	// Full is the whole log as fetched, for a caller that means to spill
+	// it somewhere the agent can read. Never serialized: the claim file
+	// is read by several things and a multi-megabyte log in it would be
+	// carried by all of them to be used by none.
+	//
+	// It exists because the tail is not always the failure. Actions
+	// appends post-job cleanup after the failing step, so the end of the
+	// log is where the *runner* stopped rather than where the build
+	// broke — measured on Catapult's ORC-224, whose last 150 lines are
+	// checkout teardown, a Postgres service-container dump and orphan
+	// cleanup, with no test output in them at all.
+	Full string `json:"-"`
+	// LogPath is where the caller wrote Full, as the caller named it, or
+	// "". The prompt names it so the agent can read past the tail.
+	LogPath string `json:",omitempty"`
+	// Lines is how many lines Full had, so the prompt can say how much
+	// the tail is not showing rather than leaving the agent to guess
+	// whether the file is worth opening.
+	Lines int `json:",omitempty"`
+	// Errors are the failing-step markers found in Full, with where they
+	// are. A path plus "go read it" is a worse prompt than a path plus a
+	// line number: it makes finding the failure the agent's search
+	// problem when the harness already holds the answer.
+	Errors []LogMark `json:",omitempty"`
+}
+
+// LogMark is one notable line in a job log: where it is, which step it
+// falls in, and what it says.
+//
+// Line is 1-based and counts lines of the log as written to disk, so it
+// is the number `grep -n` and an editor both report for that file. The
+// two agree by construction — the same string is scanned and spilled —
+// and a test pins it, because a line number that is off by a header is
+// worse than none.
+type LogMark struct {
+	Line int
+	// Step is the enclosing `##[group]`'s title, which is the step name
+	// as the workflow wrote it: "Run mix test", "Run mix credo --strict".
+	Step string `json:",omitempty"`
+	Text string
 }
 
 // ErrNotMergeable is returned by MergePR when the branch cannot merge

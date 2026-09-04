@@ -101,6 +101,12 @@ runs:
         # directory — so without this the step dies on the redirect,
         # before the command it is trying to capture.
         mkdir -p "$RUNNER_TEMP/pipeline"
+        # --ci-logs-dir points inside the workspace, not at RUNNER_TEMP:
+        # the model reads files relative to its checkout, and a path
+        # outside it is one more thing that can be unreadable for a
+        # reason nobody sees. Under `.pipeline/` because the branch step
+        # below already excludes that directory from the commit, so a
+        # multi-megabyte log cannot ride along into the PR.
         set +e
         pipeline agent claim \
           --kind dev \
@@ -114,6 +120,7 @@ runs:
           --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          --ci-logs-dir "$GITHUB_WORKSPACE/.pipeline/ci-logs" \
           2> "$RUNNER_TEMP/pipeline/claim-error.txt"
         rc=$?
         # Written to a file rather than a step output: an output on a
