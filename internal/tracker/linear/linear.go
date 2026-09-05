@@ -12,8 +12,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
@@ -73,11 +75,110 @@ type gqlError struct {
 	Message string `json:"message"`
 }
 
+// Retry bounds for reads. A blip here takes a whole sweep down, and the
+// sweep's very first act is a read — so one unlucky request costs every
+// dispatch, promotion and escalation that beat would have made.
+//
+// Measured on Catapult, 2026-09-05: six sweeps failed between 14:00 and
+// 15:20 with `Post "https://api.linear.app/graphql": context deadline
+// exceeded`, each 40–51s of wall clock, and the one read in full shows
+// 30.04s between the step starting and the error with no output in
+// between — the client timeout below, firing on the first call, before
+// anything was written.
+//
+// **The attempt count and the delay are bounds, not measurements.** The
+// only figure taken is that 30s timeout; nobody here has measured how
+// long Linear stays unreachable, so three attempts is a guess at "long
+// enough for a blip, short enough that a real outage still fails the
+// run" and is written as one. Worst case is three timeouts plus backoff,
+// a little over ninety seconds, against a sweep that otherwise takes
+// well under a minute.
+const (
+	maxReadAttempts = 3
+	readBackoff     = 500 * time.Millisecond
+)
+
+// isRead reports whether a GraphQL document is a query rather than a
+// mutation, which is what decides whether it may be retried.
+//
+// Read off the document itself rather than from a list of method names
+// beside it: a list is a second place to update, and the one thing worse
+// than not retrying is retrying a write. A new mutation is excluded here
+// by being what it is.
+func isRead(query string) bool {
+	return strings.HasPrefix(strings.TrimSpace(query), "query")
+}
+
+// retryableStatus reports whether an HTTP status is worth another go.
+// 5xx and 429 are the server's problem and may pass; a 4xx is this
+// client's request and will fail identically however often it is sent.
+func retryableStatus(code int) bool {
+	return code >= 500 || code == http.StatusTooManyRequests
+}
+
 func (c *Client) do(ctx context.Context, query string, vars map[string]any, out any) error {
 	body, err := json.Marshal(gqlRequest{Query: query, Variables: vars})
 	if err != nil {
 		return err
 	}
+	attempts := 1
+	// **Writes are never retried, and that is the deliberate half.** A
+	// timeout awaiting headers says nothing about whether the server
+	// processed the request, so a retried mutation may be a second
+	// comment or a second transition. A duplicate comment is not merely
+	// noise: the escalation rules count their own markers
+	// (`len(markersOf(t, marker.CIRed)) + 1`), so one duplicated ci-red
+	// marker parks a ticket in Blocked a failure early. The sweep is
+	// convergent — the same stance `internal/state`'s worker already
+	// takes on its write path — so a failed write costs a beat and the
+	// next sweep re-derives it, while a duplicated write is not
+	// recoverable at all.
+	if isRead(query) {
+		attempts = maxReadAttempts
+	}
+	var lastErr error
+	started := time.Now()
+	for attempt := 1; ; attempt++ {
+		// Rebuilt every attempt, not reused: the request body is a
+		// reader and the first attempt drains it, so a retried request
+		// built once would POST an empty document and be rejected as a
+		// syntax error — a different failure wearing the same clothes.
+		lastErr = c.attempt(ctx, body, out)
+		var retry retryableError
+		if !errors.As(lastErr, &retry) || attempt >= attempts {
+			break
+		}
+		// Linear-ish backoff with the caller's deadline respected. A
+		// context that is already done must not sleep on it: the sweep
+		// has a job timeout and burning it here helps nobody.
+		delay := time.Duration(attempt) * readBackoff
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("linear: %w (gave up after %d attempt(s) over %s)",
+				lastErr, attempt, time.Since(started).Round(time.Millisecond))
+		case <-time.After(delay):
+		}
+	}
+	if lastErr != nil && attempts > 1 {
+		// The count is in the message or a retried failure reads as a
+		// single one, and the next reader measures the wrong thing.
+		var retry retryableError
+		if errors.As(lastErr, &retry) {
+			return fmt.Errorf("linear: %w (after %d attempts over %s)",
+				lastErr, attempts, time.Since(started).Round(time.Millisecond))
+		}
+	}
+	return lastErr
+}
+
+// retryableError marks the failures worth another attempt, so the loop
+// above decides on a type rather than by re-inspecting strings.
+type retryableError struct{ err error }
+
+func (e retryableError) Error() string { return e.err.Error() }
+func (e retryableError) Unwrap() error { return e.err }
+
+func (c *Client) attempt(ctx context.Context, body []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -86,11 +187,17 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	req.Header.Set("Authorization", c.apiKey)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		// Transport failures are the measured case: a timeout awaiting
+		// headers, a reset connection, a DNS blip.
+		return retryableError{err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("linear: HTTP %d", resp.StatusCode)
+		httpErr := fmt.Errorf("linear: HTTP %d", resp.StatusCode)
+		if retryableStatus(resp.StatusCode) {
+			return retryableError{httpErr}
+		}
+		return httpErr
 	}
 	var envelope struct {
 		Data   json.RawMessage `json:"data"`
