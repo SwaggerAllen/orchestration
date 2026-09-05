@@ -2009,6 +2009,35 @@ real and is the trade: a ticket whose verdict cannot be read now waits quietly r
 failing loudly, so the honest report of the failure has to come from somewhere else, which is
 what the claim-failure record below is for.
 
+**A transient tracker failure is retried on reads, and never on writes.** The sweep's first act
+is a project-wide read, which the rule above makes fatal — so one unlucky request costs every
+dispatch, promotion and escalation that beat would have made. Six of Catapult's sweeps went
+that way inside eighty minutes on 2026-09-05, each dying on `Post
+"https://api.linear.app/graphql": context deadline exceeded (Client.Timeout exceeded while
+awaiting headers)`, and each cleared by a re-run or by the next timed sweep, which is what
+identifies them as blips rather than an outage.
+
+The asymmetry is the whole of the rule. A timeout awaiting headers says nothing about whether
+the server processed the request: the read that never answered may have run, and re-running it
+costs a duplicate read, which is nothing. Re-running a *write* costs a duplicate write, and a
+duplicated comment is not merely noise here — the escalation rules count their own markers, so
+one extra `ci-red` parks a ticket in `Blocked` a failure early, and no later sweep undoes it.
+The sweep is convergent, so a write that fails is re-derived on the next beat; a write that
+succeeded twice is not recoverable at all. Losing a beat is the cheaper failure, and it is the
+one chosen.
+
+Which half a call falls in is read off the GraphQL document — a `query` is retried, a
+`mutation` is not — rather than from a list of method names kept beside it. A list is a second
+place to update, and a mutation added later would be retried by omission; read off the
+document, it is excluded by being what it is.
+
+The attempt count and the backoff are **bounds, not measurements**, and say so where they are
+declared. The one figure taken is the client's own 30s timeout, which is what those six sweeps
+hit; nobody has measured how long Linear stays unreachable, so three attempts is a guess at
+"long enough for a blip, short enough that a real outage still fails the run". A retried
+failure reports its attempt count in the error, or the next person to look measures one timeout
+where there were three.
+
 **A run that dies before it claims says so, and a broken harness parks the ticket.** Every other
 failure route posts through the abort path, and abort needs the claim file to know what it is
 aborting — so a run that never got one skipped it, and the loudest failures, the ones where the
