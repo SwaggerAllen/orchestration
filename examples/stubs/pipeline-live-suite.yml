@@ -3,15 +3,27 @@
 # run-name is load-bearing: "pipeline: live-suite <ticket>" is how the
 # control plane correlates this run to its ticket (stale claims, busy
 # checks). Set it exactly.
+#
+# And deliberately NOT that shape when no ticket was given. The plane
+# reads runs by name, so a detached run named "pipeline: live-suite "
+# would be a half-formed member of the convention rather than a
+# non-member. The name below cannot match it at all, which is the honest
+# statement: this run is not part of the protocol.
 name: pipeline-live-suite
-run-name: "pipeline: live-suite ${{ inputs.ticket }}"
+run-name: >-
+  ${{ inputs.ticket
+      && format('pipeline: live-suite {0}', inputs.ticket)
+      || 'live suite (detached, no ticket)' }}
 
 on:
   workflow_dispatch:
     inputs:
       ticket:
-        description: Boundary ticket key
-        required: true
+        description: >-
+          Boundary ticket key. Leave empty to run detached: the suite
+          runs and reports nowhere, for when no boundary is open or when
+          another marker comment on the same verdict would be noise.
+        required: false
         type: string
 
 # Every pipeline command builds a snapshot first, and the snapshot has a

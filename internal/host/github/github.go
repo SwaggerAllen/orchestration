@@ -24,6 +24,21 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/host"
 )
 
+// RunNameFields exposes the correlation convention to callers that need
+// to check a name against it — the stub-workflow test, which asserts a
+// detached run's name cannot be read as an agent run. Returns nil when
+// the name is not an agent run's, else {kind, ticket}.
+//
+// Exported so that test reads this regexp rather than a copy of it: a
+// second copy is what would let the two drift while both pass.
+func RunNameFields(name string) []string {
+	m := runNameRe.FindStringSubmatch(name)
+	if m == nil {
+		return nil
+	}
+	return []string{m[1], m[2]}
+}
+
 // DefaultBaseURL is the public GitHub API.
 const DefaultBaseURL = "https://api.github.com"
 
