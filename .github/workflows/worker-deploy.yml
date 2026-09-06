@@ -96,7 +96,7 @@ jobs:
         # The signature check is the only thing standing between a
         # public URL and a token that starts workflows in every project
         # repo. It is not deployed untested.
-        run: node --test --experimental-strip-types index.test.ts
+        run: node --test --experimental-strip-types *.test.ts
 
       - name: deploy
         uses: cloudflare/wrangler-action@v3

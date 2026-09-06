@@ -77,3 +77,18 @@ class_name = "ProjectState"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ProjectState"]
+
+# The pipeline's measurement of itself, one instance per project,
+# addressed by name on the /stats/<project>/ path.
+#
+# A second class rather than more tables on ProjectState: Durable
+# Objects serialize requests to one instance, and ProjectState is on the
+# dispatch path, so a dashboard aggregation must not be able to queue
+# ahead of a reservation (DESIGN §13).
+[[durable_objects.bindings]]
+name = "PROJECT_STATS"
+class_name = "ProjectStats"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ProjectStats"]
