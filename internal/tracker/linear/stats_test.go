@@ -47,9 +47,14 @@ func TestTheStatsQueryAsksForArchivedIssues(t *testing.T) {
 	if !strings.Contains((*bodies)[0], "includeArchived: true") {
 		t.Errorf("the stats query does not ask for archived issues:\n%s", (*bodies)[0])
 	}
-	// The terminal timestamps and the state NAME, not its id: the store
-	// keeps names and nothing here maps ids back.
-	for _, want := range []string{"archivedAt", "completedAt", "canceledAt", "state { name }", "fromState { name }", "toState { name }"} {
+	// The terminal timestamps, the state name, and its TYPE. The type
+	// is what the default aggregate excludes terminal states by —
+	// Linear's built-in Duplicate has no protocol slug, so a list of
+	// names would silently start counting it.
+	for _, want := range []string{
+		"archivedAt", "completedAt", "canceledAt",
+		"state { name type }", "fromState { name type }", "toState { name type }",
+	} {
 		if !strings.Contains((*bodies)[0], want) {
 			t.Errorf("the stats query does not select %q", want)
 		}
@@ -60,11 +65,11 @@ const onePage = `{"data":{"issues":{"nodes":[
   {"identifier":"ORC-23","title":"Add a farewell","priority":3,
    "createdAt":"2026-08-13T01:00:00Z","completedAt":"2026-08-13T05:00:00Z",
    "canceledAt":null,"archivedAt":"2026-08-14T00:19:06Z",
-   "state":{"name":"Done"},"projectMilestone":{"name":"Hookup"},
+   "state":{"name":"Done","type":"completed"},"projectMilestone":{"name":"Hookup"},
    "labels":{"nodes":[{"name":"bug"}],"pageInfo":{"hasNextPage":false}},
    "history":{"nodes":[
-     {"createdAt":"2026-08-13T05:00:00Z","fromState":{"name":"In Progress"},"toState":{"name":"Done"}},
-     {"createdAt":"2026-08-13T02:00:00Z","fromState":{"name":"Todo"},"toState":{"name":"In Progress"}},
+     {"createdAt":"2026-08-13T05:00:00Z","fromState":{"name":"In Progress","type":"started"},"toState":{"name":"Done","type":"completed"}},
+     {"createdAt":"2026-08-13T02:00:00Z","fromState":{"name":"Todo","type":"unstarted"},"toState":{"name":"In Progress","type":"started"}},
      {"createdAt":"2026-08-13T01:30:00Z","fromState":null,"toState":null}
    ],"pageInfo":{"hasNextPage":false}}}
 ],"pageInfo":{"hasNextPage":false}}}}`
@@ -136,7 +141,7 @@ func TestStatsIssuesPaginate(t *testing.T) {
 	   "history":{"nodes":[],"pageInfo":{"hasNextPage":false}}}
 	],"pageInfo":{"hasNextPage":true,"endCursor":"cur1"}}}}`
 	second := `{"data":{"issues":{"nodes":[
-	  {"identifier":"ORC-2","createdAt":"2026-08-13T00:00:00Z","state":{"name":"Done"},
+	  {"identifier":"ORC-2","createdAt":"2026-08-13T00:00:00Z","state":{"name":"Done","type":"completed"},
 	   "labels":{"nodes":[],"pageInfo":{"hasNextPage":false}},
 	   "history":{"nodes":[],"pageInfo":{"hasNextPage":false}}}
 	],"pageInfo":{"hasNextPage":false}}}}`
@@ -175,5 +180,25 @@ func TestAnOverflowingHistoryIsRefusedRatherThanTruncated(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ORC-9") {
 		t.Errorf("the error does not name the issue: %v", err)
+	}
+}
+
+// The category rides with the state, and the store excludes terminal
+// states by it rather than by name.
+func TestTheStateCategoryComesBackWithTheState(t *testing.T) {
+	c, _ := serve(t, onePage)
+	got, err := c.ListIssuesForStats(context.Background(), "team", "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := got[0]
+	if i.CurrentCategory != "completed" {
+		t.Errorf("current category = %q, want completed", i.CurrentCategory)
+	}
+	if i.History[1].Category != "completed" {
+		t.Errorf("the Done transition's category = %q, want completed", i.History[1].Category)
+	}
+	if i.History[0].FromCategory != "unstarted" {
+		t.Errorf("the created-in state's category = %q, want unstarted", i.History[0].FromCategory)
 	}
 }

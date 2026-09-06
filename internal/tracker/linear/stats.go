@@ -46,11 +46,11 @@ func (c *Client) ListIssuesForStats(ctx context.Context, teamID, projectID strin
 	  ) {
 	    nodes {
 	      identifier title priority createdAt completedAt canceledAt archivedAt
-	      state { name }
+	      state { name type }
 	      projectMilestone { name }
 	      labels(first: $nested) { nodes { name } pageInfo { hasNextPage } }
 	      history(first: $nested) {
-	        nodes { createdAt fromState { name } toState { name } }
+	        nodes { createdAt fromState { name type } toState { name type } }
 	        pageInfo { hasNextPage }
 	      }
 	    }
@@ -60,6 +60,13 @@ func (c *Client) ListIssuesForStats(ctx context.Context, teamID, projectID strin
 
 	type nameRef struct {
 		Name string `json:"name"`
+		// Type is the tracker's own category — started, completed,
+		// canceled, duplicate. Carried because the default aggregate
+		// excludes terminal states BY CATEGORY rather than by name:
+		// Linear's built-in Duplicate has no protocol slug, and a
+		// terminal state added later would have none either, so a list
+		// of names would silently start counting it.
+		Type string `json:"type"`
 	}
 	type page struct {
 		Issues struct {
@@ -117,6 +124,7 @@ func (c *Client) ListIssuesForStats(ctx context.Context, teamID, projectID strin
 			}
 			if n.State != nil {
 				iss.CurrentState = n.State.Name
+				iss.CurrentCategory = n.State.Type
 			}
 			if n.Milestone != nil {
 				iss.Milestone = n.Milestone.Name
@@ -136,9 +144,10 @@ func (c *Client) ListIssuesForStats(ctx context.Context, teamID, projectID strin
 				if h.ToState == nil {
 					continue // not a state change
 				}
-				tr := stats.Transition{To: h.ToState.Name, At: h.CreatedAt}
+				tr := stats.Transition{To: h.ToState.Name, Category: h.ToState.Type, At: h.CreatedAt}
 				if h.FromState != nil {
 					tr.From = h.FromState.Name
+					tr.FromCategory = h.FromState.Type
 				}
 				iss.History = append(iss.History, tr)
 			}

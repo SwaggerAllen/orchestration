@@ -55,8 +55,46 @@ const BUCKETS: Record<string, string> = {
  * and Boundary review — states where nothing is running and no minute
  * is being spent. The collective agent-time figure is only meaningful
  * against this list.
+ *
+ * These are protocol slugs, not the tracker's display names. The
+ * collector normalises before writing, because the tracker says
+ * "Design review" while every constant that reasons about states says
+ * `design_review` — and a store holding display names would match this
+ * list on nothing and report zero agent time forever. A flat line, not
+ * a failure: neither side's tests can see it, since the store's seed
+ * their own names and the adapter's assert what Linear returns.
  */
 const AGENT_STATES = ["designing", "design_review", "in_progress", "reconciling", "checks"];
+
+/**
+ * Categories excluded from the default aggregate: a ticket's time in a
+ * terminal state measures nothing. `Done` is not a duration, it is
+ * where the ticket stopped.
+ *
+ * By category rather than by name, and that is the load-bearing part.
+ * Linear's built-in Duplicate has no protocol slug at all, and a
+ * terminal state added later would have none either — an exclusion list
+ * of names would silently start counting it. The category comes from
+ * the tracker itself.
+ */
+const TERMINAL_CATEGORIES = ["completed", "canceled", "duplicate"];
+
+/**
+ * States excluded from the default aggregate by name, because what they
+ * measure is not this ticket's work.
+ *
+ * `backlog` measures how early the ticket was foreseen. `todo` measures
+ * how long the OTHER tickets in the milestone took — a queue position,
+ * not an effort. Both are real and both are collected; they are just
+ * not what an average per ticket is asking about, and left in they
+ * dominate it.
+ *
+ * Collected and excluded rather than dropped, per the rule the write
+ * side already follows: filtering at collection is irreversible,
+ * filtering on read is free. `states=` overrides this in either
+ * direction.
+ */
+const QUEUE_STATES = ["backlog", "todo"];
 
 export class ProjectStats {
   private sql: SqlLike;
@@ -111,6 +149,7 @@ export class ProjectStats {
       CREATE TABLE IF NOT EXISTS interval (
         ticket_key TEXT NOT NULL,
         state TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
         entered_at INTEGER NOT NULL,
         left_at INTEGER,
         PRIMARY KEY (ticket_key, state, entered_at)
@@ -230,9 +269,9 @@ export class ProjectStats {
       this.sql.exec("DELETE FROM interval WHERE ticket_key = ?", t.key);
       for (const iv of t.intervals ?? []) {
         this.sql.exec(
-          `INSERT OR REPLACE INTO interval (ticket_key, state, entered_at, left_at)
-           VALUES (?, ?, ?, ?)`,
-          t.key, iv.state, iv.entered_at, iv.left_at ?? null,
+          `INSERT OR REPLACE INTO interval (ticket_key, state, category, entered_at, left_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          t.key, iv.state, iv.category ?? "", iv.entered_at, iv.left_at ?? null,
         );
       }
     }
@@ -386,11 +425,20 @@ export class ProjectStats {
       clauses.push(`NOT EXISTS (SELECT 1 FROM ticket_label l WHERE l.ticket_key = t.key AND l.label = ?)`);
       binds.push(label);
     }
-    if (q.get("includeBoundary") !== "1") {
-      // The boundary ticket is pipeline machinery whose "time in
-      // status" is a human's manual pass, not the pipeline's work. It
-      // would dominate every average it appeared in.
-      clauses.push("t.is_boundary = 0");
+    // Boundary tickets are shaped nothing like ordinary ones: their
+    // "time in status" is a human's manual pass rather than the
+    // pipeline's work, and they would dominate every average they
+    // appeared in. So three answers, not two — excluded by default,
+    // included alongside, or the only thing looked at, which is how you
+    // ask "are the boundary passes getting longer".
+    switch (q.get("boundary")) {
+      case "only":
+        clauses.push("t.is_boundary = 1");
+        break;
+      case "include":
+        break;
+      default:
+        clauses.push("t.is_boundary = 0");
     }
     clauses.push(`t.${on} IS NOT NULL`);
     return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", binds };
@@ -406,11 +454,58 @@ export class ProjectStats {
    * cohort is the reading the trend questions want — "tickets that
    * landed this week spent N hours in design".
    */
+  /**
+   * Which intervals count, as SQL over the joined `interval i`.
+   *
+   * Positive and negative, the same shape as the label filters and for
+   * the same reason: "design review on its own" and "everything except
+   * design review" are both real questions, and neither is answerable
+   * from a fixed list. `states=` names exactly what to include and
+   * suppresses the defaults entirely; `notStates=` subtracts from them.
+   *
+   * The defaults exclude terminal categories and the two queue states.
+   * They are a starting point rather than a rule — which is why both
+   * overrides exist.
+   */
+  private intervalFilter(q: URLSearchParams): { sql: string; binds: unknown[] } {
+    const clauses: string[] = [];
+    const binds: unknown[] = [];
+
+    const only = splitLabels(q.get("states"));
+    if (only.length > 0) {
+      clauses.push(`i.state IN (${only.map(() => "?").join(",")})`);
+      binds.push(...only);
+      // An explicit list is the whole answer. Layering the defaults
+      // under it would mean asking for `done` and being handed nothing,
+      // with no way to tell that from a ticket that never got there.
+      return { sql: clauses.join(" AND "), binds };
+    }
+
+    if (q.get("includeTerminal") !== "1") {
+      clauses.push(`i.category NOT IN (${TERMINAL_CATEGORIES.map(() => "?").join(",")})`);
+      binds.push(...TERMINAL_CATEGORIES);
+    }
+    if (q.get("includeQueue") !== "1") {
+      clauses.push(`i.state NOT IN (${QUEUE_STATES.map(() => "?").join(",")})`);
+      binds.push(...QUEUE_STATES);
+    }
+    for (const st of splitLabels(q.get("notStates"))) {
+      clauses.push("i.state != ?");
+      binds.push(st);
+    }
+    return { sql: clauses.join(" AND "), binds };
+  }
+
   private stateStats(q: URLSearchParams): Response {
     const fmt = BUCKETS[q.get("bucket") ?? ""] ?? null;
     const on = q.get("on") === "created" ? "created_at" : "completed_at";
     const { sql: where, binds } = this.ticketFilter(q);
     const bucket = fmt ? `strftime('${fmt}', t.${on} / 1000, 'unixepoch')` : `'all'`;
+
+    const iv = this.intervalFilter(q);
+    const joined = [where.replace(/^WHERE /, ""), iv.sql].filter((c) => c.length > 0);
+    const scope = joined.length ? `WHERE ${joined.join(" AND ")}` : "";
+    const scopeBinds = [...binds, ...iv.binds];
 
     const rows = [...this.sql.exec(
       `SELECT ${bucket} AS bucket,
@@ -420,10 +515,10 @@ export class ProjectStats {
               SUM(COALESCE(i.left_at, i.entered_at) - i.entered_at) AS total_ms
          FROM ticket t
          JOIN interval i ON i.ticket_key = t.key
-         ${where}
+         ${scope}
         GROUP BY bucket, state
         ORDER BY bucket, state`,
-      ...binds,
+      ...scopeBinds,
     )];
 
     // The collective agent figure is a separate row rather than a sum
@@ -436,13 +531,26 @@ export class ProjectStats {
               SUM(COALESCE(i.left_at, i.entered_at) - i.entered_at) AS total_ms
          FROM ticket t
          JOIN interval i ON i.ticket_key = t.key
-         ${where}${where ? " AND" : "WHERE"} i.state IN (${agentPlaceholders})
+         ${scope}${scope ? " AND" : "WHERE"} i.state IN (${agentPlaceholders})
         GROUP BY bucket
         ORDER BY bucket`,
-      ...binds, ...AGENT_STATES,
+      ...scopeBinds, ...AGENT_STATES,
     )];
 
-    return Response.json({ states: rows, agentTotal: agent, agentStates: AGENT_STATES });
+    return Response.json({
+      states: rows,
+      agentTotal: agent,
+      agentStates: AGENT_STATES,
+      // Echoed so a reader can tell an empty bucket from a filtered one
+      // — the difference between "nothing spent time there" and "you
+      // did not ask about it".
+      excluded: {
+        terminalCategories: q.get("includeTerminal") === "1" ? [] : TERMINAL_CATEGORIES,
+        queueStates: q.get("includeQueue") === "1" ? [] : QUEUE_STATES,
+        notStates: splitLabels(q.get("notStates")),
+        onlyStates: splitLabels(q.get("states")),
+      },
+    });
   }
 
   /**

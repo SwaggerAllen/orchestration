@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 func at(day, hour int) time.Time {
@@ -318,5 +319,164 @@ func TestRoundingIsPerJobNotPerRun(t *testing.T) {
 	// The waste is the gap between billed and elapsed.
 	if waste := perJob - 72_000; waste != 108_000 {
 		t.Errorf("rounding waste = %d, want 108000", waste)
+	}
+}
+
+// ---- state naming ---------------------------------------------------
+
+// The tracker says "Design review" and every constant that reasons
+// about states says `design_review`. Storing display names would make
+// the store's agent-state list match nothing and report zero agent time
+// forever — a flat line rather than a failure, invisible to both sides'
+// tests.
+func TestTrackerDisplayNamesBecomeProtocolSlugs(t *testing.T) {
+	n := NewStateNamer(map[protocol.State]string{
+		protocol.Designing:    "Designing",
+		protocol.DesignReview: "Design review",
+		protocol.InProgress:   "In Progress",
+	})
+	for name, want := range map[string]string{
+		"Designing":     "designing",
+		"Design review": "design_review",
+		"In Progress":   "in_progress",
+		"in progress":   "in_progress", // case is the tracker's, not ours
+		" Designing ":   "designing",
+	} {
+		if got := n.Slug(name); got != want {
+			t.Errorf("Slug(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// THE test that proves the config map is load-bearing, and nothing did
+// until it existed.
+//
+// Every state Catapult uses is named exactly its slug with spaces for
+// underscores, so the fallback normaliser produces the right answer for
+// all of them — with the map inverted, or absent, or wrong. A probe
+// that reversed the map printed ok against a suite that only used
+// those.
+//
+// The map earns its place on the states a project names differently,
+// which is the entire reason `pipeline.config.json` carries one: the
+// tracker's words are per-team and the slug is the only stable key.
+func TestAStateNamedUnlikeItsSlugStillResolves(t *testing.T) {
+	n := NewStateNamer(map[protocol.State]string{
+		protocol.ReadyForRework: "Rework queue",
+		protocol.Merged:         "Shipped",
+		protocol.Designing:      "Designing",
+	})
+	for name, want := range map[string]string{
+		"Rework queue": "ready_for_rework",
+		"Shipped":      "merged",
+		"Designing":    "designing",
+	} {
+		if got := n.Slug(name); got != want {
+			t.Errorf("Slug(%q) = %q, want %q — the config map is not being read, "+
+				"only the fallback that lower-cases and underscores", name, got, want)
+		}
+	}
+}
+
+// Triage and Duplicate are Linear's own and have no protocol slug.
+// Dropping them would lose real time; leaving the display name would put
+// two naming conventions in one column.
+func TestAStateThePipelineDoesNotOwnIsNormalisedNotDropped(t *testing.T) {
+	n := NewStateNamer(map[protocol.State]string{protocol.Designing: "Designing"})
+	for name, want := range map[string]string{
+		"Duplicate":      "duplicate",
+		"Triage":         "triage",
+		"Waiting on Bob": "waiting_on_bob",
+		"":               "",
+	} {
+		if got := n.Slug(name); got != want {
+			t.Errorf("Slug(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestNormaliseRewritesTheWholeHistory(t *testing.T) {
+	n := NewStateNamer(map[protocol.State]string{
+		protocol.Todo:       "Todo",
+		protocol.Designing:  "Designing",
+		protocol.InProgress: "In Progress",
+	})
+	got := n.Normalise(Issue{
+		CurrentState: "In Progress",
+		History: []Transition{
+			{From: "Todo", To: "Designing", At: at(1, 0)},
+			{From: "Designing", To: "In Progress", At: at(1, 1)},
+		},
+	})
+	if got.CurrentState != "in_progress" {
+		t.Errorf("current state = %q", got.CurrentState)
+	}
+	want := []Transition{
+		{From: "todo", To: "designing", At: at(1, 0)},
+		{From: "designing", To: "in_progress", At: at(1, 1)},
+	}
+	for k := range want {
+		if got.History[k].From != want[k].From || got.History[k].To != want[k].To {
+			t.Errorf("transition %d = %q->%q, want %q->%q", k,
+				got.History[k].From, got.History[k].To, want[k].From, want[k].To)
+		}
+	}
+}
+
+// The whole point: what Normalise produces must be what the store's
+// agent-state list matches. These two lists living in different
+// languages is the defect this exists to prevent, so the test names both
+// ends rather than trusting either.
+func TestTheNormalisedAgentStatesAreTheOnesTheStoreCounts(t *testing.T) {
+	n := NewStateNamer(map[protocol.State]string{
+		protocol.Designing:    "Designing",
+		protocol.DesignReview: "Design review",
+		protocol.InProgress:   "In Progress",
+		protocol.Reconciling:  "Reconciling",
+		protocol.Checks:       "Checks",
+	})
+	// Mirrors AGENT_STATES in worker/projectstats.ts.
+	for tracker, slug := range map[string]string{
+		"Designing":     "designing",
+		"Design review": "design_review",
+		"In Progress":   "in_progress",
+		"Reconciling":   "reconciling",
+		"Checks":        "checks",
+	} {
+		if got := n.Slug(tracker); got != slug {
+			t.Errorf("the store counts %q but the collector would write %q for %q", slug, got, tracker)
+		}
+	}
+}
+
+// ---- Murphy -------------------------------------------------------
+
+// Milestones are strictly serial, so two open boundaries should never
+// happen. Milestones() gives both the same window start — overlapping
+// windows — so the anomaly is reported rather than passing as data.
+func TestTwoOpenBoundariesAreReported(t *testing.T) {
+	bs := []Boundary{
+		boundary("ORC-156", "Debt", at(1, 0), at(5, 0)),
+		boundary("ORC-217", "Product tier", at(6, 0), time.Time{}),
+		boundary("ORC-260", "Next thing", at(7, 0), time.Time{}),
+	}
+	open := OpenBoundaries(bs)
+	if len(open) != 2 {
+		t.Fatalf("OpenBoundaries = %v, want both open tickets", open)
+	}
+	// And the overlap it is warning about is real, not theoretical.
+	ms := Milestones(bs, at(0, 0))
+	if !ms[1].WindowStart.Equal(ms[2].WindowStart) {
+		t.Error("the two open boundaries did not in fact overlap; the warning would be describing nothing")
+	}
+}
+
+func TestOneOpenBoundaryIsNormalAndReportsAsOne(t *testing.T) {
+	open := OpenBoundaries([]Boundary{
+		boundary("ORC-156", "Debt", at(1, 0), at(5, 0)),
+		boundary("ORC-217", "Product tier", at(6, 0), time.Time{}),
+	})
+	if len(open) != 1 || open[0] != "ORC-217" {
+		t.Errorf("OpenBoundaries = %v, want [ORC-217]", open)
 	}
 }

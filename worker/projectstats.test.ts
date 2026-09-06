@@ -179,7 +179,10 @@ test("an archived ticket is counted like any other", async () => {
   assert.equal(body.states[0].tickets, 2, "the archived ticket was dropped");
 });
 
-test("the boundary ticket is excluded by default and included on request", async () => {
+// Three answers, not two. Boundary tickets are shaped nothing like
+// ordinary ones — their time in status is a manual pass — so they must
+// be excludable, includable, and askable about on their own.
+test("boundary tickets can be excluded, included, or asked about alone", async () => {
   const s = store();
   await s.fetch(req("POST", "/tickets", {
     tickets: [
@@ -191,8 +194,139 @@ test("the boundary ticket is excluded by default and included on request", async
   assert.equal(off.states[0].tickets, 1);
   assert.equal(off.states[0].total_ms, 1000, "the boundary ticket dominated the total");
 
-  const on = await (await s.fetch(req("GET", "/states?includeBoundary=1"))).json() as any;
-  assert.equal(on.states[0].tickets, 2);
+  const both = await (await s.fetch(req("GET", "/states?boundary=include"))).json() as any;
+  assert.equal(both.states[0].tickets, 2);
+
+  const only = await (await s.fetch(req("GET", "/states?boundary=only"))).json() as any;
+  assert.equal(only.states[0].tickets, 1, "boundary=only did not narrow to the boundary ticket");
+  assert.equal(only.states[0].total_ms, 999_000, "boundary=only returned the wrong ticket");
+});
+
+// ---- which intervals count -----------------------------------------
+
+/** A ticket whose intervals are given explicitly, with categories. */
+function withStates(key: string, day: number, spans: Array<[string, string, number]>) {
+  const closed = T0 + day * DAY;
+  let at = closed - 100_000;
+  const intervals = spans.map(([state, category, ms]) => {
+    const iv = { state, category, entered_at: at, left_at: at + ms };
+    at += ms;
+    return iv;
+  });
+  return { key, created_at: closed - 100_000, completed_at: closed, intervals };
+}
+
+// A ticket's time in a terminal state measures nothing -- `done` is not
+// a duration, it is where the ticket stopped.
+test("terminal states are excluded from the default aggregate", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["designing", "started", 1000],
+      ["done", "completed", 50_000],
+      ["duplicate", "duplicate", 60_000],
+    ])],
+  }));
+  const body = await (await s.fetch(req("GET", "/states"))).json() as any;
+  assert.deepEqual(body.states.map((r: any) => r.state), ["designing"]);
+
+  const all = await (await s.fetch(req("GET", "/states?includeTerminal=1"))).json() as any;
+  assert.equal(all.states.length, 3, "includeTerminal=1 did not bring them back");
+});
+
+// BY CATEGORY, NOT BY NAME. Linear's built-in Duplicate has no protocol
+// slug, and a terminal state added later would have none either -- an
+// exclusion list of names would silently start counting it.
+test("a terminal state nobody named is still excluded", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["designing", "started", 1000],
+      ["shipped_to_orbit", "completed", 90_000],
+    ])],
+  }));
+  const body = await (await s.fetch(req("GET", "/states"))).json() as any;
+  assert.deepEqual(body.states.map((r: any) => r.state), ["designing"],
+    "an unrecognised terminal state was counted; the exclusion is matching names, not categories");
+});
+
+// backlog measures how early the ticket was foreseen; todo measures how
+// long the OTHER tickets took. Both real, neither what a per-ticket
+// average is asking about, and both dominate it if left in.
+test("queue states are excluded from the default aggregate", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["backlog", "backlog", 500_000],
+      ["todo", "unstarted", 400_000],
+      ["designing", "started", 1000],
+    ])],
+  }));
+  const body = await (await s.fetch(req("GET", "/states"))).json() as any;
+  assert.deepEqual(body.states.map((r: any) => r.state), ["designing"]);
+
+  const all = await (await s.fetch(req("GET", "/states?includeQueue=1"))).json() as any;
+  assert.equal(all.states.length, 3);
+});
+
+// The overnight hours land entirely in the states the author holds, so
+// excluding those removes the sleep noise without encoding when anyone
+// sleeps.
+test("notStates subtracts from the defaults", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["designing", "started", 1000],
+      ["design_review", "started", 400_000],
+      ["blocked", "started", 300_000],
+    ])],
+  }));
+  const body = await (await s.fetch(req("GET", "/states?notStates=design_review,blocked"))).json() as any;
+  assert.deepEqual(body.states.map((r: any) => r.state), ["designing"]);
+  assert.deepEqual(body.excluded.notStates, ["design_review", "blocked"]);
+});
+
+// An explicit list is the whole answer. Layering the defaults under it
+// would mean asking for `done` and being handed nothing, with no way to
+// tell that from a ticket that never got there.
+test("an explicit states list overrides the defaults entirely", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["designing", "started", 1000],
+      ["done", "completed", 50_000],
+    ])],
+  }));
+  const body = await (await s.fetch(req("GET", "/states?states=done"))).json() as any;
+  assert.equal(body.states.length, 1, "asking for done returned nothing; the defaults were layered under the list");
+  assert.equal(body.states[0].state, "done");
+  assert.equal(body.states[0].total_ms, 50_000);
+});
+
+// An empty bucket and a filtered one look identical in the numbers.
+test("the response says what it filtered out", async () => {
+  const s = store();
+  const body = await (await s.fetch(req("GET", "/states"))).json() as any;
+  assert.deepEqual(body.excluded.terminalCategories, ["completed", "canceled", "duplicate"]);
+  assert.deepEqual(body.excluded.queueStates, ["backlog", "todo"]);
+});
+
+// The agent total reads the same filtered set as the per-state rows, or
+// the two disagree about the same question.
+test("the agent total respects the interval filter", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", {
+    tickets: [withStates("ORC-1", 1, [
+      ["designing", "started", 1000],
+      ["in_progress", "started", 2000],
+    ])],
+  }));
+  const all = await (await s.fetch(req("GET", "/states"))).json() as any;
+  assert.equal(all.agentTotal[0].total_ms, 3000);
+
+  const less = await (await s.fetch(req("GET", "/states?notStates=in_progress"))).json() as any;
+  assert.equal(less.agentTotal[0].total_ms, 1000,
+    "the agent total ignored notStates; it and the per-state rows answer different questions");
 });
 
 test("agent states total separately from the per-state rows", async () => {

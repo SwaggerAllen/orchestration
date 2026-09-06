@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 // DebtPrefix marks a tech-debt milestone by its name.
@@ -43,6 +44,18 @@ type Transition struct {
 	From string
 	To   string
 	At   time.Time
+	// FromCategory is the type of the state moved away from, needed
+	// only for the first transition — the one that names the state the
+	// ticket was created in.
+	FromCategory string
+	// Category is the tracker's own type for the state entered
+	// (`started`, `completed`, `canceled`, `duplicate`, …). Carried
+	// because the default aggregate excludes terminal states, and doing
+	// that by category rather than by name is what makes it survive a
+	// state nobody here named: Linear's built-in Duplicate has no
+	// protocol slug at all, and a future terminal state would have none
+	// either.
+	Category string
 }
 
 // Issue is one ticket as the collector reads it. Deliberately not
@@ -64,6 +77,9 @@ type Issue struct {
 	// source for a ticket that has never moved: history is empty, so
 	// nothing else says what state its one interval is.
 	CurrentState string
+	// CurrentCategory is that state's tracker type, for the same reason
+	// Transition.Category exists.
+	CurrentCategory string
 	// History is oldest first. Every adapter must guarantee it — the
 	// same requirement tracker.Issue.Comments carries, for the same
 	// reason: Linear's connections come back newest first, and a
@@ -94,6 +110,7 @@ func (i Issue) Archived() bool { return !i.ArchivedAt.IsZero() }
 // while the ticket is still in it.
 type Interval struct {
 	State     string
+	Category  string
 	EnteredAt time.Time
 	LeftAt    time.Time
 }
@@ -126,18 +143,24 @@ func Intervals(i Issue) []Interval {
 		if i.CurrentState == "" {
 			return nil
 		}
-		return []Interval{{State: i.CurrentState, EnteredAt: i.CreatedAt}}
+		return []Interval{{State: i.CurrentState, Category: i.CurrentCategory, EnteredAt: i.CreatedAt}}
 	}
 	out := make([]Interval, 0, len(i.History)+1)
 	if from := i.History[0].From; from != "" {
 		out = append(out, Interval{
-			State:     from,
+			State: from,
+			// The state a ticket was CREATED in has no category of its
+			// own in the history — `fromState` names it, and only the
+			// state entered carries a type. Left empty rather than
+			// guessed; the default aggregate excludes it by name
+			// (backlog, todo) which is where these land anyway.
+			Category:  i.History[0].FromCategory,
 			EnteredAt: i.CreatedAt,
 			LeftAt:    i.History[0].At,
 		})
 	}
 	for n, tr := range i.History {
-		iv := Interval{State: tr.To, EnteredAt: tr.At}
+		iv := Interval{State: tr.To, Category: tr.Category, EnteredAt: tr.At}
 		if n+1 < len(i.History) {
 			iv.LeftAt = i.History[n+1].At
 		}
@@ -291,6 +314,90 @@ func BillableMillis(jobs []time.Duration) int64 {
 			continue
 		}
 		out += ((ms + minute - 1) / minute) * minute
+	}
+	return out
+}
+
+// StateNamer maps the tracker's display names onto protocol slugs.
+//
+// It exists because the two halves of this system name states
+// differently and nothing forced them to agree. The tracker returns
+// display names — "Designing", "Design review", "In Progress" — while
+// every constant that reasons about states, here and in the store, is a
+// protocol slug. Storing display names would make the store's agent
+// total match nothing and read zero forever, which is a flat line rather
+// than a failure: neither side's tests can catch it, because the store's
+// tests seed their own names and the adapter's assert what Linear
+// returns.
+//
+// Display names are also per-project. `pipeline.config.json` maps each
+// protocol state to whatever that team calls it, so two projects can
+// disagree about the words while meaning the same state. Slugs are the
+// only stable key.
+type StateNamer map[string]string
+
+// NewStateNamer inverts the config's protocol-state → tracker-name map.
+func NewStateNamer(states map[protocol.State]string) StateNamer {
+	n := make(StateNamer, len(states))
+	for slug, name := range states {
+		n[strings.ToLower(strings.TrimSpace(name))] = string(slug)
+	}
+	return n
+}
+
+// Slug returns the protocol slug for a tracker state name.
+//
+// A state the pipeline does not own — Linear's built-in Triage and
+// Duplicate, or anything the author added — has no slug, and is
+// normalised rather than dropped: lower-cased with spaces folded to
+// underscores, so "Duplicate" becomes "duplicate" and stays one key
+// across every project. Dropping it would lose real time; leaving the
+// display name would make it a second naming convention in the same
+// column.
+func (n StateNamer) Slug(trackerName string) string {
+	if trackerName == "" {
+		return ""
+	}
+	key := strings.ToLower(strings.TrimSpace(trackerName))
+	if slug, ok := n[key]; ok {
+		return slug
+	}
+	return strings.ReplaceAll(key, " ", "_")
+}
+
+// Normalise rewrites an issue's state names into protocol slugs.
+//
+// Applied before the intervals are derived, so everything downstream —
+// the store's columns, its agent-state list, the dashboard's filters —
+// speaks one vocabulary.
+func (n StateNamer) Normalise(i Issue) Issue {
+	i.CurrentState = n.Slug(i.CurrentState)
+	h := make([]Transition, len(i.History))
+	for k, tr := range i.History {
+		tr.From = n.Slug(tr.From)
+		tr.To = n.Slug(tr.To)
+		h[k] = tr
+	}
+	i.History = h
+	return i
+}
+
+// OpenBoundaries names the boundary tickets that have not closed.
+//
+// Milestones are strictly serial, so this should never return more than
+// one: a second boundary opening while the first is live means two
+// milestones are ending at once, which the pipeline has no idea how to
+// mean. Milestones() does not fail on it — it gives both the same window
+// start, which is to say overlapping windows — so the collector reports
+// the anomaly rather than letting the overlap pass as data.
+//
+// Handled because it is cheap to handle, not because it is expected.
+func OpenBoundaries(boundaries []Boundary) []string {
+	var out []string
+	for _, b := range boundaries {
+		if b.CompletedAt.IsZero() {
+			out = append(out, b.Ticket)
+		}
 	}
 	return out
 }
