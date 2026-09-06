@@ -163,6 +163,33 @@ type Checks struct {
 // design, and reading CI is not a reason to give it one. So the harness
 // reads and the agent is handed the text — the same division as the
 // non-asks document (DESIGN §4) and the ticket body itself.
+// StatsRun is one Actions run as the stats collector records it
+// (DESIGN §13).
+//
+// TicketKey and Kind are empty for every run that is not an agent run —
+// CI on a pull request, a worker deploy, a preview build — and those are
+// kept rather than dropped. They match no correlation convention and are
+// plausibly most of the minutes spent, so measuring only the runs that
+// name a ticket would measure a minority of the bill and call it the
+// bill.
+type StatsRun struct {
+	ID         int64
+	Repo       string
+	Workflow   string
+	Name       string
+	Kind       string
+	TicketKey  string
+	StartedAt  time.Time
+	Conclusion string
+	Attempt    int
+	// Complete distinguishes a run that has finished from one still in
+	// flight. An unfinished run's minutes are not yet knowable, and
+	// storing it with a zero would freeze that zero: the store is
+	// insert-only, so the row a later pass would correct is a row it
+	// cannot touch.
+	Complete bool
+}
+
 type JobLog struct {
 	Name string
 	URL  string
