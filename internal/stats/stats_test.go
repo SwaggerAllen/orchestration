@@ -1,10 +1,13 @@
 package stats
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -481,5 +484,76 @@ func TestOneOpenBoundaryIsNormalAndReportsAsOne(t *testing.T) {
 	})
 	if len(open) != 1 || open[0] != "ORC-217" {
 		t.Errorf("OpenBoundaries = %v, want [ORC-217]", open)
+	}
+}
+
+// Tickets carries the two flags nothing downstream can re-derive: the
+// boundary label is the milestone table's whole source, and archived is
+// the only evidence the enumeration asked for archived issues at all.
+func TestTicketsCarryTheBoundaryAndArchivedFlags(t *testing.T) {
+	created := time.Date(2026, 8, 21, 0, 16, 0, 0, time.UTC)
+	issues := []Issue{
+		{
+			Key: "ORC-90", Labels: []string{core.LabelBoundary}, Milestone: "The engine",
+			CreatedAt: created, ArchivedAt: created.Add(72 * time.Hour),
+			CurrentState: "done", CurrentCategory: "completed",
+		},
+		{Key: "ORC-91", CreatedAt: created, CurrentState: "todo"},
+	}
+	got := Tickets(issues)
+	if len(got) != 2 {
+		t.Fatalf("got %d tickets, want 2", len(got))
+	}
+	if !got[0].IsBoundary || !got[0].Archived {
+		t.Errorf("ORC-90: boundary=%v archived=%v, want both true", got[0].IsBoundary, got[0].Archived)
+	}
+	if got[1].IsBoundary || got[1].Archived {
+		t.Errorf("ORC-91: boundary=%v archived=%v, want both false", got[1].IsBoundary, got[1].Archived)
+	}
+	// The intervals ride along, because the store replaces a ticket's
+	// intervals wholesale from this document — a ticket sent without
+	// them arrives having deleted its own history.
+	if len(got[0].Intervals) == 0 {
+		t.Error("ORC-90 was shaped with no intervals; the store would replace its history with nothing")
+	}
+	if n := ArchivedCount(issues); n != 1 {
+		t.Errorf("ArchivedCount = %d, want 1", n)
+	}
+}
+
+// The milestone the tracker assigns is deliberately not carried: windows
+// decide milestone membership, because the harness tickets and bugs a
+// cost question is about are frequently assigned to none. A second
+// answer to one question is the failure being avoided.
+func TestTicketsDoNotCarryTheTrackersMilestoneAssignment(t *testing.T) {
+	got := Tickets([]Issue{{Key: "ORC-1", Milestone: "The engine", CurrentState: "done"}})
+	if v := fmt.Sprintf("%+v", got[0]); strings.Contains(v, "The engine") {
+		t.Errorf("the shaped ticket carries a milestone assignment: %s", v)
+	}
+}
+
+// The collector's own runs are marked, never dropped: nothing is
+// filtered on the way in, because collection is the irreversible step
+// and filtering is free at read time. Runaway spend by the thing
+// measuring spend has to stay visible.
+func TestMarkSelfTagsTheCollectorsOwnRunsWithoutDroppingThem(t *testing.T) {
+	runs := []host.StatsRun{
+		{ID: 1, Workflow: "pipeline-stats.yml"},
+		{ID: 2, Workflow: "ci.yml"},
+	}
+	got := MarkSelf(runs, "pipeline-stats.yml")
+	if len(got) != 2 {
+		t.Fatalf("MarkSelf returned %d runs, want both — nothing is filtered at collection", len(got))
+	}
+	if !got[0].IsStatsJob || got[1].IsStatsJob {
+		t.Errorf("marked = %v, %v; want the stats workflow marked and ci.yml not", got[0].IsStatsJob, got[1].IsStatsJob)
+	}
+	// An empty name marks nothing rather than everything: a caller that
+	// cannot say which workflow it is overstates the bill, which is the
+	// safe direction.
+	for _, r := range MarkSelf(runs, "") {
+		if r.IsStatsJob {
+			t.Errorf("run %d was marked with no self-workflow named", r.ID)
+		}
 	}
 }

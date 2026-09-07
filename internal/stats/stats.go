@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/core"
+	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
@@ -398,6 +399,100 @@ func OpenBoundaries(boundaries []Boundary) []string {
 		if b.CompletedAt.IsZero() {
 			out = append(out, b.Ticket)
 		}
+	}
+	return out
+}
+
+// Ticket is one ticket as the store keeps it: the tracker's own facts
+// plus the intervals derived from its history.
+//
+// The milestone the tracker assigns is deliberately absent, and its
+// absence is the design rather than an omission. Milestones are matched
+// by window (Milestones above), because harness tickets and bugs are
+// frequently assigned to no milestone at all and they are exactly the
+// work a per-milestone cost question is about. Storing the assignment
+// beside the window would offer a second answer to one question.
+type Ticket struct {
+	Key       string
+	Title     string
+	Labels    []string
+	Priority  int
+	CreatedAt time.Time
+	// Zero when the ticket has not reached that end.
+	CompletedAt time.Time
+	CanceledAt  time.Time
+	IsBoundary  bool
+	Archived    bool
+	Intervals   []Interval
+}
+
+// Tickets shapes normalised issues into the records the store keeps.
+//
+// Call it on issues a StateNamer has already normalised. It does not
+// normalise them itself: doing so here would make the step optional,
+// and skipping it is silent — display names would land in the state
+// column, the store's agent-state list would match none of them, and
+// the collective agent figure would read zero forever rather than fail.
+func Tickets(issues []Issue) []Ticket {
+	out := make([]Ticket, 0, len(issues))
+	for _, i := range issues {
+		out = append(out, Ticket{
+			Key:         i.Key,
+			Title:       i.Title,
+			Labels:      i.Labels,
+			Priority:    i.Priority,
+			CreatedAt:   i.CreatedAt,
+			CompletedAt: i.CompletedAt,
+			CanceledAt:  i.CanceledAt,
+			IsBoundary:  i.IsBoundary(),
+			Archived:    i.Archived(),
+			Intervals:   Intervals(i),
+		})
+	}
+	return out
+}
+
+// ArchivedCount is how many of these issues the tracker has archived.
+//
+// Reported by the collector on every pass, because it is the only
+// evidence that the enumeration asked for archived issues at all.
+// Omitting `includeArchived` does not fail — it silently drops the
+// oldest tickets, which renders as a downward trend on every
+// per-milestone chart with nothing about the output looking wrong. A
+// zero here on a project known to hold archived tickets is that bug,
+// visible in the job log rather than in a chart six weeks later.
+func ArchivedCount(issues []Issue) int {
+	var n int
+	for _, i := range issues {
+		if i.Archived() {
+			n++
+		}
+	}
+	return n
+}
+
+// Run is a collected run plus the one fact the host cannot supply:
+// whether it is the collector's own.
+type Run struct {
+	host.StatsRun
+	// IsStatsJob marks a run of the workflow that does the collecting.
+	//
+	// Marked rather than dropped, so runaway spend by the thing
+	// measuring spend stays visible. The general rule is that nothing
+	// is filtered on the way in: collection is the irreversible step
+	// and filtering is free at read time, so a fact excluded at write
+	// is a question that can never be asked again. The read side
+	// excludes these by default and takes `statsJob=1` to include them.
+	IsStatsJob bool
+}
+
+// MarkSelf tags the collector's own runs by the workflow file they came
+// from. An empty selfWorkflow marks nothing, which is the honest answer
+// for a caller that cannot say which workflow it is.
+func MarkSelf(runs []host.StatsRun, selfWorkflow string) []Run {
+	out := make([]Run, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, Run{StatsRun: r, IsStatsJob: selfWorkflow != "" && r.Workflow == selfWorkflow})
 	}
 	return out
 }

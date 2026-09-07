@@ -15,6 +15,7 @@ bindings live.
 | `pipeline-live-suite.yml` | The project's `:live` tests (real network), dispatched once when the boundary ticket opens; the result lands on the ticket before the author's pass. Its job must be able to *run* that command — dependencies and services included, not just the toolchain |
 | `pipeline-admin.yml` | `setup` and `state ingest`, on demand. The two operations the author runs by hand, reachable without a terminal — which matters because both are reached for when something is already wrong. Note its `deployments: read`: `setup` ends by probing the deploy endpoint, and that probe runs on a dry run too |
 | `pipeline-order.yml` | What to start next and what can run beside it, on demand, rendered to the run summary. Reads the tracker; writes nothing |
+| `pipeline-stats.yml` | Nightly recompute of the pipeline's own measurement (DESIGN §13): the tracker half from Linear's state history, the run half from Actions. The one stub that uses `schedule:` — nothing waits on it, so cron jitter costs nothing — and the one that does not run on `github.token`, because the bill spans repositories and the in-workflow token can only read its own |
 
 **Every stub that runs the project's own commands carries the same
 environment block, and it is your `ci.yml` job's environment.** An agent
