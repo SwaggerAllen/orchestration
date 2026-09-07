@@ -8,6 +8,9 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
+// T0 anchors the run fixtures in collect_test.go.
+var T0 = time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+
 func at(day, hour int) time.Time {
 	return time.Date(2026, 8, day, hour, 0, 0, 0, time.UTC)
 }

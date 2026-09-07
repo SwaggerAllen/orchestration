@@ -188,6 +188,15 @@ type StatsRun struct {
 	// insert-only, so the row a later pass would correct is a row it
 	// cannot touch.
 	Complete bool
+
+	// DurationMS and BillableMS are left zero by the lister and filled
+	// by the collector, which is the only thing that reads the run's
+	// jobs. Split that way because the jobs call is per-run and the
+	// expensive half of a backfill — the lister returns a hundred runs
+	// per call and must not trigger a hundred more.
+	DurationMS int64
+	BillableMS int64
+	JobCount   int
 }
 
 type JobLog struct {
