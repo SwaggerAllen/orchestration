@@ -22,7 +22,9 @@ import {
   verifySignature,
   githubTargets,
   signatureDiagnosis,
+  projectNames,
 } from "./index.ts";
+import { dashboardHTML } from "./dashboard.ts";
 
 const SECRET = "linear-signing-secret";
 
@@ -445,4 +447,52 @@ test("an alarm with no pending sweep dispatches nothing", async () => {
     globalThis.fetch = realFetch;
   }
   assert.equal(called, false, "an empty alarm dispatched a sweep");
+});
+
+
+// ---- the dashboard --------------------------------------------------
+
+// The selector's names are a GUESS: the stats object is addressed by
+// `state.project` from a project's own config — any stable string —
+// while PROJECTS knows the repository. They are the same word today and
+// nothing enforces it, so ?project= has to be able to override.
+test("project names are derived from the repositories, as a starting point", () => {
+  const names = projectNames({
+    PROJECTS: JSON.stringify([
+      { repository: "swaggerallen/catapult", workflow: "w.yml" },
+      { repository: "swaggerallen/orchestration-dummy", workflow: "w.yml" },
+    ]),
+  });
+  assert.deepEqual(names, ["catapult", "orchestration-dummy"]);
+});
+
+// The dashboard must not be able to take the Worker down. Everything
+// else this Worker does — webhooks, dispatch, the move record — matters
+// more than a chart.
+test("an unparseable or absent PROJECTS yields no names rather than throwing", () => {
+  assert.deepEqual(projectNames({ PROJECTS: "not json" }), []);
+  assert.deepEqual(projectNames({}), []);
+});
+
+// The page loads nothing from anywhere. That is what makes serving it
+// with no CSP honest, and it is the property a vendored chart library
+// would have cost: a pin to bump, a supply chain, and a CDN that can be
+// down. Guarded because "just add a <script src>" is the obvious next
+// edit and it is invisible in review.
+test("the dashboard fetches no third-party code", () => {
+  const html = dashboardHTML({ projects: ["catapult"] });
+  for (const bad of ["<script src", "<link rel=\"stylesheet\"", "cdn.", "unpkg", "jsdelivr", "@import"]) {
+    assert.ok(!html.includes(bad), `the page pulls in ${bad}`);
+  }
+  // And it holds no credential. A page that carried STATE_TOKEN would
+  // hand it to everyone who opened the page, which is the entire reason
+  // the Access path exists.
+  for (const bad of ["STATE_TOKEN", "Bearer ", "authorization"]) {
+    assert.ok(!html.includes(bad), `the page carries ${bad}`);
+  }
+});
+
+test("the dashboard's project list is the one it was given", () => {
+  const html = dashboardHTML({ projects: ["catapult", "dummy"] });
+  assert.ok(html.includes(JSON.stringify(["catapult", "dummy"])));
 });

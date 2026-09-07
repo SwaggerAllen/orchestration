@@ -889,15 +889,18 @@ runs under. The pass prints its own total so the comparison is one
 glance. A figure that does not land near the host's own means the
 arithmetic here is wrong.
 
-**d. Cloudflare Access, before anything serves a dashboard.** The store
-reads are authenticated by `PIPELINE_STATE_TOKEN` today, which is fine
-for a machine and useless for a browser: a page that carries a bearer
-token in its JavaScript hands that token to everyone who opens the
-page, and this one grants write access to the move record as well. So
-the hostname that serves the dashboard goes behind Access first, and
-how the page then reaches the store without holding the token is a
-decision for the change that builds it — not one to leave until after
-it is published.
+**d. Cloudflare Access, which is what the dashboard authenticates
+against.** The page is served by the metronome Worker at `/dashboard`,
+not from the Pages output — one hostname for page and API means no CORS
+and one Access application. It carries no credential of its own: a page
+holding `PIPELINE_STATE_TOKEN` would hand it to everyone who opened the
+page, and that token writes the move record too. Its viewer is the
+credential instead, and an Access identity buys reads only.
+
+Until `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set on the Worker, no
+identity is accepted and the dashboard shows a 401 with the reason on
+it. That is the shipped state, so the deploy carrying the page opens
+nothing.
 
 1. dash.cloudflare.com → **Zero Trust** → Access → **Applications** →
    Add an application → **Self-hosted**.
@@ -908,11 +911,29 @@ it is published.
    address. One rule; the point is a fence, not a directory.
 4. Login method: **One-time PIN** needs no identity provider and works
    from a phone.
+5. Copy the application's **Audience (AUD) tag** — it is on the
+   application's Overview — and set both values on the Worker: Workers
+   & Pages → `pipeline-metronome` → Settings → Variables and Secrets.
+   `ACCESS_TEAM_DOMAIN` is the `yourteam` in
+   `yourteam.cloudflareaccess.com`; `ACCESS_AUD` is that tag. Plain
+   variables, not secrets — neither is one.
+6. Point the hostname at the Worker: `pipeline-metronome` → Settings →
+   Domains & Routes → Add custom domain. Then open
+   `https://<that hostname>/dashboard`.
+
+**Do not put Access in front of the `workers.dev` origin's paths, and
+do not turn `workers_dev` off.** The webhooks post there and Access
+would block them. That origin stays open, which is exactly why the
+Worker verifies the Access token's signature and audience rather than
+trusting the header Access sets: on `workers.dev` that header is
+whatever the caller typed.
 
 Cloudflare renames things in this dashboard from time to time, so treat
 the labels above as the shape rather than the exact words. What matters
 is that the hostname has an Access application in front of it before it
-resolves to anything.
+resolves to anything, and that `ACCESS_AUD` names *that* application —
+one team signs for all of its applications with the same keys, so the
+audience is what keeps a token minted elsewhere in the account out.
 
 ## Secrets recap
 

@@ -26,6 +26,8 @@
 import { SweepDebounce } from "./debounce.ts";
 import { ProjectState } from "./projectstate.ts";
 import { ProjectStats } from "./projectstats.ts";
+import { accessIdentity } from "./access.ts";
+import { dashboardHTML } from "./dashboard.ts";
 
 // Re-exported because wrangler binds Durable Object classes from the
 // entrypoint module, not from wherever they are defined.
@@ -85,6 +87,19 @@ export interface Env {
    * records nothing and judges nothing.
    */
   STATE_TOKEN: string;
+  /**
+   * Cloudflare Access, for the dashboard. Both unset — the state this
+   * ships in — means no Access identity is ever accepted and the only
+   * way into /stats stays the shared secret, so publishing the
+   * dashboard before the Access application exists opens nothing.
+   *
+   * ACCESS_TEAM_DOMAIN is the "yourteam" in yourteam.cloudflareaccess.com;
+   * ACCESS_AUD is the application's Audience tag. The audience is what
+   * stops a token minted for a different application in the same team
+   * from being replayed here.
+   */
+  ACCESS_TEAM_DOMAIN?: string;
+  ACCESS_AUD?: string;
 }
 
 interface Project {
@@ -120,6 +135,31 @@ export function parseProjects(raw: string): Project[] {
     }
   }
   return parsed;
+}
+
+/**
+ * Names to offer in the dashboard's project selector, best-effort.
+ *
+ * A GUESS, and the page treats it as one. The stats object is addressed
+ * by `state.project` from a project's own config — any stable string —
+ * while PROJECTS knows the repository. They are the same word today and
+ * nothing enforces that, so the repository's name half is offered as a
+ * starting point and `?project=` overrides it. Deriving it silently and
+ * asserting the equivalence is how a selector confidently reads an
+ * empty object.
+ *
+ * A PROJECTS value that will not parse yields an empty list rather than
+ * a 500: the page still loads, still accepts ?project=, and says what
+ * it found. The dashboard is not a reason to take the Worker down.
+ */
+export function projectNames(env: { PROJECTS?: string }): string[] {
+  try {
+    return parseProjects(env.PROJECTS ?? "")
+      .map((p) => p.repository.split("/").pop() ?? "")
+      .filter((n) => n !== "");
+  } catch {
+    return [];
+  }
 }
 
 /** Length-independent compare over two hex digests. Both are the same
@@ -415,6 +455,25 @@ export default {
       );
     }
 
+    // The dashboard itself. Static HTML holding no secret, so it is
+    // served without a credential: what it can READ is what Access
+    // gates, one route below. Serving the page only to an authenticated
+    // viewer would buy nothing and would make a misconfigured Access
+    // application look like a 404 rather than like an empty chart with
+    // the reason on it.
+    if (request.method === "GET" && (path === "/dashboard" || path === "/dashboard/")) {
+      return new Response(dashboardHTML({ projects: projectNames(env) }), {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          // No inline-script CSP: the page IS an inline script, which
+          // is the whole point of having no build step. It loads
+          // nothing from anywhere, which is the property a CSP would
+          // otherwise be buying.
+          "cache-control": "no-store",
+        },
+      });
+    }
+
     // /stats/<project>/<op> — same shape, different object. The query
     // string is carried through, because every read is a filter.
     if (path.startsWith("/stats/")) {
@@ -426,10 +485,25 @@ export default {
       const project = rest.slice(0, slash);
       const op = rest.slice(slash) + new URL(request.url).search;
       const id = env.PROJECT_STATS.idFromName(project);
+      // The dashboard is a browser and cannot hold STATE_TOKEN, so it
+      // arrives as its viewer instead. VERIFIED here, not read: this
+      // Worker also answers at its workers.dev origin, which nothing
+      // fronts — the webhooks post there — and anyone can set a header.
+      // accessIdentity checks the signature, the audience and the
+      // expiry, and returns null when Access is not configured at all.
+      //
+      // The rebuilt request below is what makes the object able to
+      // trust it. Only the two headers named here cross, so a caller
+      // cannot supply x-pipeline-access; the object reads it as this
+      // Worker's word, and grants reads on it and nothing else.
+      const viewer = await accessIdentity(request, env);
       return env.PROJECT_STATS.get(id).fetch(
         new Request(`https://stats${op}`, {
           method: request.method,
-          headers: { authorization: request.headers.get("authorization") ?? "" },
+          headers: {
+            authorization: request.headers.get("authorization") ?? "",
+            "x-pipeline-access": viewer ?? "",
+          },
           body: request.method === "POST" ? await request.text() : undefined,
         }),
       );

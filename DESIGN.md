@@ -2661,6 +2661,32 @@ so runaway spend by the thing measuring spend stays visible. Collection is the i
 step and filtering is free at read time, so a fact excluded at write is a question that can
 never be asked again.
 
+**The dashboard is served by the Worker, and its viewer is the credential.** The store's
+reads are the same Durable Object the collector writes, and a browser cannot be given the
+shared secret that collector uses: a page carrying a bearer token in its JavaScript hands that
+token to everyone who opens the page, and this one writes the move record as well. So a viewer
+arrives as a Cloudflare Access identity instead, and that identity buys reads and nothing else
+— the write routes still require the secret, so a page cannot rewrite the store it is
+displaying.
+
+**The identity is verified, not read.** Access sets its assertion header on requests it
+proxies, but the Worker also answers at its `workers.dev` origin, which nothing fronts — the
+webhooks post there — and anyone can set a header. So the token's signature is checked against
+the team's published keys, its audience against this application's, and its expiry. The
+audience check is the one that is easy to leave out and is not optional: one Access team signs
+for every application in it with the same keys, so without it a token minted for any other
+application in the account opens this one. With no team domain and no audience configured no
+identity is ever accepted, which is the state the Worker ships in — publishing the dashboard
+before the Access application exists opens nothing.
+
+**Serving the page from the Worker rather than from the project's Pages output is what makes
+"same-origin" true.** A Pages custom domain and this Worker are different origins, so a page
+there would be cross-origin to the store and would still need a credential it cannot hold; one
+hostname means one Access application, no CORS, and the viewer's own identity. The page carries
+no chart library for a related reason: the charts are stacked bars over a few dozen buckets,
+inline SVG draws them in about sixty lines, and a vendored library is a pin to bump and a
+supply chain to own where the alternative is that small.
+
 **The collector writes rows before the watermark that covers them, never the other way
 round.** Every other failure in this pass is a re-run away from repaired, because the tracker
 half is an idempotent recompute and the run half refuses a row it already holds. A watermark

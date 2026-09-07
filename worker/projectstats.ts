@@ -186,7 +186,20 @@ export class ProjectStats {
 
   async fetch(request: Request): Promise<Response> {
     const auth = request.headers.get("authorization");
-    if (!this.env.STATE_TOKEN || auth !== `Bearer ${this.env.STATE_TOKEN}`) {
+    const bearer = !!this.env.STATE_TOKEN && auth === `Bearer ${this.env.STATE_TOKEN}`;
+    // TWO WAYS IN, AND THEY ARE NOT EQUAL. The collector presents the
+    // shared secret and may write. A dashboard viewer presents nothing
+    // — a browser page cannot hold that secret without handing it to
+    // everyone who opens the page, and it writes the move record too —
+    // so they arrive as an Access identity the entry Worker verified,
+    // and it buys reads only.
+    //
+    // The header below is set by the entry Worker and by nothing else:
+    // it rebuilds the request from scratch on the way in, copying the
+    // authorization header and this one, so a caller cannot supply it.
+    // Reading it here is trusting the Worker, not the internet.
+    const viewer = request.headers.get("x-pipeline-access") ?? "";
+    if (!bearer && !(viewer !== "" && request.method === "GET")) {
       return new Response("unauthorized\n", { status: 401 });
     }
     const url = new URL(request.url);
