@@ -78,6 +78,26 @@ class_name = "ProjectState"
 tag = "v2"
 new_sqlite_classes = ["ProjectState"]
 
+# Cloudflare Access, for the dashboard at /dashboard. BOTH UNSET is the
+# shipped state and it is not an oversight: with no team domain and no
+# audience, no Access identity is ever accepted and the only way into
+# /stats stays the shared secret. So this Worker can carry the dashboard
+# before the Access application exists without opening anything.
+#
+# Set them once the application is created (SETUP §9d):
+#   ACCESS_TEAM_DOMAIN = "yourteam"      # yourteam.cloudflareaccess.com
+#   ACCESS_AUD = "<the application's Audience tag>"
+#
+# The audience is not decoration. One Access team issues tokens for
+# every application in it, all signed by the same keys, so without this
+# check a token minted for any other application in the account would
+# open this one.
+#
+# Note what is NOT set here: the Worker keeps workers_dev = true above,
+# because the webhooks post to that origin and Access does not front it.
+# That is exactly why the JWT is verified rather than read — a header on
+# a workers.dev request is whatever the caller typed.
+
 # The pipeline's measurement of itself, one instance per project,
 # addressed by name on the /stats/<project>/ path.
 #

@@ -22,7 +22,11 @@ import {
   verifySignature,
   githubTargets,
   signatureDiagnosis,
+  projectNames,
 } from "./index.ts";
+import { CHART_JS_PATH } from "./index.ts";
+import { dashboardHTML } from "./dashboard.ts";
+import { CHART_JS, CHART_JS_SHA256, CHART_JS_VERSION } from "./vendor/chartjs.ts";
 
 const SECRET = "linear-signing-secret";
 
@@ -445,4 +449,92 @@ test("an alarm with no pending sweep dispatches nothing", async () => {
     globalThis.fetch = realFetch;
   }
   assert.equal(called, false, "an empty alarm dispatched a sweep");
+});
+
+
+// ---- the dashboard --------------------------------------------------
+
+// The selector's names are a GUESS: the stats object is addressed by
+// `state.project` from a project's own config — any stable string —
+// while PROJECTS knows the repository. They are the same word today and
+// nothing enforces it, so ?project= has to be able to override.
+test("project names are derived from the repositories, as a starting point", () => {
+  const names = projectNames({
+    PROJECTS: JSON.stringify([
+      { repository: "swaggerallen/catapult", workflow: "w.yml" },
+      { repository: "swaggerallen/orchestration-dummy", workflow: "w.yml" },
+    ]),
+  });
+  assert.deepEqual(names, ["catapult", "orchestration-dummy"]);
+});
+
+// The dashboard must not be able to take the Worker down. Everything
+// else this Worker does — webhooks, dispatch, the move record — matters
+// more than a chart.
+test("an unparseable or absent PROJECTS yields no names rather than throwing", () => {
+  assert.deepEqual(projectNames({ PROJECTS: "not json" }), []);
+  assert.deepEqual(projectNames({}), []);
+});
+
+// The page loads nothing from another origin. It sits behind the Access
+// application and shares an origin with the stats API, so a script it
+// loads runs with the viewer's identity — a CDN outage would cost the
+// charts and a CDN compromise would cost rather more.
+//
+// This pins the property rather than the absence of a script tag. It
+// used to assert `<script src` never appeared at all, and vendoring
+// Chart.js turned that red, correctly: the invariant was always "no
+// FOREIGN code", and "no script tag" was a proxy that stopped being
+// true. Guarded because swapping the vendored path for a CDN URL is a
+// one-word edit that looks like a simplification.
+test("the dashboard loads no cross-origin code", () => {
+  const html = dashboardHTML({ projects: ["catapult"], chartSrc: "/dashboard/chart-4.5.1.js" });
+  for (const bad of ["cdn.", "unpkg", "jsdelivr", "@import", "//esm.", "https://"]) {
+    assert.ok(!html.includes(bad), `the page reaches out to ${bad}`);
+  }
+  for (const src of html.matchAll(/<(?:script|link)[^>]*(?:src|href)="([^"]*)"/g)) {
+    assert.ok(src[1].startsWith("/"), `${src[1]} is not a same-origin path`);
+  }
+  // And it holds no credential. A page that carried STATE_TOKEN would
+  // hand it to everyone who opened the page, which is the entire reason
+  // the Access path exists.
+  for (const bad of ["STATE_TOKEN", "Bearer ", "authorization"]) {
+    assert.ok(!html.includes(bad), `the page carries ${bad}`);
+  }
+});
+
+test("the dashboard's project list is the one it was given", () => {
+  const html = dashboardHTML({ projects: ["catapult", "dummy"], chartSrc: "/x.js" });
+  assert.ok(html.includes(JSON.stringify(["catapult", "dummy"])));
+});
+
+// The library's path carries its version, which is what makes the
+// immutable cache header honest: a new version is a new URL rather than
+// a stale cache nobody can bust.
+test("the vendored library is served from a versioned path", () => {
+  assert.equal(CHART_JS_PATH, `/dashboard/chart-${CHART_JS_VERSION}.js`);
+  assert.ok(CHART_JS_PATH.includes(CHART_JS_VERSION), "the path does not carry the version");
+  const html = dashboardHTML({ projects: [], chartSrc: CHART_JS_PATH });
+  assert.ok(html.includes(`<script src="${CHART_JS_PATH}">`), "the page does not load it");
+});
+
+// THE BLOB IS RE-DERIVABLE, and this is what says so. A vendored
+// dependency nobody can reproduce from upstream is worse than a link,
+// because it can be neither audited nor updated with confidence: the
+// digest is the upstream file's, so this fails if the base64 was
+// hand-edited, truncated, or regenerated from something else.
+//
+// Reproduce it with:
+//   npm pack chart.js@<version> && tar xzf chart.js-<version>.tgz
+//   sha256sum package/dist/chart.umd.min.js
+test("the vendored Chart.js matches the digest recorded beside it", async () => {
+  const bytes = Uint8Array.from(CHART_JS, (c) => c.charCodeAt(0));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  assert.equal(hex, CHART_JS_SHA256);
+  // And it is the library rather than some other file that hashes to
+  // the same recorded value because both were regenerated together.
+  assert.ok(CHART_JS.includes(`Chart.js v${CHART_JS_VERSION}`), "not the Chart.js banner");
+  assert.ok(CHART_JS.includes("MIT License"), "the licence notice is gone");
 });

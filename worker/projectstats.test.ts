@@ -526,3 +526,54 @@ test("a malformed write is refused whole rather than stored in part", async () =
   const body = await (await s.fetch(req("GET", "/states"))).json() as any;
   assert.equal(body.states.length, 0, "the valid half of a rejected batch was stored");
 });
+
+// ---- the dashboard's way in ----------------------------------------
+//
+// A browser cannot hold STATE_TOKEN: a page carrying it hands it to
+// everyone who opens the page, and that token writes the move record
+// too. So a viewer arrives as an Access identity the entry Worker has
+// verified, and it buys reads only.
+
+test("a verified viewer may read", async () => {
+  const s = store();
+  await s.fetch(req("POST", "/tickets", { tickets: [ticket("ORC-1", 1, 3 * 3600_000)] }));
+  const res = await s.fetch(new Request("https://stats/states", {
+    headers: { authorization: "", "x-pipeline-access": "a@b.c" },
+  }));
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { states: unknown[] };
+  assert.ok(body.states.length > 0, "a verified viewer read nothing");
+});
+
+// The identity is read-only, and this is the half that would be easy to
+// lose: the two credentials differ in what they may DO, not only in
+// whether they are present. A viewer who could POST could rewrite the
+// tracker half of the store from a browser.
+test("a verified viewer may not write", async () => {
+  const s = store();
+  for (const path of ["/tickets", "/milestones", "/runs", "/watermark"]) {
+    const res = await s.fetch(new Request("https://stats" + path, {
+      method: "POST",
+      headers: { authorization: "", "x-pipeline-access": "a@b.c" },
+      body: JSON.stringify({ tickets: [], milestones: [], runs: [], source: "x" }),
+    }));
+    assert.equal(res.status, 401, `${path} accepted a write from a viewer`);
+  }
+});
+
+// Unset is the shipped state of ACCESS_TEAM_DOMAIN/ACCESS_AUD, and the
+// entry Worker then forwards an empty identity. An empty string must
+// not read as "somebody".
+test("an empty access identity is nobody", async () => {
+  const s = store();
+  const res = await s.fetch(new Request("https://stats/states", {
+    headers: { authorization: "", "x-pipeline-access": "" },
+  }));
+  assert.equal(res.status, 401);
+});
+
+test("the collector's bearer still writes and reads", async () => {
+  const s = store();
+  const res = await s.fetch(req("POST", "/tickets", { tickets: [ticket("ORC-9", 1, 1000)] }));
+  assert.equal(res.status, 200);
+});

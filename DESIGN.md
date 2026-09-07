@@ -2661,6 +2661,62 @@ so runaway spend by the thing measuring spend stays visible. Collection is the i
 step and filtering is free at read time, so a fact excluded at write is a question that can
 never be asked again.
 
+**The dashboard is served by the Worker, and its viewer is the credential.** The store's
+reads are the same Durable Object the collector writes, and a browser cannot be given the
+shared secret that collector uses: a page carrying a bearer token in its JavaScript hands that
+token to everyone who opens the page, and this one writes the move record as well. So a viewer
+arrives as a Cloudflare Access identity instead, and that identity buys reads and nothing else
+— the write routes still require the secret, so a page cannot rewrite the store it is
+displaying.
+
+**The identity is verified, not read.** Access sets its assertion header on requests it
+proxies, but the Worker also answers at its `workers.dev` origin, which nothing fronts — the
+webhooks post there — and anyone can set a header. So the token's signature is checked against
+the team's published keys, its audience against this application's, and its expiry. The
+audience check is the one that is easy to leave out and is not optional: one Access team signs
+for every application in it with the same keys, so without it a token minted for any other
+application in the account opens this one. With no team domain and no audience configured no
+identity is ever accepted, which is the state the Worker ships in — publishing the dashboard
+before the Access application exists opens nothing.
+
+**Serving the page from the Worker rather than from the project's Pages output is what makes
+"same-origin" true.** A Pages custom domain and this Worker are different origins, so a page
+there would be cross-origin to the store and would still need a credential it cannot hold; one
+hostname means one Access application, no CORS, and the viewer's own identity.
+
+**The chart library is vendored and served from that same origin, never from a CDN**, and the
+reason is that coupling again: the page sits behind the Access application and shares an origin
+with the store, so a script it loads runs with the viewer's identity. An outage would cost the
+charts; a compromise would cost rather more. The library's version is in its path, which is what
+makes an immutable cache header honest — a new version is a new URL rather than a stale cache
+nobody can bust — and the upstream file's digest is recorded beside the blob with a test that
+checks it. That digest is the point: a vendored dependency nobody can reproduce from upstream is
+worse than a link, because it can be neither audited nor updated with confidence.
+
+**The collector writes rows before the watermark that covers them, never the other way
+round.** Every other failure in this pass is a re-run away from repaired, because the tracker
+half is an idempotent recompute and the run half refuses a row it already holds. A watermark
+ahead of its rows is the one that is not: the collector steps over runs it never stored, those
+runs age out of the host's API, and the store has no route that would let a later pass fill the
+gap. The ordering is the whole guard, and it is the same reason the move record is written
+ahead of the transition rather than after it (§9) — in both cases the recoverable failure is
+chosen over the unrecoverable one.
+
+**A pass that runs out of budget is a normal outcome and reports itself as one.** The jobs call
+is per run and the host's hourly allowance is shared with the sweep, so a first backfill cannot
+finish in one sitting whatever the budget is. The pass stops, stores what it has, advances the
+watermark over exactly that, and says the backfill is unfinished. Treating it as an error would
+mean either a pass that never completes or a budget large enough to starve the sweep of the
+allowance it needs to dispatch anything.
+
+**The minute arithmetic is cross-checked by a human, because no credential here can do it.**
+The host's own account billing total is the only independent figure to hold the computed sum
+against, and it is account-scoped: neither the in-workflow token nor a repository-scoped
+fine-grained token can read it, and those are the only credentials the collector runs under. So
+the pass reads its own month back out of the store and prints it, and the comparison against
+the host's billing page is a glance somebody takes. Building the call would mean building one
+that fails in exactly the place the collector lives.
+
 **Milestones are derived from the boundary tickets, which already record them.** Each carries
 its milestone, and milestones are serial, so a milestone's window is the span between the
 previous boundary's completion and its own. A boundary ticket's *creation* is not the
