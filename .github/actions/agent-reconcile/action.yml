@@ -139,6 +139,10 @@ runs:
         prompt_path: ${{ runner.temp }}/pipeline/prompt.md
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        # The verdict is this role's whole output — a reconcile run that
+        # produced none did not reconcile — so its absence after a zero
+        # exit is a turn that ended early, and gets one resume.
+        expect_file: ${{ runner.temp }}/pipeline/verdict.json
 
     - name: finish
       shell: bash

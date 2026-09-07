@@ -2059,6 +2059,31 @@ Evidence is cleared when the run recovers. The model pass fails over from the su
 credential to the API key, and a first attempt's death left behind is a cause of death attached
 to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
 
+**A zero exit is not a finished pass, so the artifact decides.** The model runs
+non-interactively, and `claude -p` exits 0 the moment the turn ends — which is not the same
+event as the work being done. A pass that puts a command in the background and stops waiting on
+it ends its turn there; nothing waits on that command, the process exits 0, and the harness
+reads a completed pass. Catapult's ORC-230 hit this twice inside twenty-five minutes on
+consecutive dev reworks, each ending on a sentence rather than on work — "a `mix compile
+--warnings-as-errors` is running in the background to verify; I'll continue once it completes",
+then "I'll wait for the root `mix test` background task to complete before proceeding". Both
+runs pushed their `wip:` safety net over work whose gates had, by the model's own account, not
+been run, and both tickets went to `Blocked` over a hand-back nobody wrote.
+
+The role's own required file is what separates the two, because a pass that finished wrote it:
+the hand-back for dev, the verdict for reconcile. A zero exit that did not produce it is
+resumed **once**, with a message saying the turn ended early and that nothing was waiting for
+the thing it was waiting on. Design and boundary declare no such file — design's product is the
+tree it wrote and boundary's proposals are optional by construction — so they are not resumed,
+and that is a gap rather than a decision.
+
+A resume that comes back empty does **not** fail the model step. The steps after it are what
+commit and push the tree, and skipping them discards the run's work outright, which is the
+older failure the push step's own safety net exists for. So the step exits 0, the work lands on
+the branch, and finish is what reports the missing artifact — naming the stopped pass rather
+than the absent file, since `open .../handback.md: no such file or directory` reads as the
+harness losing a file and sends the reader after the wrong thing.
+
 **And it brings the argument the run had already written, when there is one.** A run that fails
 *validation* — the outcome parsed and the harness refused its shape — has done the thinking the
 ticket needs before it died. That reasoning lives in the outcome file and used to go to the

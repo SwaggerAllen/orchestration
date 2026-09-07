@@ -1044,6 +1044,20 @@ func cmdAgentFinish(args []string) error {
 		return fmt.Errorf("agent finish: --handback is required")
 	}
 	body, err := os.ReadFile(*handback)
+	// Absent and unreadable are different failures and want different
+	// hunts, so they say different things. Absent is the common one and
+	// it is not a path bug: the model pass ended without writing it.
+	// `claude -p` exits 0 when the turn ends, so a pass that stopped
+	// mid-work — classically after backgrounding a command it meant to
+	// wait for, which nothing waits on — is indistinguishable from one
+	// that succeeded until this file turns out to be missing. Catapult's
+	// ORC-230 went to Blocked twice on consecutive reworks that way, and
+	// the message it carried was `open .../handback.md: no such file or
+	// directory`, which reads as the harness losing a file and sent the
+	// diagnosis after the wrong thing.
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("agent finish: no hand-back at %s — the model pass stopped before it finished, so this is not a missing file, it is a missing pass. `claude -p` exits 0 the moment the turn ends and nothing waits on a backgrounded command, so a run that stopped mid-work looks exactly like one that succeeded until this. The end of the model step's output in the run log says which; whatever the pass had reached is committed on the branch (an issue that moves without a hand-back is a state change nobody can audit)", *handback)
+	}
 	if err != nil {
 		return fmt.Errorf("agent finish: reading hand-back: %w (an issue that moves without one is a state change nobody can audit)", err)
 	}

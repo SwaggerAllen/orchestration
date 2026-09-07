@@ -189,6 +189,11 @@ runs:
         prompt_path: ${{ runner.temp }}/pipeline/prompt.md
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        # The same path the claim named to the model and the finish step
+        # reads back. Its absence is how a turn that ended early is told
+        # from a pass that finished, and it is the only thing that gets
+        # the model resumed.
+        expect_file: ${{ runner.temp }}/pipeline/handback.md
 
     - name: push
       id: push
