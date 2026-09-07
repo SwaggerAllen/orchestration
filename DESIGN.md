@@ -2582,6 +2582,70 @@ statements into data-driven dispatch, and those switches validate arguments and 
 as well as mapping — the rewrite would risk more than the drift it prevents. Saying which is
 which beats implying the whole table is machine-checked.
 
+### The stats store, and why it is a second object
+
+Nothing measured the pipeline, so no question about it could be answered: whether Actions is
+cost effective, whether design time is climbing, whether rework is climbing, how much of each
+milestone is bugs and debt. `ProjectStats` is a second Durable Object class in the same Worker
+holding the derived answer.
+
+**A second class rather than more tables on `ProjectState`.** Durable Objects serialize
+requests to one instance, and `ProjectState` sits on the critical path — every sweep reads
+`/all`, every dispatch calls `/reserve`. A dashboard aggregation queued ahead of a reservation
+would widen exactly the dispatch window the reservation exists to close. Same Worker, same
+deploy, same auth; its own lane.
+
+**Derived, not collected: the collector recomputes from the tracker and the host.** Linear
+holds each ticket's complete state history and GitHub holds run timing, so a backfill and a
+nightly pass are the same code with a different window. A separate event-capture path would be
+a second source of truth needing its own correctness proof, and would still need a backfill for
+anything older than the day it shipped. Because the pass is a recompute, a defect in the
+aggregation is repaired by running it again.
+
+**The two sources have different durability, so they have different write policies.** Linear's
+archive is a visibility flag rather than a deletion — an archived ticket returns its full state
+history — so the tracker half is a full recompute and idempotent upsert, safe to rebuild
+forever. GitHub's run data ages out, so **the collector may never delete a run row**. Once a run
+is past the host's horizon the stored row is the only copy, and a recompute that dropped it
+would destroy data no later pass could restore. That asymmetry is the reason the two halves are
+not written the same way, and it is enforced rather than assumed: the store has no route that
+removes a run.
+
+**Enumeration reads archived tickets.** The queries the collector runs must ask for them
+explicitly. Omitting that does not fail — it silently under-counts the oldest milestones, which
+renders as a downward trend on every per-milestone chart with nothing in the output looking
+wrong.
+
+**Minutes are computed, not read.** The host's own `billable` figure came back as zero on every
+run measured — 4-to-12-minute runs across six days, so not settlement lag — while
+`run_duration_ms` was accurate. So billing is reconstructed from each job's start and finish,
+rounded up to the minute per job, which is the host's documented model. Rounding waste is then
+the difference between that sum and the raw one rather than an estimate: for short, frequent
+jobs like the sweep it is a large fraction of the bill, and it has a different remedy than long
+jobs do — debounce wider, not move elsewhere. The host's monthly account total is the
+cross-check; a computed sum that does not land near it means the arithmetic is wrong.
+
+**Facts at ticket granularity, aggregated at read time.** Label filters are arbitrary set
+questions — has this, lacks that — and pre-aggregating them means materialising a powerset.
+Day and week buckets are likewise computed on read, because a stored bucket is a decision about
+week boundaries that becomes a migration when it is wrong. Filter values are bound parameters;
+only a fixed allowlist of column and bucket names is ever interpolated.
+
+**Nothing is filtered on the way in.** The collector's own runs are marked rather than dropped,
+so runaway spend by the thing measuring spend stays visible. Collection is the irreversible
+step and filtering is free at read time, so a fact excluded at write is a question that can
+never be asked again.
+
+**Milestones are derived from the boundary tickets, which already record them.** Each carries
+its milestone, and milestones are serial, so a milestone's window is the span between the
+previous boundary's completion and its own. A boundary ticket's *creation* is not the
+milestone's start — it is created when the milestone is ready to close, so a window anchored to
+it would omit most of the work. The first milestone has no predecessor and opens at the earliest
+ticket's creation. Grouping by window rather than by assignment is deliberate: harness tickets
+and bugs are frequently assigned to no milestone at all, and they are exactly the work a
+milestone-cost question is about. The boundary ticket's own open interval separately marks work
+completed while a boundary was running.
+
 ---
 
 ## 14. Open items

@@ -103,18 +103,52 @@ func TestCIRunsTheWorkerSuiteOnPullRequests(t *testing.T) {
 	if !strings.Contains(ci, "pull_request") {
 		t.Fatal("ci.yml no longer runs on pull requests; nothing below gates a merge")
 	}
-	if !strings.Contains(ci, "index.test.ts") {
-		t.Error("ci.yml does not run worker/index.test.ts, so the worker suite gates the " +
-			"deploy and not the merge — a PR breaking it merges clean and fails the deploy, " +
-			"where a failure is indistinguishable from a metronome nobody redeployed")
-	}
-	// Same runtime as the deploy gate, or the two can disagree: the
-	// merge gate passes and the deploy gate still fails after it.
 	deploy := repoFile(t, filepath.Join(".github", "workflows", "worker-deploy.yml"))
+
+	// The glob, not a filename. This asserted `index.test.ts` until a
+	// second suite was added, and a named file is a gate that silently
+	// stops covering whatever arrives next to it: the new suite runs
+	// locally, passes, and is executed by neither the merge gate nor the
+	// deploy gate, so a green pipeline says nothing at all about it.
+	//
+	// A directory argument is the wrong fix and was the reason the
+	// filename was there — Node tries to load `worker` as a module and
+	// fails.
+	const workerSuite = "node --test --experimental-strip-types *.test.ts"
 	for _, w := range []struct{ name, body string }{{"ci.yml", ci}, {"worker-deploy.yml", deploy}} {
+		if !strings.Contains(w.body, workerSuite) {
+			t.Errorf("%s does not run the worker suite as %q. Named alone, ci.yml would gate "+
+				"the deploy and not the merge — a PR breaking it merges clean and fails the "+
+				"deploy, where a failure is indistinguishable from a metronome nobody "+
+				"redeployed. Named as one file, a suite added beside it is never run at all.",
+				w.name, workerSuite)
+		}
+		// Same runtime in both, or they can disagree: the merge gate
+		// passes and the deploy gate still fails after it.
 		if !strings.Contains(w.body, `node-version: "22"`) {
 			t.Errorf("%s does not pin node 22; the merge gate and the deploy gate would "+
 				"test different runtimes", w.name)
+		}
+	}
+}
+
+// The gate is pinned in prose as well as in the two workflows, and a
+// change to one that misses the others leaves a contributor running
+// something CI does not. Six consecutive design-review rounds in the
+// project this pipeline drives each corrected one statement of a rule
+// and left its siblings; this is the same shape, in this repo.
+func TestTheWorkerSuiteCommandIsPinnedEverywhereItIsStated(t *testing.T) {
+	const workerSuite = "node --test --experimental-strip-types *.test.ts"
+	for _, path := range []string{
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".github", "workflows", "worker-deploy.yml"),
+		"CLAUDE.md",
+		filepath.Join("worker", "README.md"),
+	} {
+		body := repoFile(t, path)
+		if !strings.Contains(body, workerSuite) {
+			t.Errorf("%s does not state the worker suite as %q — the four statements of this "+
+				"command have drifted, so what a contributor runs is not what CI runs", path, workerSuite)
 		}
 	}
 }

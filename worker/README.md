@@ -33,10 +33,12 @@ A Worker with no `LINEAR_WEBHOOK_SECRET` rejects **everything** rather
 than accepting everything. The pipeline then runs at the cron's pace —
 slow, not open.
 
-Tests are `index.test.ts`, run by `worker-deploy` before every deploy:
+Tests are `*.test.ts` — `index.test.ts` and `projectstats.test.ts` — run by
+`worker-deploy` before every deploy. The glob rather than a filename, so a
+suite added later is not invisible to CI:
 
 ```sh
-cd worker && node --test --experimental-strip-types index.test.ts
+cd worker && node --test --experimental-strip-types *.test.ts
 ```
 
 No framework and no dependencies — Node strips the types and supplies

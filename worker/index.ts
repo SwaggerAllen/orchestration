@@ -25,10 +25,11 @@
  */
 import { SweepDebounce } from "./debounce.ts";
 import { ProjectState } from "./projectstate.ts";
+import { ProjectStats } from "./projectstats.ts";
 
 // Re-exported because wrangler binds Durable Object classes from the
 // entrypoint module, not from wherever they are defined.
-export { SweepDebounce, ProjectState };
+export { SweepDebounce, ProjectState, ProjectStats };
 
 export interface Env {
   /**
@@ -72,6 +73,12 @@ export interface Env {
    * Read and written by the harness over the /state path below.
    */
   PROJECT_STATE: DurableObjectNamespace;
+  /**
+   * The pipeline's measurement of itself, one instance per project.
+   * Written by the stats collector and read by the dashboard over the
+   * /stats path below (DESIGN §13).
+   */
+  PROJECT_STATS: DurableObjectNamespace;
   /**
    * Shared secret the harness presents on /state (secret). Unset closes
    * the path entirely, which fails safe: with no store the pipeline
@@ -401,6 +408,26 @@ export default {
       const id = env.PROJECT_STATE.idFromName(project);
       return env.PROJECT_STATE.get(id).fetch(
         new Request(`https://state${op}`, {
+          method: request.method,
+          headers: { authorization: request.headers.get("authorization") ?? "" },
+          body: request.method === "POST" ? await request.text() : undefined,
+        }),
+      );
+    }
+
+    // /stats/<project>/<op> — same shape, different object. The query
+    // string is carried through, because every read is a filter.
+    if (path.startsWith("/stats/")) {
+      const rest = path.slice("/stats/".length);
+      const slash = rest.indexOf("/");
+      if (slash <= 0) {
+        return new Response("expected /stats/<project>/<op>\n", { status: 404 });
+      }
+      const project = rest.slice(0, slash);
+      const op = rest.slice(slash) + new URL(request.url).search;
+      const id = env.PROJECT_STATS.idFromName(project);
+      return env.PROJECT_STATS.get(id).fetch(
+        new Request(`https://stats${op}`, {
           method: request.method,
           headers: { authorization: request.headers.get("authorization") ?? "" },
           body: request.method === "POST" ? await request.text() : undefined,
