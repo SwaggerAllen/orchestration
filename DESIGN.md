@@ -2682,10 +2682,16 @@ before the Access application exists opens nothing.
 **Serving the page from the Worker rather than from the project's Pages output is what makes
 "same-origin" true.** A Pages custom domain and this Worker are different origins, so a page
 there would be cross-origin to the store and would still need a credential it cannot hold; one
-hostname means one Access application, no CORS, and the viewer's own identity. The page carries
-no chart library for a related reason: the charts are stacked bars over a few dozen buckets,
-inline SVG draws them in about sixty lines, and a vendored library is a pin to bump and a
-supply chain to own where the alternative is that small.
+hostname means one Access application, no CORS, and the viewer's own identity.
+
+**The chart library is vendored and served from that same origin, never from a CDN**, and the
+reason is that coupling again: the page sits behind the Access application and shares an origin
+with the store, so a script it loads runs with the viewer's identity. An outage would cost the
+charts; a compromise would cost rather more. The library's version is in its path, which is what
+makes an immutable cache header honest — a new version is a new URL rather than a stale cache
+nobody can bust — and the upstream file's digest is recorded beside the blob with a test that
+checks it. That digest is the point: a vendored dependency nobody can reproduce from upstream is
+worse than a link, because it can be neither audited nor updated with confidence.
 
 **The collector writes rows before the watermark that covers them, never the other way
 round.** Every other failure in this pass is a re-run away from repaired, because the tracker

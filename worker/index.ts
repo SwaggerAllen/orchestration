@@ -28,6 +28,7 @@ import { ProjectState } from "./projectstate.ts";
 import { ProjectStats } from "./projectstats.ts";
 import { accessIdentity } from "./access.ts";
 import { dashboardHTML } from "./dashboard.ts";
+import { CHART_JS, CHART_JS_VERSION } from "./vendor/chartjs.ts";
 
 // Re-exported because wrangler binds Durable Object classes from the
 // entrypoint module, not from wherever they are defined.
@@ -136,6 +137,9 @@ export function parseProjects(raw: string): Project[] {
   }
   return parsed;
 }
+
+/** Where the vendored library is served, version in the path. */
+export const CHART_JS_PATH = `/dashboard/chart-${CHART_JS_VERSION}.js`;
 
 /**
  * Names to offer in the dashboard's project selector, best-effort.
@@ -462,14 +466,30 @@ export default {
     // application look like a 404 rather than like an empty chart with
     // the reason on it.
     if (request.method === "GET" && (path === "/dashboard" || path === "/dashboard/")) {
-      return new Response(dashboardHTML({ projects: projectNames(env) }), {
+      return new Response(
+        dashboardHTML({ projects: projectNames(env), chartSrc: CHART_JS_PATH }),
+        {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+          },
+        },
+      );
+    }
+
+    // Chart.js, vendored and served from this origin — never a CDN.
+    // The page is behind the Access application and shares an origin
+    // with the stats API, so a script it loads runs with the viewer's
+    // identity: an outage would cost the charts and a compromise would
+    // cost rather more.
+    //
+    // The version is in the path, which is what makes `immutable`
+    // honest — a new version is a new URL rather than a stale cache.
+    if (request.method === "GET" && path === CHART_JS_PATH) {
+      return new Response(CHART_JS, {
         headers: {
-          "content-type": "text/html; charset=utf-8",
-          // No inline-script CSP: the page IS an inline script, which
-          // is the whole point of having no build step. It loads
-          // nothing from anywhere, which is the property a CSP would
-          // otherwise be buying.
-          "cache-control": "no-store",
+          "content-type": "text/javascript; charset=utf-8",
+          "cache-control": "public, max-age=31536000, immutable",
         },
       });
     }
