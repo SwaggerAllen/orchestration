@@ -33,6 +33,16 @@ inputs:
       run does not complete.
     required: false
     default: ""
+  expect_file:
+    description: >-
+      Path the pass must have written by the time it stops — the
+      hand-back for dev, the verdict for reconcile. Its absence after a
+      zero exit is what identifies a turn that ended early, and is the
+      only thing this action resumes on. Left empty by the roles that
+      require no such file: design's product is the tree it wrote, and
+      boundary's proposals file is optional by construction.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -50,6 +60,7 @@ runs:
         SUBSCRIPTION_TOKEN: ${{ inputs.claude_code_oauth_token }}
         API_KEY: ${{ inputs.anthropic_api_key }}
         PROMPT_PATH: ${{ inputs.prompt_path }}
+        EXPECT_FILE: ${{ inputs.expect_file }}
       run: |
         set -uo pipefail
 
@@ -66,6 +77,7 @@ runs:
         mkdir -p "$LOGDIR"
         ERRFILE="$LOGDIR/run-error.txt"
         CODEFILE="$LOGDIR/run-exit-code.txt"
+        RESUME_PATH="$LOGDIR/resume.md"
         # Cleared up front and again on success: these files mean "the
         # model run is what failed". Left behind from a first attempt
         # that failed over and succeeded, they would put a stale cause on
@@ -145,19 +157,27 @@ runs:
         # A redirect rather than a pipe: each attempt re-reads the file,
         # so the failover gets the whole prompt rather than the remains
         # of a stream the first attempt drained.
+        #
+        # $2 is the file the CLI reads on stdin and everything after it
+        # is passed through to the CLI. Parameterised rather than copied
+        # because the resume below needs a different message and one
+        # extra flag, and a third and fourth copy of the credential arms
+        # would be two more places for the unset above to be got wrong.
         attempt() {
-          case "$1" in
+          local mode="$1" stdin="$2"
+          shift 2
+          case "$mode" in
           subscription)
             env -u ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN="$SUBSCRIPTION_TOKEN" \
               npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
-                --dangerously-skip-permissions < "$PROMPT_PATH"
+                --dangerously-skip-permissions "$@" < "$stdin"
             ;;
           api)
             env -u CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY="$API_KEY" \
               npx --yes "@anthropic-ai/claude-code@$CLI_VERSION" \
                 -p \
-                --dangerously-skip-permissions < "$PROMPT_PATH"
+                --dangerously-skip-permissions "$@" < "$stdin"
             ;;
           esac
         }
@@ -184,13 +204,83 @@ runs:
           local mode="$1"
           local err="$LOGDIR/model-$mode.err" out="$LOGDIR/model-$mode.out"
           local rc
-          attempt "$mode" 2> "$err" | tee "$out"
+          attempt "$mode" "$PROMPT_PATH" 2> "$err" | tee "$out"
           rc="${PIPESTATUS[0]}"
           cat "$err" >&2
           if [ "$rc" -ne 0 ]; then
             report "$mode" "$rc" "$err" "$out"
+            return "$rc"
           fi
-          return "$rc"
+          resume_if_unfinished "$mode"
+          return 0
+        }
+
+        # An exit 0 means "the turn ended", not "the work is done", and
+        # those come apart in one way that has already cost this pipeline
+        # tickets. `-p` is non-interactive: nothing prompts the model
+        # again, and a command it puts in the BACKGROUND is waited on by
+        # nothing — the moment it stops producing tool calls the process
+        # exits 0 and the harness walks on as though the pass were
+        # complete.
+        #
+        # Measured on Catapult's ORC-230, twice inside twenty-five
+        # minutes. Both dev reworks ended on a sentence rather than on
+        # work, and the last line each printed was the whole diagnosis:
+        #
+        #   34160733869  4m42s  outcome=success
+        #     "A `mix compile --warnings-as-errors` is running in the
+        #      background to verify; I'll continue once it completes."
+        #   34161804049  5m18s  outcome=success
+        #     "I'll wait for the root `mix test` background task to
+        #      complete before proceeding."
+        #
+        # Neither log contains "model run exited", so `report` never
+        # fired: the CLI exited 0 both times. The push step then
+        # committed its `wip:` safety net over work whose gates had, by
+        # the model's own account, not been run, and finish died on a
+        # hand-back nobody wrote — reaching the ticket as `open
+        # .../handback.md: no such file or directory`, which reads as a
+        # harness path bug and sent the diagnosis after the wrong thing.
+        #
+        # The artifact the role requires is the cheap signal that
+        # separates the two: a pass that finished wrote it. So one resume
+        # with `--continue`, carrying a message that says what happened.
+        #
+        # It does NOT fail the step when the resume comes back empty. The
+        # steps after this one are what commit and push the tree, and
+        # skipping them loses the run's work outright — the ORC-92 bug
+        # the push step's own comment records. Finish reports it instead,
+        # which leaves the work on the branch for the next pass.
+        #
+        # UNVERIFIED, and bounded because of it: that `-p --continue`
+        # with a message on stdin resumes the CLI's own session. The
+        # session store is in this job and the flag is documented, but no
+        # run from this repo has exercised it and the probe could not be
+        # taken where this was written. A resume that errors is logged
+        # and ignored, so the worst case is one wasted invocation and
+        # exactly today's behaviour.
+        resume_if_unfinished() {
+          local mode="$1"
+          if [ -z "$EXPECT_FILE" ] || [ -e "$EXPECT_FILE" ]; then
+            return 0
+          fi
+          echo "::warning::the $mode run exited 0 without writing $EXPECT_FILE — the turn ended before the pass finished; resuming it once"
+          {
+            echo "Your turn ended, but \`$EXPECT_FILE\` does not exist, so this run is not finished."
+            echo
+            echo "This run is NON-INTERACTIVE and one-shot. Nothing prompts you again, and a command you left running in the background is waited on by nothing: the moment you stop producing tool calls the process exits and the harness proceeds as though your pass were complete. If your last turn ended saying you would continue once something finished, that is what just happened — it never finished, because nothing was waiting for it."
+            echo
+            echo "Finish now, in the foreground. Run whatever verification you still owe with no backgrounding, commit your work, and write \`$EXPECT_FILE\` before you stop."
+          } > "$RESUME_PATH"
+          local err="$LOGDIR/model-$mode-resume.err" out="$LOGDIR/model-$mode-resume.out"
+          attempt "$mode" "$RESUME_PATH" --continue 2> "$err" | tee "$out" || true
+          cat "$err" >&2
+          if [ -e "$EXPECT_FILE" ]; then
+            echo "the resumed $mode run wrote $EXPECT_FILE"
+            return 0
+          fi
+          echo "::error::the $mode run did not write $EXPECT_FILE, and resuming it did not either — the tree is still committed and pushed, and the finish step is what reports this"
+          return 0
         }
 
         report() {

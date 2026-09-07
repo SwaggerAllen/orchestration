@@ -379,8 +379,92 @@ func TestModelRunPassesThePromptOnStdin(t *testing.T) {
 	}
 	// Two attempts, subscription and API key, and the failover has to
 	// re-read the file rather than inherit a drained stream.
-	if n := strings.Count(body, `< "$PROMPT_PATH"`); n != 2 {
+	//
+	// The redirect reads a parameter rather than $PROMPT_PATH directly,
+	// since the resume feeds a different file through the same two arms
+	// — so the invariant is asserted where it now lives: both arms
+	// redirect, and the ordinary pass hands them the prompt file.
+	if n := strings.Count(body, `< "$stdin"`); n != 2 {
 		t.Errorf("the prompt is redirected into %d attempt(s), want both", n)
+	}
+	if !strings.Contains(body, `attempt "$mode" "$PROMPT_PATH"`) {
+		t.Error("the ordinary attempt does not read the prompt file")
+	}
+}
+
+// An exit 0 from the CLI means the turn ended, which is not the same
+// event as the pass being finished: `-p` is non-interactive, nothing
+// waits on a command the model put in the background, and a pass that
+// stops mid-work exits 0 and reads as a success. Catapult's ORC-230 went
+// to Blocked twice inside twenty-five minutes that way, on consecutive
+// dev reworks that each ended on a sentence about waiting.
+//
+// The role's required artifact is the signal, and the resume is bounded
+// at one. Guarded because the shape is easy to "simplify" into either of
+// its two broken neighbours: a loop, or a failure — and failing is the
+// worse of them, because the steps after this one are what commit and
+// push the tree.
+func TestModelRunResumesATurnThatEndedEarly(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	for _, want := range []string{
+		"EXPECT_FILE: ${{ inputs.expect_file }}",
+		`resume_if_unfinished "$mode"`,
+		`attempt "$mode" "$RESUME_PATH" --continue`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run-agent-model does not %q", want)
+		}
+	}
+	// One resume, not a loop: a pass that will not finish must not be
+	// paid for over and over.
+	if n := strings.Count(body, "--continue"); n != 1 {
+		t.Errorf("--continue appears %d time(s); the resume is bounded at one", n)
+	}
+	// And the resume must not decide the step's fate. Skipping the push
+	// loses the run's work outright, which is the older failure its
+	// safety net exists for, so a resume that comes back empty exits 0
+	// and leaves the report to finish.
+	fn := body[strings.Index(body, "resume_if_unfinished() {"):]
+	fn = fn[:strings.Index(fn, "\n        }\n")]
+	if strings.Contains(fn, "exit ") {
+		t.Error("the resume exits the step; that skips the push and discards the run's work")
+	}
+	if !strings.Contains(fn, "|| true") {
+		t.Error("a resume that errors is not tolerated; an unverified flag must not be able to fail the step")
+	}
+}
+
+// The resume is only armed for the roles whose output IS a file. Dev's
+// hand-back and reconcile's verdict are each required by finish, so
+// their absence is a stopped pass; design's product is the tree it
+// wrote and boundary's proposals file is optional by construction, so
+// neither has a signal to read and neither claims one.
+func TestOnlyTheRolesWithARequiredArtifactDeclareIt(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		expect string
+	}{
+		{"agent-dev", "${{ runner.temp }}/pipeline/handback.md"},
+		{"agent-reconcile", "${{ runner.temp }}/pipeline/verdict.json"},
+		{"agent-design", ""},
+		{"agent-boundary", ""},
+	} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", tc.action, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		got := strings.Contains(body, "expect_file:")
+		if want := tc.expect != ""; got != want {
+			t.Errorf("%s declares expect_file = %v, want %v", tc.action, got, want)
+		}
+		if tc.expect != "" && !strings.Contains(body, "expect_file: "+tc.expect) {
+			t.Errorf("%s does not point expect_file at %s — the file finish reads back", tc.action, tc.expect)
+		}
 	}
 }
 
