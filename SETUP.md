@@ -192,16 +192,27 @@ the files that define what the agents may do.
 **No token above carries `Workflows`, and that is on purpose.**
 `AGENT_GITHUB_TOKEN` leaves it unset by the entry above;
 `PIPELINE_REPO_TOKEN` is Contents read-only; `DISPATCH_TOKEN` and
-`STATS_GITHUB_TOKEN` are Actions only. So a workflow file in *any*
-repository — the project repos and this one alike — is an edit you make
-by hand, or with a credential granted for that one change. Written down
-because the question comes up every time a change here needs a new
-stub, and the answer is not discoverable from a push that fails: GitHub
-rejects the whole push with `refusing to allow ... to create or update
-workflow`, so the run dies carrying work that had nothing to do with
-the workflow file. When a change in this repo needs a stub or a
-workflow, it ships as an example under `examples/stubs/` and the real
-file is your commit, ahead of it.
+`STATS_GITHUB_TOKEN` are Actions only. So an agent run can never land a
+workflow file, in any repository — which is the blast radius these
+files want, and the reason a change in this repo that needs a new stub
+ships it as an example under `examples/stubs/` with the real file
+arriving separately.
+
+**Your own credentials are a different question, and the answer is
+yes.** A GitHub App installation token — the kind an assistant session
+holds — does carry workflow scope, and a workflow file pushed with one
+lands normally. Measured on `catapult`, pushing
+`.github/workflows/pipeline-stats.yml`. So "a stub is the author's to
+add" is a statement about the *pipeline's* credentials rather than
+about every credential you have.
+
+Written down because the question comes up every time a change needs a
+stub, and neither answer is discoverable from trying it. A push that is
+refused takes the whole push with it — GitHub rejects it with `refusing
+to allow ... to create or update workflow`, so the run dies carrying
+work that had nothing to do with the workflow file — and a push that
+succeeds tells you nothing about the token the *pipeline* would have
+used.
 
 ## 3. GitHub secrets and settings
 
