@@ -20,7 +20,12 @@ on the PR branch):
   noticed — that's a fail.
 - The static storybook renders what the narrative doc describes.
 - Standing decisions touched by the change landed, and none were
-  contradicted in passing.
+  contradicted in passing. A section below, *The reasons behind the
+  rules this diff touched*, carries the rule line and the recorded
+  reason at the merge-base for every rule id the branch changed
+  (DESIGN §4). A rule rewritten against its own reason, with the entry
+  not amended, is a fail naming the id — `foundation#17` — so the
+  rework knows which entry to read.
 - The structure that landed is the structure the branch's `systems/*.md`
   diff sketched — a deviation is fine if the hand-back argues it, and if
   nothing does it's more likely nobody noticed (DESIGN §4, §9).

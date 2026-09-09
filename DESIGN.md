@@ -476,6 +476,18 @@ sibling is a sibling by convention, and `systems/*.md` already matches
 so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
 author-owned moves ahead of this.
 
+A sibling file is a reason moved out of the doc, and moving a reason out of a design doc is the
+loss Catapult's `docs/conventions.md` §12 records: a commit that moved reasoning "into the code it
+guards" landed one half of it in both places it named and the other half nowhere, and a later
+ticket re-derived the whole chain to restore it. The sibling is not that move, on three counts
+that are each mechanical. It is design-owned by the same glob and written in the same commit, so
+the reason never leaves the pass that changed the rule; it is read by the same record review, so
+narration in an entry is judged where narration in a bullet is; and the id joins the two halves
+under an audit that reports either one idle, so a reason cannot be dropped in silence the way a
+paragraph moved into a moduledoc was. What the split changes is when a reason is paid for: on
+every read before, and now only when the rule it holds is touched — which is the moment the
+review is handed it, whether or not the pass thought to look.
+
 **The record review holds the design pass to that rule, from outside it.** After a design pass
 commits, a second model run inside the same job reads three things — the pass's own diff to the
 record, walked the way the ownership audit walks it so a merge's doc edits are not billed to the

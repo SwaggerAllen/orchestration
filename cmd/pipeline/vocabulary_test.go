@@ -168,6 +168,7 @@ func TestEachRolePromptNamesItsWholeVocabulary(t *testing.T) {
 		{"reconcile.md", protocol.ReconcileOutcomes},
 		{"reconcile.md", protocol.CollisionVerdicts},
 		{"design.md", protocol.DesignOutcomes},
+		{"record-review.md", protocol.RecordFindingKinds},
 	} {
 		body, ok := prompts[c.prompt]
 		if !ok {

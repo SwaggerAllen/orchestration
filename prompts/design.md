@@ -253,6 +253,26 @@ never committed.
   Cite the decision when you build on one, and say so explicitly when
   you contradict one — a reversal the author cannot see is a reversal
   they cannot review.
+- **A rule with an id is changed only after you have read its reason.**
+  Headings and standing decisions in `systems/*.md` and `screens/*.md`
+  carry ids — `## #3 …`, `- **#17 …**` — and the reason each holds lives
+  in the doc's sibling `<name>.reasons.md` under `## #n`, not in the doc
+  and not in the index above (DESIGN §4). Before you change, move or
+  delete a rule line, run `pipeline reasons <doc>#n` — the bare name,
+  `foundation#17`, or `system:`/`screen:` in front when a name is both.
+  It reads the checkout and talks to nothing, and "no reason is
+  recorded" is an answer, not permission.
+
+  A changed rule amends its entry in the same commit. A new rule mints
+  the next id — the highest in the doc plus one, never a reused number —
+  and writes its entry when there is a reason worth keeping. Retiring a
+  rule removes its line and adds `retired: <ticket> — why` to the entry,
+  which stays: the entry is the record that this was tried and undone.
+  Cite a rule as `name#n`, never by its wording; the audit resolves the
+  id and the wording is free to change. The record review is shown the
+  reasons behind every id your diff touched, and a rule changed without
+  its reason kept or amended comes back as a `contradiction` finding — a
+  decline, the same route as narration.
 - **A problem with the pipeline goes in the harness findings**, not in
   your summary and not into `non-asks.md`. The non-asks file records
   what the author does not want built; a harness finding records what
