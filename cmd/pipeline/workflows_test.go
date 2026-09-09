@@ -676,8 +676,13 @@ func TestReconcileRepromptsAfterItsCheckoutWithTheTouchedReasons(t *testing.T) {
 // The replay reads a project and posts nothing: no tracker credential,
 // no finish, no comment. It is a measurement of the reviewer, and a
 // measurement that wrote to the thing it measured would not be one.
+//
+// Two files, because the stub is what a project copies and the action
+// is what a fix reaches: the stub wires three jobs, the action does
+// each one's work. Both are held to the absence list.
 func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
-	body := stripComments(repoFile(t, filepath.Join(".github", "workflows", "review-replay.yml")))
+	action := stripComments(repoFile(t, filepath.Join(".github", "actions", "review-replay", "action.yml")))
+	stub := stripComments(repoFile(t, filepath.Join("examples", "stubs", "pipeline-review-replay.yml")))
 	for _, want := range []struct{ text, why string }{
 		{"pipeline agent record-review", "the same assembly the design action runs"},
 		{`--base-tree "$RUNNER_TEMP/pipeline/record-base"`, "the reviewer is handed the record as it stood before the pass"},
@@ -685,15 +690,27 @@ func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
 		{`git cat-file -e "$BEFORE:$d"`, "the export guard, for a pass whose start had no screens/"},
 		{"xargs -r -I{} git show --format= --cc {} -- '*.md'", "the first-parent, markdown-only extraction the action uses"},
 		{"actions/upload-artifact", "the verdicts are the output"},
-		{"max-parallel: 1", "one model run at a time"},
+		{`--prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md"`, "the prompt under test is the one pipeline_ref names"},
 	} {
-		if !strings.Contains(body, want.text) {
-			t.Errorf("review-replay.yml does not carry %s — %s", want.text, want.why)
+		if !strings.Contains(action, want.text) {
+			t.Errorf("review-replay/action.yml does not carry %s — %s", want.text, want.why)
 		}
 	}
-	for _, absent := range []string{"pipeline agent finish", "LINEAR_API_KEY", "PIPELINE_STATE_TOKEN", "CommentTicket", "contents: write"} {
-		if strings.Contains(body, absent) {
-			t.Errorf("review-replay.yml carries %q — a replay that writes to what it measures is not a measurement", absent)
+	for _, want := range []struct{ text, why string }{
+		{"max-parallel: 1", "one model run at a time"},
+		{"fetch-depth: 0", "the reconstruction walks back from the merge"},
+		{"pipeline_ref: ${{ inputs.pipeline_ref }}", "the reviewer under test is chosen per run, not per edit"},
+		{"actions/review-replay@main", "the reconstruction is the action's, so a fix to it reaches every project"},
+	} {
+		if !strings.Contains(stub, want.text) {
+			t.Errorf("pipeline-review-replay.yml does not carry %s — %s", want.text, want.why)
+		}
+	}
+	for name, body := range map[string]string{"review-replay/action.yml": action, "pipeline-review-replay.yml": stub} {
+		for _, absent := range []string{"pipeline agent finish", "LINEAR_API_KEY", "PIPELINE_STATE_TOKEN", "CommentTicket", "contents: write", "GITHUB_TOKEN:"} {
+			if strings.Contains(body, absent) {
+				t.Errorf("%s carries %q — a replay that writes to what it measures is not a measurement", name, absent)
+			}
 		}
 	}
 }

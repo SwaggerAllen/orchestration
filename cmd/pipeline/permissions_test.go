@@ -194,7 +194,14 @@ func usesPipelineAction(t *testing.T, root, body string) bool {
 			t.Errorf("workflow uses action %q, which is not in this repo: %v", m[1], err)
 			continue
 		}
-		if strings.Contains(string(raw), "pipeline agent ") {
+		// The same rule the caller applies to a workflow that runs the
+		// binary itself: the host, and so the snapshot, is wired only
+		// when GITHUB_TOKEN reaches it. The review replay's action runs
+		// `pipeline agent record-review` with no token at all — it
+		// assembles a prompt from two trees and a config — and asking
+		// its stub for pull-requests: read would be asking for a scope
+		// no call ever uses.
+		if strings.Contains(string(raw), "pipeline agent ") && strings.Contains(string(raw), "GITHUB_TOKEN:") {
 			return true
 		}
 	}

@@ -706,17 +706,21 @@ rehearsal.
 **Reading the reviewer's verdicts.** The record review (DESIGN §4) is
 armed: a decline sends a design pass back and two park the ticket, and
 its false-positive rate on real writing is a guess until its verdicts
-on real diffs have been read. `review-replay` (Actions → review-replay
-→ Run workflow) does that without touching the project: for the last N
-doc-touching merges on a project's branch it reconstructs what each
-pass wrote and what it started from, assembles the reviewer's prompt
-exactly as the design action does, runs the model, and keeps every
-verdict as an artifact under a summary table. Nothing is posted. It
-needs a model credential in this repo's secrets
-(`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) and, for a project
-other than the dummy, `REPLAY_REPO_TOKEN` with read access to it. A
-count of declines is not a count of defects: open the artifacts and
-read the findings.
+on real diffs have been read. The project's `pipeline-review-replay`
+stub (its Actions → pipeline-review-replay → Run workflow) does that
+without touching anything: for the last N doc-touching merges on a
+branch it reconstructs what each pass wrote and what it started from,
+assembles the reviewer's prompt exactly as the design action does, runs
+the model, and keeps every verdict as an artifact under a summary
+table. Nothing is posted. It runs in the project repo on the project's
+own model credential and `PIPELINE_REPO_TOKEN`, and takes the pipeline
+ref the reviewer comes from as an input — so a reviewer on a pipeline
+branch can be read against real diffs before it merges. It is a stub
+and not a workflow here because Actions secrets are per repository: a
+replay hosted here needed its own copy of the model credential and a
+read token onto every project it measured, to read what the project's
+runner already holds. A count of declines is not a count of defects:
+open the artifacts and read the findings.
 
 Scenarios live in `scenarios/`. `pipeline scenario validate` checks
 them, and the Go suite validates every shipped one — a fixture with a
