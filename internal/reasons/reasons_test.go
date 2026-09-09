@@ -138,10 +138,10 @@ func TestEveryLineBelongsToTheNearestIdAbove(t *testing.T) {
 	if got := d.Blocks[17]; got != "- **#17 Lead.** Rule sentence.\n\n  A second paragraph of #17." {
 		t.Errorf("Blocks[17] = %q", got)
 	}
-	if got := d.Blocks[1]; got != "## #1 Standing decisions\n" {
+	if got := d.Blocks[1]; got != "## #1 Standing decisions" {
 		t.Errorf("Blocks[1] = %q", got)
 	}
-	if got := d.Blocks[3]; got != "- **#3 Next.**\n" {
+	if got := d.Blocks[3]; got != "- **#3 Next.**" {
 		t.Errorf("Blocks[3] = %q", got)
 	}
 	for id, b := range d.Blocks {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -182,7 +183,9 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 
 // RecordReview is the record review's verdict on what this pass wrote
 // to the record (DESIGN §4): a second, fresh model run inside the same
-// design job, holding nothing but the pass's own doc diff and the rule.
+// design job, holding the pass's own doc diff, the rules and reasons
+// behind the ids that diff touched as they stood before the pass, and
+// the rule.
 //
 // Fresh on purpose. The design agent that writes pass narration is in
 // the worst position to apply the rule against it: at the end of a long
@@ -192,8 +195,15 @@ func LoadDesignOutcome(path, mode string) (*DesignOutcome, error) {
 // Catapult, 2026-09-01: 90 of 284 standing-decision bullets carried
 // pass narration, every one written by a prompt that prohibits it in as
 // many words and every one signed off at Design review. A reader with
-// only the diff and the rule has none of that pressure; reconcile is the
-// same shape, for the same reason.
+// the diff, the reasons behind what it touched, and the rule has none of
+// that pressure; reconcile is the same shape, for the same reason.
+//
+// The reasons are the one input added to that isolation, and they are
+// selected by the diff, not by the ticket: a touched rule's entry is the
+// record's own prior text about that rule, the removed side of the diff
+// one file over. It carries nothing the pass wrote about its ticket. It
+// is what lets the reviewer see a rule rewritten against its own reason
+// — the contradiction kind — which from the diff alone is invisible.
 //
 // Detect here, fix there. The reviewer has the distance to see
 // narration; the writer has the context to know which "Y" is a
@@ -225,7 +235,17 @@ type RecordFinding struct {
 	// alternative, a prior draft. The writer decides what to do about
 	// it; this only has to be findable.
 	Why string `json:"why"`
+	// Kind is one of protocol.RecordFindingKinds; absent reads as
+	// narration, which is what every finding was before the kind
+	// existed.
+	Kind string `json:"kind,omitempty"`
+	// ID names the rule a contradiction breaks, as a citation writes it
+	// — `foundation#17` — and is required on that kind: the writer has
+	// to find the entry, and the rule's wording is exactly what changed.
+	ID string `json:"id,omitempty"`
 }
+
+var findingID = regexp.MustCompile(`^(?:(?:system|screen):)?[a-z0-9_-]+#\d+$`)
 
 // LoadRecordReview reads and validates the review the model wrote.
 //
@@ -251,6 +271,16 @@ func LoadRecordReview(path string) (*RecordReview, error) {
 		if strings.TrimSpace(f.File) == "" || strings.TrimSpace(f.Quote) == "" {
 			return nil, fmt.Errorf("record review: finding %d names no file or no passage — the writer has to be able to find it", i+1)
 		}
+		if f.Kind == "" {
+			r.Findings[i].Kind = "narration"
+			continue
+		}
+		if !protocol.Known(protocol.RecordFindingKinds, f.Kind) {
+			return nil, fmt.Errorf("record review: finding %d has kind %q, not one of %s", i+1, f.Kind, strings.Join(protocol.RecordFindingKinds, ", "))
+		}
+		if f.Kind == "contradiction" && !findingID.MatchString(strings.TrimSpace(f.ID)) {
+			return nil, fmt.Errorf("record review: finding %d is a contradiction and names no rule (id %q) — a contradiction names the rule it contradicts, as name#n, because the writer has to find the entry", i+1, f.ID)
+		}
 	}
 	return &r, nil
 }
@@ -261,7 +291,7 @@ func LoadRecordReview(path string) (*RecordReview, error) {
 func (r *RecordReview) prose() string {
 	var b strings.Builder
 	if r.Verdict == "decline" {
-		b.WriteString("The record review read what this pass wrote to the record and sent it back (DESIGN §4). Each passage below reads as narration — a review round, a draft that was thrown back, an alternative passed over — rather than as a rule and the reason it holds. Rewrite each as the rule it establishes, keeping the reason where there is one: the pass that wrote these has the context to tell a load-bearing incident from an alternative it merely considered, and this review deliberately does not.\n")
+		b.WriteString("The record review read what this pass wrote to the record and sent it back (DESIGN §4). Each passage below either reads as narration — a review round, a draft that was thrown back, an alternative passed over — rather than as a rule and the reason it holds, or changes a rule without keeping or amending the reason recorded for it. Rewrite a narrated passage as the rule it establishes, keeping the reason where there is one; for a contradicted rule, run `pipeline reasons` on the id named and either keep the rule consistent with its reason or amend the entry in the same commit. The pass that wrote these has the context to settle each, and this review deliberately does not.\n")
 	} else {
 		b.WriteString("The record review read what this pass wrote to the record and found nothing to send back.")
 		if len(r.Findings) > 0 {
@@ -269,6 +299,10 @@ func (r *RecordReview) prose() string {
 		}
 	}
 	for _, f := range r.Findings {
+		if f.Kind == "contradiction" {
+			fmt.Fprintf(&b, "\n- `%s` (contradicts `%s`): \u201c%s\u201d \u2014 %s", f.File, strings.TrimSpace(f.ID), strings.TrimSpace(f.Quote), strings.TrimSpace(f.Why))
+			continue
+		}
 		fmt.Fprintf(&b, "\n- `%s`: \u201c%s\u201d \u2014 %s", f.File, strings.TrimSpace(f.Quote), strings.TrimSpace(f.Why))
 	}
 	if s := strings.TrimSpace(r.Summary); s != "" {

@@ -133,6 +133,38 @@ runs:
           "+refs/heads/main:refs/remotes/origin/main"
         git checkout "$BRANCH"
 
+    # The prompt was assembled at claim, ahead of this checkout, so it
+    # could not carry the one input only the branch can supply: the
+    # reasons behind the rule ids the branch changed (DESIGN §4), read
+    # off the record as it stood at the merge-base against the checkout.
+    # The merge-base rather than the design pass's start, because
+    # reconcile judges the whole branch against its argument — the same
+    # three-dot reasoning the design action gives for branch.txt. The
+    # reprompt refreshes nothing else: the non-asks stay as claimed.
+    - name: export the record at the merge-base, and rebuild the prompt with what the branch touched
+      shell: bash
+      run: |
+        set -euo pipefail
+        BASE="$(git merge-base origin/main HEAD)"
+        DEST="$RUNNER_TEMP/pipeline/record-base"
+        mkdir -p "$DEST"
+        for d in systems screens; do
+          if git cat-file -e "$BASE:$d" 2>/dev/null; then
+            git archive "$BASE" -- "$d" | tar -x -C "$DEST"
+          fi
+        done
+        git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/changed.txt"
+        pipeline agent reprompt \
+          --kind reconcile \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --out "$RUNNER_TEMP/pipeline" \
+          --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/reconcile.md" \
+          --repo-context "$GITHUB_WORKSPACE/.pipeline/prompts/repo-context.md" \
+          --verdict-path "$RUNNER_TEMP/pipeline/verdict.json" \
+          --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
+          --base-tree "$DEST" \
+          --changed-files "$RUNNER_TEMP/pipeline/changed.txt"
+
     - name: run the reconcile agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
       with:

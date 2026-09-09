@@ -616,3 +616,59 @@ func TestTheModelRunnerTakesALogDirAndDefaultsToTheAbortsPath(t *testing.T) {
 		}
 	}
 }
+
+// The record review is handed the tree from the pass's start commit,
+// not the merge-base, and the export precedes the assembly that reads
+// it. `steps.base.outputs.sha` is the wrong sha for it: on a second pass
+// after a decline the first pass may already have amended an entry.
+func TestTheRecordReviewIsHandedTheTreeFromThePassStart(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-design", "action.yml")))
+	export := strings.Index(body, "name: export the record as it stood at the pass's start")
+	assemble := strings.Index(body, "name: assemble the record review")
+	if export < 0 || assemble < 0 || export > assemble {
+		t.Fatalf("export at %d, assemble at %d — the export must precede the step that reads it", export, assemble)
+	}
+	step := body[export:assemble]
+	for _, want := range []struct{ text, why string }{
+		{`BEFORE="${{ steps.branch.outputs.before }}"`, "the pass's start commit, not the merge-base"},
+		{`git cat-file -e "$BEFORE:$d"`, "git archive fails on a pathspec matching nothing"},
+		{`git archive "$BEFORE" -- "$d" | tar -x -C "$DEST"`, "the export itself"},
+	} {
+		if !strings.Contains(step, want.text) {
+			t.Errorf("the export step does not carry %s — %s", want.text, want.why)
+		}
+	}
+	if strings.Contains(step, "steps.base.outputs.sha") {
+		t.Error("the export reads the merge-base; a second pass after a decline would be shown the first pass's amendment as its own")
+	}
+	if !strings.Contains(body[assemble:], `--base-tree "$RUNNER_TEMP/pipeline/record-base"`) {
+		t.Error("the record review is not handed the exported tree; the section would say no base tree was handed in")
+	}
+}
+
+// Reconcile's reprompt runs after its checkout and before the model,
+// with the merge-base tree and the branch's changed files.
+func TestReconcileRepromptsAfterItsCheckoutWithTheTouchedReasons(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-reconcile", "action.yml")))
+	checkout := strings.Index(body, `git checkout "$BRANCH"`)
+	reprompt := strings.Index(body, "name: export the record at the merge-base")
+	model := strings.Index(body, "name: run the reconcile agent")
+	if checkout < 0 || reprompt < 0 || model < 0 || !(checkout < reprompt && reprompt < model) {
+		t.Fatalf("checkout at %d, reprompt at %d, model at %d — the reprompt needs the branch and the model needs the reprompt", checkout, reprompt, model)
+	}
+	step := body[reprompt:model]
+	for _, want := range []string{
+		`BASE="$(git merge-base origin/main HEAD)"`,
+		`git cat-file -e "$BASE:$d"`,
+		`git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/changed.txt"`,
+		"pipeline agent reprompt",
+		"--kind reconcile",
+		`--verdict-path "$RUNNER_TEMP/pipeline/verdict.json"`,
+		`--base-tree "$DEST"`,
+		`--changed-files "$RUNNER_TEMP/pipeline/changed.txt"`,
+	} {
+		if !strings.Contains(step, want) {
+			t.Errorf("the reconcile reprompt step does not carry %s", want)
+		}
+	}
+}

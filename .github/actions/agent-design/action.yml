@@ -339,6 +339,30 @@ runs:
     # markdown under designOwnedPaths — so the harness answers it, and a
     # pass that wrote none gets no model run and says so. Talks to
     # nothing: the config, changed.txt and the patch.
+    # The record as it stood when this pass started, as a tree (DESIGN
+    # §4): the review is handed the rule lines and reason entries behind
+    # every rule id the pass touched, so a rule rewritten against its own
+    # reason is visible to a reader that holds no history. `before`, not
+    # the merge-base: the diff under review is before..HEAD, and on a
+    # second pass after a decline the first pass may already have amended
+    # an entry — from the merge-base that amendment would read as this
+    # pass's. Per directory behind cat-file, because `git archive` fails
+    # on a pathspec matching nothing and a project's first system doc has
+    # no screens/ to export.
+    - name: export the record as it stood at the pass's start
+      shell: bash
+      run: |
+        set -euo pipefail
+        BEFORE="${{ steps.branch.outputs.before }}"
+        DEST="$RUNNER_TEMP/pipeline/record-base"
+        mkdir -p "$DEST"
+        for d in systems screens; do
+          if git cat-file -e "$BEFORE:$d" 2>/dev/null; then
+            git archive "$BEFORE" -- "$d" | tar -x -C "$DEST"
+          fi
+        done
+        find "$DEST" -type f | sort
+
     - name: assemble the record review
       id: record
       shell: bash
@@ -347,6 +371,7 @@ runs:
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --diff "$RUNNER_TEMP/pipeline/record-diff.patch" \
           --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
+          --base-tree "$RUNNER_TEMP/pipeline/record-base" \
           --out "$RUNNER_TEMP/pipeline/review" \
           --prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/review/review.json"

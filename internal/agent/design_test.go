@@ -855,6 +855,13 @@ func TestLoadRecordReviewValidation(t *testing.T) {
 		// posted as an empty comment.
 		{"decline with no findings", `{"verdict":"decline"}`, "no findings"},
 		{"finding with no quote", `{"verdict":"decline","findings":[{"file":"systems/a.md","why":"x"}]}`, "names no file or no passage"},
+		{"contradiction", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"the entry says stores never share","kind":"contradiction","id":"foundation#17"}]}`, ""},
+		{"prefixed contradiction", `{"verdict":"decline","findings":[{"file":"screens/board.md","quote":"Two tabs","why":"x","kind":"contradiction","id":"screen:board#2"}]}`, ""},
+		// The writer has to find the entry, and the rule's wording is
+		// exactly what changed, so the id is the only handle.
+		{"contradiction with no id", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"contradiction"}]}`, "names no rule"},
+		{"contradiction with a bare id", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"contradiction","id":"#17"}]}`, "names no rule"},
+		{"unknown kind", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"style"}]}`, "not one of narration, contradiction"},
 	} {
 		_, err := LoadRecordReview(write(c.body))
 		switch {
@@ -1066,5 +1073,62 @@ func TestADeclineOnADecisionlessPassIsRecordedNotActedOn(t *testing.T) {
 	}
 	if !found {
 		t.Error("a decline on a decisionless pass vanished")
+	}
+}
+
+// Every finding was narration before the kind existed, so an absent kind
+// reads as narration rather than as an error a working reviewer would
+// suddenly start producing.
+func TestAFindingWithNoKindIsNarration(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "review.json")
+	if err := os.WriteFile(p, []byte(`{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"Design review threw","why":"a round"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := LoadRecordReview(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Findings[0].Kind != "narration" {
+		t.Errorf("Kind = %q, want narration", r.Findings[0].Kind)
+	}
+}
+
+// A contradiction is a decline like narration — same route, same
+// second-decline parking — and the ticket carries the id, because the
+// next pass's first move is `pipeline reasons` on it.
+func TestAContradictionDeclineNamesTheRuleOnTheTicket(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_71", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "The cap copy is a decision."}
+	review := &RecordReview{Verdict: "decline", Findings: []RecordFinding{
+		{File: "systems/caps.md", Quote: "Stores may share a connection", Why: "the entry records why they never do", Kind: "contradiction", ID: "caps#17"},
+	}}
+	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, review, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDesign {
+		t.Errorf("state = %q, want ready_for_design", got)
+	}
+	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	found := false
+	for _, c := range issues[0].Comments {
+		m, ok, err := marker.Parse(c.Body)
+		if err != nil || !ok || m.Kind != marker.RecordReview {
+			continue
+		}
+		found = true
+		for _, want := range []string{"contradicts `caps#17`", "Stores may share a connection", "pipeline reasons"} {
+			if !strings.Contains(c.Body, want) {
+				t.Errorf("the decline's prose does not carry %q:\n%s", want, c.Body)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no record-review marker")
 	}
 }

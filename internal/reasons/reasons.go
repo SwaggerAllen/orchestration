@@ -254,8 +254,12 @@ func ParseDoc(content string) Doc {
 		}
 	}
 	d.Duplicates = dups(seen)
+	// Trailing blank lines are trimmed off a block, because whether an
+	// id is the last in its file is not a fact about the rule: a rule
+	// followed by a new one at head and by end-of-file at base would
+	// otherwise read as touched.
 	for id, ls := range blocks {
-		d.Blocks[id] = strings.Join(ls, "\n")
+		d.Blocks[id] = strings.TrimRight(strings.Join(ls, "\n"), "\n")
 	}
 	return d
 }
@@ -541,6 +545,10 @@ type Touched struct {
 	BaseRule *Rule
 	// BaseEntry is the entry at base, nil when there was none.
 	BaseEntry *Entry
+	// BaseText is the rule as it stood at base — the heading, or the
+	// bullet's first paragraph: the bold lead and the sentence stating
+	// the rule, up to the first blank line.
+	BaseText string
 	// New reports that the id existed on neither side at base.
 	New bool
 }
@@ -614,6 +622,7 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 			t := Touched{Dir: k.dir, Name: k.name, ID: id}
 			if r, ok := base.Rule(id); ok {
 				t.BaseRule = &r
+				t.BaseText = firstParagraph(base.Doc.Blocks[id])
 			}
 			if e, ok := base.Entry(id); ok {
 				t.BaseEntry = &e
@@ -626,6 +635,17 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 }
 
 func docBlock(ix Index, id int) string { return ix.Doc.Blocks[id] }
+
+func firstParagraph(block string) string {
+	var out []string
+	for _, l := range strings.Split(block, "\n") {
+		if strings.TrimSpace(l) == "" {
+			break
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
 
 func entryBlock(ix Index, id int) string {
 	if ix.File == nil {

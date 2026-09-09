@@ -477,13 +477,31 @@ so neither of the two ordering rules in the pipeline repo's own guide applies an
 author-owned moves ahead of this.
 
 **The record review holds the design pass to that rule, from outside it.** After a design pass
-commits, a second model run inside the same job reads exactly one thing — the pass's own diff to
-the record, walked the way the ownership audit walks it so a merge's doc edits are not billed to
-the pass — and the rule above, and nothing else: no ticket, no thread, no non-asks, no index. It
-answers `pass` or `decline`, and a decline names each passage that reads as narration rather than
-as a rule and its reason. The harness posts the findings under a `record-review` marker and moves
-the ticket to `Ready for design` — the author's own decline route (§3) — with no PR opened and no
-preview built, because nothing is ready to be looked at.
+commits, a second model run inside the same job reads three things — the pass's own diff to the
+record, walked the way the ownership audit walks it so a merge's doc edits are not billed to the
+pass; the rule lines and reason entries behind every rule id that diff touched, as they stood
+before the pass; and the rule above — and nothing else: no ticket, no thread, no non-asks, no
+index. It answers `pass` or `decline`, and a decline names each passage that reads as narration
+rather than as a rule and its reason, or that changes a rule without keeping or amending the
+reason recorded for it — a `contradiction`, which names the rule as `name#n`. The harness posts
+the findings under a `record-review` marker and moves the ticket to `Ready for design` — the
+author's own decline route (§3) — with no PR opened and no preview built, because nothing is ready
+to be looked at.
+
+The reasons are the one input added to that isolation, and the argument for it is that they are
+selected by the diff and not by the ticket: a touched rule's entry is the record's own prior text
+about that rule, the removed side of the diff one file over, and it carries nothing the pass wrote
+about its ticket. Without it a rule rewritten against its own reason is invisible from the diff —
+the reason is in a file the diff did not touch, which is the whole point of the split. Which ids
+were touched is read off two trees rather than off the diff: the action exports `systems/` and
+`screens/` as they stood at the commit the pass started from, and the harness compares each id's
+block — the rule line and every line up to the next id — between that tree and the checkout. The
+pass's start commit rather than the merge-base, because the diff under review is `start..HEAD`,
+and on a second pass after a decline the first pass may already have amended an entry; diffing
+from the merge-base would show that amendment as this pass's. An id present on neither side at
+the start is new; an id whose rule line is gone and whose entry is not retired is reported by the
+audit, and the reviewer is told so. A contradiction is a decline like narration: the design pass
+has the context to argue it once, and a second decline parks the ticket the same way.
 
 Fresh, because the pass that wrote the narration is the wrong reader for it. It is at the end of
 a long run with the reasoning it just did as the freshest thing in its context, and the narration
@@ -1378,7 +1396,10 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   fine if it's better, but something should say so, and if nothing does it's more likely nobody
   noticed
 - the static storybook renders what the narrative doc describes
-- standing decisions touched by the change landed, and none were contradicted in passing
+- standing decisions touched by the change landed, and none were contradicted in passing —
+  judged against the reasons behind the rule ids the branch changed, handed to the pass as they
+  stood at the merge-base (§4), because "contradicted" is a claim about a reason, and the reason
+  lives in a file the diff did not touch
 - the structure that landed is the structure the sketch named — a deviation is fine if the
   hand-back argues it, and if nothing does it's more likely nobody noticed
 - **a surface changed with no storybook variation at all is called out even on a pass** — a tab
@@ -2477,7 +2498,7 @@ permanently idle is permanently dispatchable.
 |---|---|
 | Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused — or paused and either marked blocking the boundary ticket or `Urgent` | State → `Ready for design`, first by the precedence rule (§8) |
 | State → `Ready for design` | Design agent run; its claim writes `Designing` |
-| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job (§4); `decline` → `Ready for design` with the findings; a second decline on one ticket → `Blocked` (§12) |
+| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job, holding the diff and the reasons behind the rule ids it touched (§4); `decline` → `Ready for design` with the findings; a second decline on one ticket → `Blocked` (§12) |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
 | State → `In progress` / `Reworking` | Dev agent run |
@@ -2701,6 +2722,10 @@ without passing through `Design review`.
 
 `failed` is the only abort reason that takes no label, and that is the rule rather than an
 omission: it means the harness broke, which is not a fact about the ticket.
+
+A record-review finding's kind — `narration` or `contradiction` (§4) — has no row here, and that
+is the rule too: a finding of either kind rides inside one `decline`, so it is not an outcome, and
+the vocabulary is held to the reviewer's prompt rather than to this table.
 
 **What is held to the code and what is not.** The **value** column is asserted against
 `protocol`'s vocabularies in both directions, so a value added to one and not the other fails
