@@ -181,3 +181,25 @@ func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
 		}
 	}
 }
+
+// A reasons sibling (DESIGN §4) read as a doc is a phantom: measured by
+// removing the skip, `systems/foundation.reasons.md` loads as
+// Doc{Name: "foundation.reasons"} with no map — invisible to the audit,
+// and a name the label resolver would accept as a real system.
+func TestLoadDirSkipsReasonsFiles(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("foundation.md", "---\npaths:\n  - lib/foundation/**\n---\n")
+	write("foundation.reasons.md", "# foundation — reasons\n\n## #17\n\nBecause.\n")
+	docs, err := LoadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 || docs[0].Name != "foundation" {
+		t.Errorf("docs = %+v, want foundation alone", docs)
+	}
+}

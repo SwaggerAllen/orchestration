@@ -449,6 +449,33 @@ Catapult's ORC-115, where the prompt stated "never delete" ahead of the placemen
 a pass reasonably read it as governing both: eight passages narrating prior passes across five
 design-owned docs, two of them section headings numbering the review round.
 
+**A rule and its reason are two lines with two lifetimes, joined by an id.** Every h2-or-deeper
+heading in a screen or system doc, and every top-level bullet under `## Standing decisions`,
+carries an integer id at its head — `## #3 Cross-project, deliberately`, `- **#17 Generated
+clients are the only door** …` — unique within its doc, minted as the highest present plus one,
+and never reused or renumbered. The rule line keeps the sentence that states the rule; the
+reason it holds lives in a sibling file, `systems/<name>.reasons.md` beside `systems/<name>.md`,
+under `## #17`, with its metadata lines (`since:` the ticket that established it, `revisit:` the
+condition worth reopening it on, `retired:` the ticket that stopped it and why) before any
+prose. The rule is what every design pass reads; the reason is what one pass reads, the pass
+about to change the rule. Inline, both were paid for on every read: Catapult's `## Standing
+decisions` sections grew from 388 KB to 521 KB in one week with the rule statements near five
+percent of the text. An entry is optional — a screen section is a description as often as a
+rule, and a check demanding an entry for every id would be met with a placeholder sentence — so
+an id with no entry answers "no reason recorded", and that answer reaching a reviewer is itself
+information. A retired rule loses its line and keeps its entry, which is what keeps the id from
+being reused and keeps the fact a later pass most needs: that this was tried and why it was
+undone. Ids are per-doc rather than global because the mutex (§6) already holds one ticket per
+doc, so a per-doc counter cannot race; two tickets on two docs minting from one counter could
+mint the same number in parallel. Any line in a doc belongs to the nearest id above it, which is
+what lets a diff say which rules it touched without anyone deciding where a rule ends — and it
+is why the container heading and a system doc's "Initial vs target" and "Depends on" carry ids
+too: a token each, and the attribution rule has no exceptions. No config field is involved: the
+sibling is a sibling by convention, and `systems/*.md` already matches
+`systems/foundation.reasons.md` (a single star does not cross a slash, but it does cross a dot),
+so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
+author-owned moves ahead of this.
+
 **The record review holds the design pass to that rule, from outside it.** After a design pass
 commits, a second model run inside the same job reads exactly one thing — the pass's own diff to
 the record, walked the way the ownership audit walks it so a merge's doc edits are not billed to

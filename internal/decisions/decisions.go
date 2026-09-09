@@ -54,6 +54,7 @@ import (
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
+	"github.com/SwaggerAllen/orchestration/internal/reasons"
 )
 
 // Doc is one screen or system doc's decision index.
@@ -175,7 +176,12 @@ func LoadDir(root, dir, labelPrefix string) (docs []Doc, unreadable []string) {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") {
+		// A reasons sibling (DESIGN §4) is not indexed: its `## #n`
+		// headings would each land here as a decision titled "#17", one
+		// per rule the doc already lists, and a design pass is meant to
+		// read a reason only when it touches the rule — through
+		// `pipeline reasons`, not through this index.
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") || reasons.IsReasonsFile(name) {
 			continue
 		}
 		rel := filepath.ToSlash(filepath.Join(dir, name))
