@@ -303,7 +303,7 @@ func TestADesignJobReplayedWithACannedDeclineRoutesOnTheReview(t *testing.T) {
 		"- **#17 One Repo.** Stores own schemas and queries, never connections.",
 		"A shared connection is a second owner, and two owners drift.",
 		"+- **#17 One Repo.** Stores own schemas and queries, or connections, whichever is convenient.",
-		"+## #1 Two states", // the screen doc is the record too: a probe narrowing the extraction to systems/ passed until this line
+		"+## #1 Two states",                   // the screen doc is the record too: a probe narrowing the extraction to systems/ passed until this line
 		"- screens/cap.md\n- systems/caps.md", // changed.txt is sort -u'd by the action
 	} {
 		if !strings.Contains(w.prompt, want) {
