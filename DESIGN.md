@@ -574,6 +574,20 @@ number that way. A citation resolves against a heading's own number or any prefi
 `§7` is satisfied by `§7.8`; the reverse does not hold, and `§7.12.1` is dangling when the
 document stops at `§7.12`.
 
+**A rule is cited by its id, never by its wording.** `foundation#17` names rule #17 of
+`systems/foundation.md` from anywhere in the tree — a test name, a code comment, another doc —
+and `system:foundation#17` or `screen:board#2` when a name is both a system and a screen doc.
+The name is the doc's basename, the mutex label's name half, so nothing has to be declared for a
+citation to resolve. It resolves when the id is a rule line in the doc or an entry in its
+sibling, retired included: keeping the entry is what lets a citation of a withdrawn rule keep
+meaning something. This is the second resolver beside the section-number one, and the handle
+the design prompt's "cite the decision when you build on one" was missing — the section sweep
+resolves `path §N` against numbered headings only, and the standing-decision bullets those
+citations most wanted to name were dangling by rule (nineteen of the sweep's findings on
+Catapult). Inside a doc the token is written bare, `#17`, and bare `#17` is never a citation:
+the grammar needs a doc name word-bounded before the `#`, which is what keeps `PR #144` and a
+colour code out of the sweep.
+
 Each entry carries either a `path`, the project-relative document the shorthand names, or an
 `unchecked` string recording why no path in this repository can resolve it — another
 repository's docs, a licence text. Behaviourally `unchecked` matches leaving the shorthand out
@@ -1326,6 +1340,22 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   linted, and that is the point — a standing decision naming `farewell/1` is the decision doing
   its job, while a heading with a list under it is the split the rule was written against. A
   check that failed good docs would be switched off, taking the rule with it.
+- the rationale index holds together (§4), in a doc that is ported — one carrying a rule id, or
+  one with a reasons sibling; either arms the checks, so a doc that gained ids without a sibling
+  still has them checked for duplicates. Every h2-or-deeper heading and every bullet under
+  `## Standing decisions` carries an id and no id appears twice; every entry in the sibling that
+  is not retired has a rule line, and every retired one has none; every h2 in the sibling is an
+  entry; and every `name#n` citation anywhere in the tree resolves to a rule line or an entry,
+  retired included. An id with no entry is not a finding. The checks report an idle half in
+  either direction, the way Catapult's `# catapult:allow` reports a tag covering no violation.
+  Unported docs are counted and named as skipped, never as passed, because that is the seam the
+  port runs through one doc at a time and "not ported yet" must not print the same as "clean".
+  A `name#n` whose name no ported doc carries is not a citation — the same whitelist rule the
+  section sweep applies, and measured for the same reason: `PR #144`, `pre-#144`, `commitment
+  #2` and hex colours are what `#<digits>` means in Catapult's docs, and none of them puts a doc
+  name before the `#`. A bare name that is both a system and a screen doc is reported as
+  ambiguous rather than guessed, with the prefixed form to write; a prefixed citation of a doc the
+  prefix's directory does not hold is reported too.
 
 **Design finish (blocking, in the harness — the same rule, one gate earlier):**
 - a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not

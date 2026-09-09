@@ -332,3 +332,147 @@ func TestTouchedIdsReadAMissingBaseFileAsEmpty(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// One finding per idle half, in the doc's and the sibling's own words.
+func TestAuditReportsEachIdleHalf(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "systems/foundation.md", "## Standing decisions\n\n- **Unnumbered lead.** Prose.\n- **#7 A.**\n- **#7 B.**\n- **#9 Still here.**\n- **#3 C.**\n")
+	write(t, root, "systems/foundation.reasons.md", "## #17\n\nOrphan.\n\n## Why\n\n## #9\nretired: ORC-90 — gone\n\n## #3\n\nA.\n\n## #3\n\nB.\n")
+	ix, _, err := Load(root, "systems", "foundation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(Audit(ix), "\n")
+	for _, want := range []string{
+		`systems/foundation.md:1: heading "Standing decisions" carries no id`,
+		`systems/foundation.md:3: standing decision "Unnumbered lead." carries no id`,
+		`systems/foundation.md: id #7 appears 2 times (lines 4, 5)`,
+		`systems/foundation.reasons.md:5: heading "Why" is not an entry`,
+		`systems/foundation.reasons.md: entry #3 appears 2 times (lines 10, 14)`,
+		`systems/foundation.reasons.md: entry #17 has no rule line in systems/foundation.md and is not retired`,
+		`systems/foundation.reasons.md: entry #9 is retired (ORC-90 — gone) but systems/foundation.md still carries rule #9`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "#3 has no rule") {
+		t.Errorf("a live entry with a rule line was reported: %s", got)
+	}
+}
+
+// An id with no entry is not a finding; a retired entry with no rule
+// line is the shape retirement takes.
+func TestAuditIsCleanOnAWellFormedPair(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "systems/foundation.md", ported)
+	write(t, root, "systems/foundation.reasons.md", "# foundation — reasons\n\n## #17\nsince: ORC-22\n\nBecause.\n\n## #9\nretired: ORC-90 — gone\n")
+	ix, _, err := Load(root, "systems", "foundation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Audit(ix); len(got) != 0 {
+		t.Errorf("findings = %v, want none", got)
+	}
+}
+
+// Measured on Catapult's docs: every `#<digits>` there is a PR number, a
+// hex colour or an ordinal, and none puts a doc name before the `#`. The
+// whitelist is what keeps them out — a grammar alone would not.
+func TestTheCitationGrammarIgnoresWhatCatapultWrites(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "systems/foundation.md", ported)
+	write(t, root, "lib/x.ex", "# before the fixed harness (ORC-223, PR #144) reached the repo\n# they executed the pre-#144 harness\n# | violet | `#9b8fd4` | and commitment #2, project #1\n# foundation#17 is fine; xfoundation#17 is not a citation; docs/foundation.md#17 neither\n")
+	docs, err := LoadDir(root, "systems")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SweepCitations(root, []string{"lib/x.ex"}, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("problems = %v, want none", got)
+	}
+}
+
+func TestACitationOfARetiredEntryResolvesAndAnUnknownIdDoesNot(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "systems/foundation.md", ported)
+	write(t, root, "systems/foundation.reasons.md", "## #9\nretired: ORC-90 — gone\n")
+	write(t, root, "systems/engine.md", "## Standing decisions\n") // unported: not a citable name
+	write(t, root, "lib/x.ex", "# foundation#9 foundation#17 foundation#99 engine#1 system:foundation#3 screen:foundation#3\n")
+	docs, err := LoadDir(root, "systems")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SweepCitations(root, []string{"lib/x.ex"}, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s []string
+	for _, p := range got {
+		s = append(s, p.String())
+	}
+	joined := strings.Join(s, "\n")
+	for _, want := range []string{
+		"lib/x.ex:1: cites foundation#99, which is not a rule in systems/foundation.md or an entry in systems/foundation.reasons.md",
+		"lib/x.ex:1: cites screen:foundation#3, which names screen:foundation, and there is no ported screens/foundation.md",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in:\n%s", want, joined)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("problems = %v, want exactly the two above: #9 is retired and resolves, #17 is a rule, engine is unported, system:foundation#3 is prefixed and resolves", s)
+	}
+}
+
+func TestAnAmbiguousBareNameIsReportedNotGuessed(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "systems/board.md", "## #1 Standing decisions\n")
+	write(t, root, "screens/board.md", "## #1 Two tabs\n\n## #2 Empty\n")
+	write(t, root, "lib/x.ex", "# board#2 and screen:board#2 and system:board#2\n")
+	var docs []Index
+	for _, dir := range []string{"systems", "screens"} {
+		ixs, err := LoadDir(root, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs = append(docs, ixs...)
+	}
+	got, err := SweepCitations(root, []string{"lib/x.ex"}, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("problems = %v, want the bare cite (ambiguous) and system:board#2 (no such rule)", got)
+	}
+	if !strings.Contains(got[0].String(), "is ambiguous: board is both systems/board.md and screens/board.md — write system:board or screen:board") {
+		t.Errorf("first = %s", got[0])
+	}
+	if !strings.Contains(got[1].String(), "cites system:board#2, which is not a rule in systems/board.md, and the doc has no reasons file") {
+		t.Errorf("second = %s", got[1])
+	}
+}
+
+func TestParseCiteReadsOneCitationExactly(t *testing.T) {
+	for in, want := range map[string]string{
+		"foundation#17":        "/foundation/17",
+		"system:foundation#17": "system/foundation/17",
+		"screen:my-queue#3":    "screen/my-queue/3",
+		"foundation":           "",
+		"#17":                  "",
+		"foundation#17 more":   "",
+		"Foundation#17":        "",
+	} {
+		prefix, name, id, ok := ParseCite(in)
+		got := ""
+		if ok {
+			got = prefix + "/" + name + "/" + itoa(id)
+		}
+		if got != want {
+			t.Errorf("ParseCite(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

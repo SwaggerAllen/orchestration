@@ -15,6 +15,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -136,6 +137,41 @@ func cmdAudit(args []string) error {
 		violations = append(violations, found...)
 	}
 
+	// The rationale index (DESIGN §4, §9): a ported doc — one carrying a
+	// rule id, or one with a reasons sibling — is held to numbering every
+	// heading and standing decision, to no id twice, and to each entry in
+	// its sibling having a rule line unless it says it is retired. Unported
+	// docs are counted and named as skipped rather than passed, for the
+	// reason the class audit's skips exist: "this doc has no reasons yet"
+	// and "this doc passed every check" must not print the same, and the
+	// catapult port lands one doc at a time through exactly this seam.
+	var docs []reasons.Index
+	var unported []string
+	ported := 0
+	for _, dir := range []string{"systems", "screens"} {
+		ixs, err := reasons.LoadDir(*root, dir)
+		if err != nil {
+			return err
+		}
+		for _, ix := range ixs {
+			docs = append(docs, ix)
+			if !ix.Ported() {
+				unported = append(unported, ix.Path)
+				continue
+			}
+			ported++
+			violations = append(violations, reasons.Audit(ix)...)
+		}
+	}
+	switch {
+	case ported == 0:
+		fmt.Println("reasons index: skipped — no doc under systems/ or screens/ carries a rule id or a reasons file, so nothing is ported yet and no name#n citation is checked either (DESIGN §4)")
+	case len(unported) > 0:
+		fmt.Printf("reasons index: %d doc(s) checked; skipped %d unported: %s\n", ported, len(unported), strings.Join(unported, ", "))
+	default:
+		fmt.Printf("reasons index: %d doc(s) checked\n", ported)
+	}
+
 	// The class audit needs both halves — what arrived, and what the
 	// issue said. Each missing half is reported, never assumed clean:
 	// "no new components" and "I couldn't tell" must not print the same.
@@ -233,6 +269,18 @@ func cmdAudit(args []string) error {
 		return err
 	}
 	for _, d := range dangling {
+		violations = append(violations, d.String())
+	}
+	// The second resolver, for rule citations — `foundation#17` — over
+	// the same files (DESIGN §4). A name no ported doc carries is not a
+	// citation, which is the § sweep's whitelist rule restated: without
+	// it `pre-#144` and `PR #144` in Catapult's own docs would be
+	// findings about the corpus rather than about anything dangling.
+	ruleDangling, err := reasons.SweepCitations(*root, cited, docs)
+	if err != nil {
+		return err
+	}
+	for _, d := range ruleDangling {
 		violations = append(violations, d.String())
 	}
 
