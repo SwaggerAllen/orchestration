@@ -691,6 +691,8 @@ func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
 		{"xargs -r -I{} git show --format= --cc {} -- '*.md'", "the first-parent, markdown-only extraction the action uses"},
 		{"actions/upload-artifact", "the verdicts are the output"},
 		{`--prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md"`, "the prompt under test is the one pipeline_ref names"},
+		{"name: replay-config", "today's config rides an artifact from the list phase"},
+		{`cp "$RUNNER_TEMP/pipeline/config/pipeline.config.json" "$GITHUB_WORKSPACE/pipeline.config.json"`, "the merge's own config is overlaid before the assemble — 8 of the dummy's first 10 replays failed validation on a config that predated ready_for_design"},
 	} {
 		if !strings.Contains(action, want.text) {
 			t.Errorf("review-replay/action.yml does not carry %s — %s", want.text, want.why)
