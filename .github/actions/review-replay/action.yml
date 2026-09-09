@@ -107,6 +107,24 @@ runs:
         echo "shas=$(cat "$RUNNER_TEMP/shas.json")" >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/shas.json"
 
+    # Today's config travels with the list. The replay phase checks the
+    # project out at the merge, so the config in *that* tree is the
+    # config as of that merge — and the binary validates a config
+    # before it does anything, in full. Measured on the dummy's first
+    # replay: 8 of 10 merges failed at the assemble step with
+    # `states.ready_for_design: missing`, because they predate that
+    # state; the two that ran were the two newest. The reviewer under
+    # test is today's, judging by today's designOwnedPaths, so the
+    # config it reads is the dispatched ref's — this checkout's — and
+    # the merge's tree supplies only the history and the record.
+    - name: keep today's config for the replays
+      if: inputs.phase == 'list'
+      uses: actions/upload-artifact@v4
+      with:
+        name: replay-config
+        path: pipeline.config.json
+        retention-days: 1
+
     # ---- replay ---------------------------------------------------------
     # The design action's three inputs, reconstructed for a merge that
     # has already landed. For a merge commit M the pass is M's second
@@ -148,11 +166,23 @@ runs:
         echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
         echo "merge $M: pass $BEFORE..$HEAD_OF_PASS, $(wc -l < "$P/changed.txt") file(s), $(wc -c < "$P/record-diff.patch") bytes of record diff"
 
+    # The config read here is today's, not the merge's — see the list
+    # phase. Overlaid onto the checkout rather than pointed at from
+    # $RUNNER_TEMP, because the binary takes the project root from the
+    # config's own directory and reads the head record from there.
+    - name: fetch today's config
+      if: inputs.phase == 'replay'
+      uses: actions/download-artifact@v4
+      with:
+        name: replay-config
+        path: ${{ runner.temp }}/pipeline/config
+
     - name: assemble the record review
       if: inputs.phase == 'replay'
       id: record
       shell: bash
       run: |
+        cp "$RUNNER_TEMP/pipeline/config/pipeline.config.json" "$GITHUB_WORKSPACE/pipeline.config.json"
         pipeline agent record-review \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --diff "$RUNNER_TEMP/pipeline/record-diff.patch" \
