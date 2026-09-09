@@ -89,6 +89,33 @@ type Expect struct {
 	// AbsentMarkers are marker kinds that must NOT appear, keyed by ref.
 	// A happy path that quietly escalated is not a happy path.
 	AbsentMarkers map[string][]string `json:"absentMarkers"`
+	// MarkerFields assert what a marker of a kind says, keyed by ref —
+	// the record review's verdict, chiefly (DESIGN §4). A kind alone
+	// says the hop happened; the field says how it went, and "the
+	// review ran" and "the review sent the pass back" are different
+	// facts a rehearsal has to be able to tell apart.
+	MarkerFields map[string][]MarkerField `json:"markerFields"`
+}
+
+// MarkerField is one assertion about a marker's field: some marker of
+// Kind on the ticket carries Field with one of Values — or, with
+// Absent, no marker of Kind does. Values rather than a value because a
+// rehearsal asserts what the pipeline controls, and which verdict a
+// model reaches is not that: a fixture can say the review reached one,
+// and a happy path can say it was never a decline.
+type MarkerField struct {
+	Kind   string   `json:"kind"`
+	Field  string   `json:"field"`
+	Values []string `json:"values"`
+	Absent bool     `json:"absent,omitempty"`
+}
+
+// String is the assertion as the check phase names it.
+func (m MarkerField) String() string {
+	if m.Absent {
+		return fmt.Sprintf("no %s marker with %s in [%s]", m.Kind, m.Field, strings.Join(m.Values, " "))
+	}
+	return fmt.Sprintf("a %s marker with %s in [%s]", m.Kind, m.Field, strings.Join(m.Values, " "))
 }
 
 // Load reads and validates a scenario file. Validation is strict
@@ -182,7 +209,20 @@ func (s *Scenario) Validate() error {
 			add("expect.absentMarkers: %q is not a ticket in this scenario", ref)
 		}
 	}
-	if len(s.Expect.FinalStates) == 0 && len(s.Expect.Files) == 0 {
+	for ref, fields := range s.Expect.MarkerFields {
+		if !refs[ref] {
+			add("expect.markerFields: %q is not a ticket in this scenario", ref)
+		}
+		for i, f := range fields {
+			if f.Kind == "" || f.Field == "" || len(f.Values) == 0 {
+				add("expect.markerFields[%s][%d]: needs a kind, a field and at least one value", ref, i)
+			}
+		}
+	}
+	// A marker is an assertion too: "the review ran and reached a
+	// verdict" is a rehearsal that can fail for a reason other than a
+	// crash, which is all this rule asks.
+	if len(s.Expect.FinalStates) == 0 && len(s.Expect.Files) == 0 && len(s.Expect.Markers) == 0 && len(s.Expect.MarkerFields) == 0 {
 		add("expect: asserts nothing, so the run can only fail by crashing")
 	}
 

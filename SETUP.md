@@ -674,7 +674,7 @@ way to tidy up after a run.
 | `full` | Reset then seed, and stop |
 | `reset` | Archive every ticket; revert what the last run merged |
 | `seed` | Create the scenario's milestones and tickets |
-| `check` | Assert the final states, files and markers |
+| `check` | Assert the final states, files, markers and what the markers say |
 
 There is no exercise phase, because there is nothing for the harness to
 run: after seeding, the metronome, the webhooks and the agents carry
@@ -692,6 +692,16 @@ rather than the work.
 Milestones are reused by name rather than recreated, because their
 order is what "the next milestone" means (DESIGN §10); recreating them
 each run would reshuffle the thing the boundary flow reads.
+
+A fixture asserts in terms the pipeline controls: final states, files,
+marker kinds, and what a marker's field says (`markerFields` — the
+record review's verdict, chiefly). It never asserts prose a model
+wrote, and it never asserts which verdict a model reached: `values`
+lists what would satisfy it, and `absent` turns the assertion around,
+so the happy path says the review was never a decline while
+`rule-touched` says only that it reached one. The verdict itself is
+read off the ticket afterwards; that reading is the point of the
+rehearsal.
 
 Scenarios live in `scenarios/`. `pipeline scenario validate` checks
 them, and the Go suite validates every shipped one — a fixture with a
