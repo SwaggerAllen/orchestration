@@ -703,6 +703,21 @@ so the happy path says the review was never a decline while
 read off the ticket afterwards; that reading is the point of the
 rehearsal.
 
+**Reading the reviewer's verdicts.** The record review (DESIGN §4) is
+armed: a decline sends a design pass back and two park the ticket, and
+its false-positive rate on real writing is a guess until its verdicts
+on real diffs have been read. `review-replay` (Actions → review-replay
+→ Run workflow) does that without touching the project: for the last N
+doc-touching merges on a project's branch it reconstructs what each
+pass wrote and what it started from, assembles the reviewer's prompt
+exactly as the design action does, runs the model, and keeps every
+verdict as an artifact under a summary table. Nothing is posted. It
+needs a model credential in this repo's secrets
+(`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) and, for a project
+other than the dummy, `REPLAY_REPO_TOKEN` with read access to it. A
+count of declines is not a count of defects: open the artifacts and
+read the findings.
+
 Scenarios live in `scenarios/`. `pipeline scenario validate` checks
 them, and the Go suite validates every shipped one — a fixture with a
 typo'd ref asserts nothing while looking like it asserts something.

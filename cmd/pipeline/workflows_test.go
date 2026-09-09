@@ -672,3 +672,28 @@ func TestReconcileRepromptsAfterItsCheckoutWithTheTouchedReasons(t *testing.T) {
 		}
 	}
 }
+
+// The replay reads a project and posts nothing: no tracker credential,
+// no finish, no comment. It is a measurement of the reviewer, and a
+// measurement that wrote to the thing it measured would not be one.
+func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "workflows", "review-replay.yml")))
+	for _, want := range []struct{ text, why string }{
+		{"pipeline agent record-review", "the same assembly the design action runs"},
+		{`--base-tree "$RUNNER_TEMP/pipeline/record-base"`, "the reviewer is handed the record as it stood before the pass"},
+		{"actions/run-agent-model", "the same runner, so the verdict is the one a real pass would get"},
+		{`git cat-file -e "$BEFORE:$d"`, "the export guard, for a pass whose start had no screens/"},
+		{"xargs -r -I{} git show --format= --cc {} -- '*.md'", "the first-parent, markdown-only extraction the action uses"},
+		{"actions/upload-artifact", "the verdicts are the output"},
+		{"max-parallel: 1", "one model run at a time"},
+	} {
+		if !strings.Contains(body, want.text) {
+			t.Errorf("review-replay.yml does not carry %s — %s", want.text, want.why)
+		}
+	}
+	for _, absent := range []string{"pipeline agent finish", "LINEAR_API_KEY", "PIPELINE_STATE_TOKEN", "CommentTicket", "contents: write"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("review-replay.yml carries %q — a replay that writes to what it measures is not a measurement", absent)
+		}
+	}
+}

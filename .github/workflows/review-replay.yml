@@ -1,0 +1,220 @@
+# Read the record reviewer's verdicts on real diffs, without touching the
+# project they came from (DESIGN §4).
+#
+# The reviewer is armed: a decline sends a design pass back to the queue
+# and two park the ticket. Its false-positive rate on real writing is a
+# guess until someone has read its verdicts on real diffs, and a
+# reviewer that over-fires is indistinguishable from one that works
+# until the findings are read. So this replays it: for each of the last
+# N merges on a project's branch that touched its screen or system docs,
+# assemble the prompt exactly as the design action does — the pass's own
+# markdown diff over the first-parent walk, the record as it stood
+# before the pass exported as a tree — run the model, and keep the
+# verdict as an artifact. Nothing is posted anywhere: no ticket, no PR,
+# no comment. The project is only read.
+#
+# By hand, from this repo, because the model credential lives in Actions
+# secrets and the findings are for a person to read: the summary table
+# is the output, and the per-merge prompts and verdicts are the
+# artifacts to open when a row looks wrong.
+name: review-replay
+run-name: "review-replay: ${{ inputs.repository }}@${{ inputs.ref }}, last ${{ inputs.merges }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: The project repository to read, owner/name
+        required: true
+        default: SwaggerAllen/orchestration-dummy
+      ref:
+        description: The branch whose merges are replayed
+        required: true
+        default: main
+      merges:
+        description: How many doc-touching merges back to replay
+        required: true
+        default: "10"
+
+permissions:
+  contents: read
+
+jobs:
+  # One job lists the merges so the next can fan out over them: a
+  # composite action cannot be called in a shell loop, and one model run
+  # per job keeps a dead run from taking the others with it.
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.merges.outputs.shas }}
+    steps:
+      - name: checkout the project repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          path: .project
+          fetch-depth: 0
+          # A read-only token on the project. REHEARSAL_REPO_TOKEN reaches
+          # the dummy alone, so a replay over another project needs its
+          # own secret; github.token reaches only this repo.
+          token: ${{ secrets.REPLAY_REPO_TOKEN || secrets.REHEARSAL_REPO_TOKEN || github.token }}
+
+      - name: list the last doc-touching merges
+        id: merges
+        run: |
+          set -euo pipefail
+          cd .project
+          # First-parent only: the merges main took, newest first, that
+          # touched a screen or system doc. A squash merge has one parent
+          # and is its own pass; a merge commit's pass is its second
+          # parent's side.
+          git log --first-parent --format=%H -n 400 "${{ inputs.ref }}" -- 'screens/*.md' 'systems/*.md' \
+            | head -n "${{ inputs.merges }}" \
+            | jq -R . | jq -sc . > "$RUNNER_TEMP/shas.json"
+          echo "shas=$(cat "$RUNNER_TEMP/shas.json")" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/shas.json"
+
+  replay:
+    needs: list
+    if: ${{ needs.list.outputs.shas != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        sha: ${{ fromJSON(needs.list.outputs.shas) }}
+    steps:
+      # This checkout's binary and prompts: the reviewer under test is
+      # whatever ref this workflow was dispatched from.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build the harness
+        run: |
+          go build -o "$RUNNER_TEMP/pipeline-bin" ./cmd/pipeline
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          mv "$RUNNER_TEMP/pipeline-bin" "$RUNNER_TEMP/pipeline"
+
+      - name: checkout the project repo at the merge
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ matrix.sha }}
+          path: .project
+          fetch-depth: 0
+          token: ${{ secrets.REPLAY_REPO_TOKEN || secrets.REHEARSAL_REPO_TOKEN || github.token }}
+
+      # The design action's three inputs, reconstructed for a merge that
+      # has already landed. For a merge commit M the pass is M's second
+      # parent's side from the merge-base with the first; for a squash
+      # merge M is the pass. The diff is the first-parent walk per
+      # commit, restricted to markdown, the way the action extracts it,
+      # and the base tree is the record at the point the pass started.
+      - name: reconstruct what the pass wrote and what it started from
+        id: pass
+        run: |
+          set -euo pipefail
+          cd .project
+          M="${{ matrix.sha }}"
+          P="$RUNNER_TEMP/pipeline"
+          mkdir -p "$P/review" "$P/record-base"
+          if git rev-parse -q --verify "$M^2" >/dev/null 2>&1; then
+            BEFORE="$(git merge-base "$M^1" "$M^2")"
+            HEAD_OF_PASS="$M^2"
+          else
+            BEFORE="$M^1"
+            HEAD_OF_PASS="$M"
+          fi
+          git log --first-parent --format=%H "$BEFORE..$HEAD_OF_PASS" \
+            | xargs -r -n1 git show --name-only --format= --cc \
+            | sort -u > "$P/changed.txt"
+          git log --first-parent --format=%H "$BEFORE..$HEAD_OF_PASS" \
+            | xargs -r -I{} git show --format= --cc {} -- '*.md' \
+            > "$P/record-diff.patch"
+          for d in systems screens; do
+            if git cat-file -e "$BEFORE:$d" 2>/dev/null; then
+              git archive "$BEFORE" -- "$d" | tar -x -C "$P/record-base"
+            fi
+          done
+          echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
+          echo "merge $M: pass $BEFORE..$HEAD_OF_PASS, $(wc -l < "$P/changed.txt") file(s), $(wc -c < "$P/record-diff.patch") bytes of record diff"
+
+      - name: assemble the record review
+        id: record
+        run: |
+          pipeline agent record-review \
+            --config "$GITHUB_WORKSPACE/.project/pipeline.config.json" \
+            --diff "$RUNNER_TEMP/pipeline/record-diff.patch" \
+            --changed-files "$RUNNER_TEMP/pipeline/changed.txt" \
+            --base-tree "$RUNNER_TEMP/pipeline/record-base" \
+            --out "$RUNNER_TEMP/pipeline/review" \
+            --prompt-template "$GITHUB_WORKSPACE/prompts/record-review.md" \
+            --outcome-path "$RUNNER_TEMP/pipeline/review/review.json"
+
+      - name: run the record review
+        if: steps.record.outputs.reviewable == 'true'
+        uses: ./.github/actions/run-agent-model
+        with:
+          prompt_path: ${{ runner.temp }}/pipeline/review/prompt.md
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          log_dir: ${{ runner.temp }}/pipeline/review
+          expect_file: ${{ runner.temp }}/pipeline/review/review.json
+
+      - name: record the verdict
+        if: always()
+        run: |
+          set -euo pipefail
+          P="$RUNNER_TEMP/pipeline"
+          OUT="$RUNNER_TEMP/verdict-${{ matrix.sha }}"
+          mkdir -p "$OUT"
+          cp "$P/record-diff.patch" "$P/changed.txt" "$OUT/" 2>/dev/null || true
+          cp "$P/review/prompt.md" "$P/review/review.json" "$P/review/run-error.txt" "$OUT/" 2>/dev/null || true
+          {
+            echo "sha=${{ matrix.sha }}"
+            echo "before=${{ steps.pass.outputs.before }}"
+            echo "reviewable=${{ steps.record.outputs.reviewable }}"
+            if [ -f "$P/review/review.json" ]; then
+              echo "verdict=$(jq -r '.verdict' "$P/review/review.json")"
+              echo "narration=$(jq '[.findings[] | select((.kind // "narration") == "narration")] | length' "$P/review/review.json")"
+              echo "contradiction=$(jq '[.findings[] | select(.kind == "contradiction")] | length' "$P/review/review.json")"
+            else
+              echo "verdict=(none)"
+            fi
+          } > "$OUT/row.txt"
+          cat "$OUT/row.txt"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verdict-${{ matrix.sha }}
+          path: ${{ env.OUT }}
+          retention-days: 30
+
+  summary:
+    needs: [list, replay]
+    if: always() && needs.list.outputs.shas != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: verdict-*
+          path: verdicts
+      - name: the table
+        run: |
+          {
+            echo "## Record review replay — ${{ inputs.repository }}@${{ inputs.ref }}"
+            echo
+            echo "A count of declines is not a count of defects: open the artifact and read the findings before drawing anything from a row."
+            echo
+            echo "| merge | reviewable | verdict | narration | contradiction |"
+            echo "|---|---|---|---|---|"
+            for row in verdicts/*/row.txt; do
+              . "$row"
+              echo "| \`${sha:0:9}\` | ${reviewable:-} | ${verdict:-} | ${narration:-} | ${contradiction:-} |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
