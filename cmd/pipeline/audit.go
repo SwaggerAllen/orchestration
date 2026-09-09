@@ -171,6 +171,22 @@ func cmdAudit(args []string) error {
 	default:
 		fmt.Printf("reasons index: %d doc(s) checked\n", ported)
 	}
+	// The port's progress as a number (DESIGN §4): rule-side bytes per
+	// ported doc, beside the reason-side. A report and never a gate —
+	// the budget a doc has to hit is the port's acceptance criterion,
+	// a number nobody has hit yet is a guess, and a gate on it would
+	// need an author-owned config field.
+	var sizes []string
+	for _, ix := range docs {
+		if !ix.Ported() {
+			continue
+		}
+		rules, reasonsSize := fileSize(filepath.Join(*root, ix.Path)), fileSize(filepath.Join(*root, ix.FilePath))
+		sizes = append(sizes, fmt.Sprintf("%s %.1f KB rules / %.1f KB reasons", ix.Path, float64(rules)/1024, float64(reasonsSize)/1024))
+	}
+	if len(sizes) > 0 {
+		fmt.Printf("reasons index sizes: %s\n", strings.Join(sizes, "; "))
+	}
 
 	// The class audit needs both halves — what arrived, and what the
 	// issue said. Each missing half is reported, never assumed clean:
@@ -348,6 +364,16 @@ func cmdAudit(args []string) error {
 		fmt.Fprintln(w, "\nA mutex nobody took is a collision nobody could prevent (DESIGN §9).")
 	})
 	return fmt.Errorf("audit: %d violations — a mutex nobody took is a collision nobody could prevent (DESIGN §9)", len(violations))
+}
+
+// fileSize is a file's size in bytes, and 0 for one that is not there —
+// a doc with no sibling has no reason-side bytes.
+func fileSize(path string) int64 {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return st.Size()
 }
 
 // readPathList reads a newline-separated path list, treating an empty

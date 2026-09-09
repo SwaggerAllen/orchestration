@@ -94,6 +94,12 @@ context, and the reason is one `pipeline reasons` away from it.
   a named ticket where something broke — these are reasons, not
   narration, even when they mention a pass. The test is whether the
   sentence tells a reader *why the rule holds* or *what a pass did*.
+- **An entry's body**, in a `<name>.reasons.md`. It is the reason
+  attached to its rule by construction, and it is where an incident is
+  meant to be told — "the first draft put X here; review threw it back"
+  is narration in a doc and a reason in an entry when the rule now
+  depends on what that round found. Flag a passage in an entry only when
+  it narrates a pass and states no fact the rule depends on.
 - **A removed line.** Deletions are context. This pass is being judged
   on what it added.
 - **Prose you would merely have written differently.** You are not a

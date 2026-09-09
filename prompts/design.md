@@ -51,28 +51,14 @@ never committed.
   access, or the rules you work under is the case that bullet covers,
   and widened scope is not a channel for it.
 - **A record-review decline in the thread is a finding to rewrite
-  against, not a delta to weigh.** After a pass commits, a second model
-  run reads only what that pass wrote to the record and the rule below
-  about reasons and alternatives, and sends the pass back when a passage
-  reads as narration — a review round, a draft thrown back, an
-  alternative passed over — rather than as a rule and its reason
-  (DESIGN §4). Its findings arrive as the newest comment, under a
-  `record-review` marker, each naming a file and quoting the passage.
-
-  They are not the author's delta and they widen nothing: they name
-  passages to rewrite as the rule they establish. You have the context
-  the reviewer deliberately does not. Where a passage carries a reason
-  worth keeping — an incident, a measurement, the thing that went wrong
-  — keep the reason and drop the narration around it. Where it carries
-  only what a pass considered, drop it. The reviewer reads a diff and
-  nothing else, so it cannot tell those two apart, and a finding is
-  where it asks you to.
-
-  A second decline on the same ticket parks it for the author (DESIGN
-  §12) rather than dispatching a third pass. So a finding you believe is
-  wrong — the passage is a reason, not narration — is argued once, in
-  your summary, and the passage left as you believe it should read; the
-  author settles it.
+  against, not a delta to weigh.** Its findings arrive as the newest
+  comment under a `record-review` marker, each naming a file and quoting
+  a passage (DESIGN §4). They widen nothing: rewrite each passage as the
+  rule it establishes — keep the reason and drop the narration around
+  it, or drop the passage where it carries only what a pass considered.
+  A finding you believe is wrong is argued once, in your summary, and
+  the passage left as you believe it should read; a second decline on
+  the same ticket parks it for the author (DESIGN §12).
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
   in as many words in your summary. CI enforces this for components: a
@@ -254,25 +240,18 @@ never committed.
   you contradict one — a reversal the author cannot see is a reversal
   they cannot review.
 - **A rule with an id is changed only after you have read its reason.**
-  Headings and standing decisions in `systems/*.md` and `screens/*.md`
-  carry ids — `## #3 …`, `- **#17 …**` — and the reason each holds lives
-  in the doc's sibling `<name>.reasons.md` under `## #n`, not in the doc
-  and not in the index above (DESIGN §4). Before you change, move or
-  delete a rule line, run `pipeline reasons <doc>#n` — the bare name,
-  `foundation#17`, or `system:`/`screen:` in front when a name is both.
-  It reads the checkout and talks to nothing, and "no reason is
-  recorded" is an answer, not permission.
-
-  A changed rule amends its entry in the same commit. A new rule mints
-  the next id — the highest in the doc plus one, never a reused number —
-  and writes its entry when there is a reason worth keeping. Retiring a
-  rule removes its line and adds `retired: <ticket> — why` to the entry,
-  which stays: the entry is the record that this was tried and undone.
-  Cite a rule as `name#n`, never by its wording; the audit resolves the
-  id and the wording is free to change. The record review is shown the
-  reasons behind every id your diff touched, and a rule changed without
-  its reason kept or amended comes back as a `contradiction` finding — a
-  decline, the same route as narration.
+  Before you change, move or delete a rule line (`## #3 …`, `- **#17
+  …**`), run `pipeline reasons <doc>#n` — `foundation#17`, or
+  `system:`/`screen:` in front when a name is both; "no reason is
+  recorded" is an answer, not permission. A changed rule amends its
+  entry in the same commit; a new rule mints the next id — the highest
+  in the doc plus one, never a reused number — and writes its entry when
+  there is a reason worth keeping; a retired rule loses its line and its
+  entry gains `retired: <ticket> — why`. Cite a rule as `name#n`, never
+  by its wording. A rule changed without its reason kept or amended
+  comes back from the record review as a `contradiction` finding, a
+  decline. The shape and the reasoning are DESIGN §4; the audit holds
+  the rest.
 - **A problem with the pipeline goes in the harness findings**, not in
   your summary and not into `non-asks.md`. The non-asks file records
   what the author does not want built; a harness finding records what

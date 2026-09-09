@@ -6,8 +6,9 @@
 // design pass reads; the reason is what one pass reads, the pass that is
 // about to change the rule. Inline, the two are paid for together on
 // every read — measured on Catapult's tree, the `## Standing decisions`
-// sections grew from 388 KB to 521 KB in one week while the rule
-// statements inside them stayed near five percent of the text. Moved out
+// sections grew from 388 KB to 521 KB in the week to 2026-09-01 and
+// stood at 753 KB across 341 bullets on 2026-09-09, with the bold leads
+// that state the rules at 4.4% of that text. Moved out
 // without a join, the reason is the half a later pass loses: Catapult's
 // `docs/conventions.md` §12 records a commit that moved reasoning "into
 // the code it guards" and landed one half of it nowhere.

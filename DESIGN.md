@@ -459,8 +459,9 @@ under `## #17`, with its metadata lines (`since:` the ticket that established it
 condition worth reopening it on, `retired:` the ticket that stopped it and why) before any
 prose. The rule is what every design pass reads; the reason is what one pass reads, the pass
 about to change the rule. Inline, both were paid for on every read: Catapult's `## Standing
-decisions` sections grew from 388 KB to 521 KB in one week with the rule statements near five
-percent of the text. An entry is optional — a screen section is a description as often as a
+decisions` sections grew from 388 KB to 521 KB in the week to 2026-09-01 and stood at 753 KB
+across 341 bullets on 2026-09-09, with the bold leads that state the rules at 4.4% of that text
+and the bullets' first paragraphs at half of it. An entry is optional — a screen section is a description as often as a
 rule, and a check demanding an entry for every id would be met with a placeholder sentence — so
 an id with no entry answers "no reason recorded", and that answer reaching a reviewer is itself
 information. A retired rule loses its line and keeps its entry, which is what keeps the id from
@@ -475,6 +476,31 @@ sibling is a sibling by convention, and `systems/*.md` already matches
 `systems/foundation.reasons.md` (a single star does not cross a slash, but it does cross a dot),
 so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
 author-owned moves ahead of this.
+
+**Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
+keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
+it names (the file, the function, the shape), the predicate for when it applies, and the one
+clause of why that sits in the rule's own sentence. The sibling gets what a pass needs only to
+*change* the rule: the argument, the incident, the measurement and its numbers, the alternatives
+that lost, the ticket history. The test for a sentence is whether a pass could still follow the
+rule correctly with it gone — yes, and it moves; no, and it stays. Neither of the two cuts the
+tree suggests is right: the bold lead alone loses the "because" that 239 of Catapult's 341
+bullets carry in their first paragraph, which is the clause that stops the next pass simplifying
+the rule back into the bug, while the whole first paragraph keeps half the text and buys half of
+what the split promised. A bold-led sub-paragraph inside a bullet — Catapult carries 309 of them
+against 341 bullets — is promoted to its own bullet and minted its own id when it *states* a rule,
+and moves to the parent's entry when it *argues* one; folded into the parent it can be neither
+cited nor retired on its own, and a touch to any of them hands the reviewer the whole parent.
+`since:` stays absent where the ticket is not known rather than guessed. The port moves text and
+never rewrites it, and that is checked rather than trusted: every sentence of the original
+appears whole in exactly one of the two files, and every entry's body is a contiguous run of
+the original block of the rule it is keyed to — the second clause is what catches an entry keyed
+to the wrong id, which the audit's join cannot see and which a heading numbered first and a
+bullet numbered later are one off-by-one from. The audit prints each ported doc's rule-side and
+reason-side bytes, as a report and never a gate: a doc a pass reads whole is on the order of
+30–40 KB, which for Catapult's largest doc is roughly 450 bytes of rule per bullet, and that is
+the port's acceptance criterion — a number nobody has hit yet is a guess, and a gate on it would
+need an author-owned config field.
 
 A sibling file is a reason moved out of the doc, and moving a reason out of a design doc is the
 loss Catapult's `docs/conventions.md` §12 records: a commit that moved reasoning "into the code it

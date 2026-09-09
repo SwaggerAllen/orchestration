@@ -612,3 +612,19 @@ func TestAuditSweepsReasonsFilesForRuleCitations(t *testing.T) {
 		t.Errorf("err = %v, stderr = %s", err, stderr)
 	}
 }
+
+// The port's progress is a number, printed per ported doc and never
+// gated: the budget is the port's acceptance criterion, not a rule a
+// ticket can be failed on (DESIGN §4).
+func TestAuditReportsRuleSideBytesPerPortedDoc(t *testing.T) {
+	out, err := runAudit(t, portedProject(t))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "reasons index sizes: systems/billing.md 0.2 KB rules / 0.1 KB reasons") {
+		t.Errorf("out = %s", out)
+	}
+	if strings.Contains(out, "screens/home.md 0") {
+		t.Error("an unported doc was sized; the report is about the port's progress")
+	}
+}

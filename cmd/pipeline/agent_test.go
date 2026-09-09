@@ -1024,6 +1024,7 @@ func TestRecordReviewRolePromptCarriesBothHalvesOfTheRule(t *testing.T) {
 		{"the diff, the reasons behind what it touched, and the rule", "the isolation sentence, amended for the one input added"},
 		{"a rule whose reason the diff amends alongside it", "the never-flag half of the new kind: the entry moving with the rule is the split working"},
 		{"no reason recorded", "a rule with no entry has nothing to contradict"},
+		{"an entry's body", "an entry is the reason attached to its rule by construction, and the place an incident is told"},
 	} {
 		if !strings.Contains(lower, want.text) {
 			t.Errorf("prompts/record-review.md does not carry %q — %s", want.text, want.why)
