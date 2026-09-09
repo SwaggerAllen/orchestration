@@ -76,6 +76,8 @@ func run(args []string) error {
 		return cmdScenario(args[1:])
 	case "state":
 		return cmdState(args[1:])
+	case "stats":
+		return cmdStats(args[1:])
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -121,6 +123,12 @@ commands:
   state    the pipeline's own move record: ingest adopts a project's
            existing tickets so the DESIGN 9 invariants apply to them from
            now rather than from whenever each next moves
+  stats    the pipeline's measurement of itself: collect recomputes the
+           tracker half and advances the run half, writing both to the
+           ProjectStats store (DESIGN 13). Safe to re-run at any point —
+           the tracker half is an idempotent recompute and the run half
+           is insert-only, which is what lets a backfill span nights
+           (requires LINEAR_API_KEY, GITHUB_TOKEN and PIPELINE_STATE_TOKEN)
   version  print the binary version
 `)
 }

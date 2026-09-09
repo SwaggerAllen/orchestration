@@ -1422,6 +1422,24 @@ signal that was missing.
    non-deterministic check, once per milestone. The run posts a result marker on the ticket;
    the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
 
+   **The same workflow runs detached, with no ticket, and then is not part of this protocol.**
+   The ticket input is optional: given one, everything above holds; given none, the suite runs,
+   the job's status carries `pass`/`fail` as usual, the verdict goes to the run's job summary,
+   and *nothing* is written to the tracker — no marker, no gate satisfied, no `Blocked`. It
+   exists for the two cases the boundary shape cannot serve: running the suite when no boundary
+   ticket is open at all, and re-running it without adding another marker comment to a ticket
+   whose verdict has not changed. A marker is how the boundary protocol advances, so a run
+   nobody's boundary asked for must not write one.
+
+   **A detached run is invisible to the control plane, and its name is what makes it so.** Runs
+   are correlated by name alone — `pipeline: <kind> <ticket>` — so a detached run is named
+   outside that convention rather than with an empty ticket, which would be a half-formed
+   member of it. The consequence to know: the singularity check cannot see such a run, so it
+   neither blocks a boundary dispatch nor is blocked by one. Dispatching it by hand while a
+   boundary's own suite is live runs two live suites at once, against the same real services.
+   That is the author's to avoid; nothing in the plane can, because a run attached to no ticket
+   is a run no ticket's `LiveRun` reports.
+
    **A failure parks the ticket in `Blocked`, and the verdict gates the boundary agent.** The
    marker used to be the whole of it, on the reasoning that it "lands on the boundary ticket
    where the author is already looking". That assumption did not hold. A boundary ticket in
@@ -2028,6 +2046,35 @@ real and is the trade: a ticket whose verdict cannot be read now waits quietly r
 failing loudly, so the honest report of the failure has to come from somewhere else, which is
 what the claim-failure record below is for.
 
+**A transient tracker failure is retried on reads, and never on writes.** The sweep's first act
+is a project-wide read, which the rule above makes fatal — so one unlucky request costs every
+dispatch, promotion and escalation that beat would have made. Six of Catapult's sweeps went
+that way inside eighty minutes on 2026-09-05, each dying on `Post
+"https://api.linear.app/graphql": context deadline exceeded (Client.Timeout exceeded while
+awaiting headers)`, and each cleared by a re-run or by the next timed sweep, which is what
+identifies them as blips rather than an outage.
+
+The asymmetry is the whole of the rule. A timeout awaiting headers says nothing about whether
+the server processed the request: the read that never answered may have run, and re-running it
+costs a duplicate read, which is nothing. Re-running a *write* costs a duplicate write, and a
+duplicated comment is not merely noise here — the escalation rules count their own markers, so
+one extra `ci-red` parks a ticket in `Blocked` a failure early, and no later sweep undoes it.
+The sweep is convergent, so a write that fails is re-derived on the next beat; a write that
+succeeded twice is not recoverable at all. Losing a beat is the cheaper failure, and it is the
+one chosen.
+
+Which half a call falls in is read off the GraphQL document — a `query` is retried, a
+`mutation` is not — rather than from a list of method names kept beside it. A list is a second
+place to update, and a mutation added later would be retried by omission; read off the
+document, it is excluded by being what it is.
+
+The attempt count and the backoff are **bounds, not measurements**, and say so where they are
+declared. The one figure taken is the client's own 30s timeout, which is what those six sweeps
+hit; nobody has measured how long Linear stays unreachable, so three attempts is a guess at
+"long enough for a blip, short enough that a real outage still fails the run". A retried
+failure reports its attempt count in the error, or the next person to look measures one timeout
+where there were three.
+
 **A run that dies before it claims says so, and a broken harness parks the ticket.** Every other
 failure route posts through the abort path, and abort needs the claim file to know what it is
 aborting — so a run that never got one skipped it, and the loudest failures, the ones where the
@@ -2048,6 +2095,31 @@ passes read as input — the same trust boundary as a CI failure (§9).
 Evidence is cleared when the run recovers. The model pass fails over from the subscription
 credential to the API key, and a first attempt's death left behind is a cause of death attached
 to a run that went on to succeed, or worse, to one that later failed somewhere else entirely.
+
+**A zero exit is not a finished pass, so the artifact decides.** The model runs
+non-interactively, and `claude -p` exits 0 the moment the turn ends — which is not the same
+event as the work being done. A pass that puts a command in the background and stops waiting on
+it ends its turn there; nothing waits on that command, the process exits 0, and the harness
+reads a completed pass. Catapult's ORC-230 hit this twice inside twenty-five minutes on
+consecutive dev reworks, each ending on a sentence rather than on work — "a `mix compile
+--warnings-as-errors` is running in the background to verify; I'll continue once it completes",
+then "I'll wait for the root `mix test` background task to complete before proceeding". Both
+runs pushed their `wip:` safety net over work whose gates had, by the model's own account, not
+been run, and both tickets went to `Blocked` over a hand-back nobody wrote.
+
+The role's own required file is what separates the two, because a pass that finished wrote it:
+the hand-back for dev, the verdict for reconcile. A zero exit that did not produce it is
+resumed **once**, with a message saying the turn ended early and that nothing was waiting for
+the thing it was waiting on. Design and boundary declare no such file — design's product is the
+tree it wrote and boundary's proposals are optional by construction — so they are not resumed,
+and that is a gap rather than a decision.
+
+A resume that comes back empty does **not** fail the model step. The steps after it are what
+commit and push the tree, and skipping them discards the run's work outright, which is the
+older failure the push step's own safety net exists for. So the step exits 0, the work lands on
+the branch, and finish is what reports the missing artifact — naming the stopped pass rather
+than the absent file, since `open .../handback.md: no such file or directory` reads as the
+harness losing a file and sends the reader after the wrong thing.
 
 **And it brings the argument the run had already written, when there is one.** A run that fails
 *validation* — the outcome parsed and the harness refused its shape — has done the thinking the
@@ -2141,10 +2213,31 @@ read and no author reliably remembers.
   tail of each one's log and puts them in the prompt, fenced as evidence rather than
   instruction — a CI log carries whatever a test happened to print. The harness reads, the
   agent reasons, exactly as with the ticket body and the non-asks document; "let it read CI"
-  would be a credential, not a feature. Logs are bounded — three jobs, a tail each — because
-  a whole log is mostly setup and an unbounded one is an unbounded prompt. A fetch that fails
-  is stated in the prompt rather than swallowed: a rework with no evidence and a build with
-  nothing to say look identical, and only one of them licenses a confident fix.
+  would be a credential, not a feature. What goes *in the prompt* is bounded — three jobs, a
+  tail each — because an unbounded log is an unbounded prompt, which fails the run in a way
+  that looks like the model's fault.
+
+  **The tail is not reliably the failure, so the whole log is written to a file beside the
+  checkout and the prompt names it.** Actions appends post-job cleanup after the failing step,
+  so the end of a log is where the runner stopped rather than where the build broke: on
+  Catapult's `ORC-224` the last 150 lines were checkout teardown, a Postgres
+  service-container dump and orphan-process cleanup, with no test output among them, and the
+  ticket bounced to `Blocked` twice — the second time on a rework pass whose entire evidence
+  was those 150 lines. Raising the tail does not fix that and the measurement is why: the
+  cleanup is *appended*, so a larger tail is a larger window on the same wrong end of the
+  file — on that run the failing step's marker was four lines outside the window and the
+  violation explaining it three lines above that. **The file is indexed rather than read end
+  to end:** Actions marks the failing step with `##[error]` and every step with `##[group]`,
+  so the harness reports the line and step name it already found, and the prompt carries the
+  two greps for the cases it did not. An `##[error]` says only that a step exited non-zero,
+  so the rule the prompt states is to read *upward* from it. The log was already being
+  fetched whole and truncated in-process, so spilling it
+  costs no extra call; the file goes under the pipeline checkout, which the branch step
+  already excludes from the commit, so it cannot ride into the PR. A spill that fails is its
+  own line in the prompt, distinct from a read that failed: the tail is still there and only
+  the escape hatch is missing. A fetch that fails is stated in the prompt rather than
+  swallowed: a rework with no evidence and a build with nothing to say look identical, and
+  only one of them licenses a confident fix.
 - **CI red twice on the same branch → `Blocked`.** The count is the count of the control
   plane's own failure-comment markers on the ticket — nothing else needs to be stored, and a
   marker can't be miscounted the way an agent's prose can. Two reds on one branch is rarely a
@@ -2560,6 +2653,126 @@ accurate when written, not derived. Encoding them would mean rewriting five `swi
 statements into data-driven dispatch, and those switches validate arguments and call helpers
 as well as mapping — the rewrite would risk more than the drift it prevents. Saying which is
 which beats implying the whole table is machine-checked.
+
+### The stats store, and why it is a second object
+
+Nothing measured the pipeline, so no question about it could be answered: whether Actions is
+cost effective, whether design time is climbing, whether rework is climbing, how much of each
+milestone is bugs and debt. `ProjectStats` is a second Durable Object class in the same Worker
+holding the derived answer.
+
+**A second class rather than more tables on `ProjectState`.** Durable Objects serialize
+requests to one instance, and `ProjectState` sits on the critical path — every sweep reads
+`/all`, every dispatch calls `/reserve`. A dashboard aggregation queued ahead of a reservation
+would widen exactly the dispatch window the reservation exists to close. Same Worker, same
+deploy, same auth; its own lane.
+
+**Derived, not collected: the collector recomputes from the tracker and the host.** Linear
+holds each ticket's complete state history and GitHub holds run timing, so a backfill and a
+nightly pass are the same code with a different window. A separate event-capture path would be
+a second source of truth needing its own correctness proof, and would still need a backfill for
+anything older than the day it shipped. Because the pass is a recompute, a defect in the
+aggregation is repaired by running it again.
+
+**The two sources have different durability, so they have different write policies.** Linear's
+archive is a visibility flag rather than a deletion — an archived ticket returns its full state
+history — so the tracker half is a full recompute and idempotent upsert, safe to rebuild
+forever. GitHub's run data ages out, so **the collector may never delete a run row**. Once a run
+is past the host's horizon the stored row is the only copy, and a recompute that dropped it
+would destroy data no later pass could restore. That asymmetry is the reason the two halves are
+not written the same way, and it is enforced rather than assumed: the store has no route that
+removes a run.
+
+**Enumeration reads archived tickets.** The queries the collector runs must ask for them
+explicitly. Omitting that does not fail — it silently under-counts the oldest milestones, which
+renders as a downward trend on every per-milestone chart with nothing in the output looking
+wrong.
+
+**Minutes are computed, not read.** The host's own `billable` figure came back as zero on every
+run measured — 4-to-12-minute runs across six days, so not settlement lag — while
+`run_duration_ms` was accurate. So billing is reconstructed from each job's start and finish,
+rounded up to the minute per job, which is the host's documented model. Rounding waste is then
+the difference between that sum and the raw one rather than an estimate: for short, frequent
+jobs like the sweep it is a large fraction of the bill, and it has a different remedy than long
+jobs do — debounce wider, not move elsewhere. The host's monthly account total is the
+cross-check; a computed sum that does not land near it means the arithmetic is wrong.
+
+**Facts at ticket granularity, aggregated at read time.** Label filters are arbitrary set
+questions — has this, lacks that — and pre-aggregating them means materialising a powerset.
+Day and week buckets are likewise computed on read, because a stored bucket is a decision about
+week boundaries that becomes a migration when it is wrong. Filter values are bound parameters;
+only a fixed allowlist of column and bucket names is ever interpolated.
+
+**Nothing is filtered on the way in.** The collector's own runs are marked rather than dropped,
+so runaway spend by the thing measuring spend stays visible. Collection is the irreversible
+step and filtering is free at read time, so a fact excluded at write is a question that can
+never be asked again.
+
+**The dashboard is served by the Worker, and its viewer is the credential.** The store's
+reads are the same Durable Object the collector writes, and a browser cannot be given the
+shared secret that collector uses: a page carrying a bearer token in its JavaScript hands that
+token to everyone who opens the page, and this one writes the move record as well. So a viewer
+arrives as a Cloudflare Access identity instead, and that identity buys reads and nothing else
+— the write routes still require the secret, so a page cannot rewrite the store it is
+displaying.
+
+**The identity is verified, not read.** Access sets its assertion header on requests it
+proxies, but the Worker also answers at its `workers.dev` origin, which nothing fronts — the
+webhooks post there — and anyone can set a header. So the token's signature is checked against
+the team's published keys, its audience against this application's, and its expiry. The
+audience check is the one that is easy to leave out and is not optional: one Access team signs
+for every application in it with the same keys, so without it a token minted for any other
+application in the account opens this one. With no team domain and no audience configured no
+identity is ever accepted, which is the state the Worker ships in — publishing the dashboard
+before the Access application exists opens nothing.
+
+**Serving the page from the Worker rather than from the project's Pages output is what makes
+"same-origin" true.** A Pages custom domain and this Worker are different origins, so a page
+there would be cross-origin to the store and would still need a credential it cannot hold; one
+hostname means one Access application, no CORS, and the viewer's own identity.
+
+**The chart library is vendored and served from that same origin, never from a CDN**, and the
+reason is that coupling again: the page sits behind the Access application and shares an origin
+with the store, so a script it loads runs with the viewer's identity. An outage would cost the
+charts; a compromise would cost rather more. The library's version is in its path, which is what
+makes an immutable cache header honest — a new version is a new URL rather than a stale cache
+nobody can bust — and the upstream file's digest is recorded beside the blob with a test that
+checks it. That digest is the point: a vendored dependency nobody can reproduce from upstream is
+worse than a link, because it can be neither audited nor updated with confidence.
+
+**The collector writes rows before the watermark that covers them, never the other way
+round.** Every other failure in this pass is a re-run away from repaired, because the tracker
+half is an idempotent recompute and the run half refuses a row it already holds. A watermark
+ahead of its rows is the one that is not: the collector steps over runs it never stored, those
+runs age out of the host's API, and the store has no route that would let a later pass fill the
+gap. The ordering is the whole guard, and it is the same reason the move record is written
+ahead of the transition rather than after it (§9) — in both cases the recoverable failure is
+chosen over the unrecoverable one.
+
+**A pass that runs out of budget is a normal outcome and reports itself as one.** The jobs call
+is per run and the host's hourly allowance is shared with the sweep, so a first backfill cannot
+finish in one sitting whatever the budget is. The pass stops, stores what it has, advances the
+watermark over exactly that, and says the backfill is unfinished. Treating it as an error would
+mean either a pass that never completes or a budget large enough to starve the sweep of the
+allowance it needs to dispatch anything.
+
+**The minute arithmetic is cross-checked by a human, because no credential here can do it.**
+The host's own account billing total is the only independent figure to hold the computed sum
+against, and it is account-scoped: neither the in-workflow token nor a repository-scoped
+fine-grained token can read it, and those are the only credentials the collector runs under. So
+the pass reads its own month back out of the store and prints it, and the comparison against
+the host's billing page is a glance somebody takes. Building the call would mean building one
+that fails in exactly the place the collector lives.
+
+**Milestones are derived from the boundary tickets, which already record them.** Each carries
+its milestone, and milestones are serial, so a milestone's window is the span between the
+previous boundary's completion and its own. A boundary ticket's *creation* is not the
+milestone's start — it is created when the milestone is ready to close, so a window anchored to
+it would omit most of the work. The first milestone has no predecessor and opens at the earliest
+ticket's creation. Grouping by window rather than by assignment is deliberate: harness tickets
+and bugs are frequently assigned to no milestone at all, and they are exactly the work a
+milestone-cost question is about. The boundary ticket's own open interval separately marks work
+completed while a boundary was running.
 
 ---
 

@@ -142,6 +142,27 @@ warning naming all of it, so the degradation is at least loud.
   able to start workflows in two projects, and then run one Worker per
   project.
 
+**`STATS_GITHUB_TOKEN`** (step 9; skip until you want the numbers)
+
+- Resource owner: `SwaggerAllen` · Repository access: **Only select
+  repositories** → **every repository whose Actions minutes you want
+  counted** — each project repo *and* `orchestration`.
+- Repository permissions: **Actions → Read-only**. Nothing else.
+- What it does: the nightly `pipeline stats collect` pass lists each
+  repository's runs and reads each run's jobs, which is where billable
+  minutes come from. Read-only is the whole of what a collector needs,
+  which makes this the least powerful credential in the system.
+- **Why not `github.token`.** The bill is the account's, not one
+  repository's: the pipeline repo and every project it drives spend the
+  same minutes, and `ci.yml`, worker deploys and preview builds are
+  plausibly most of them. The in-workflow token can only read the runs
+  of the repository it is running in, so a collector using it would
+  answer the cost question with a fraction of the cost — quietly, since
+  a smaller number looks like a cheaper month.
+- Lives as an Actions secret on the **project** repo, because the
+  collector runs there. It reads `pipeline.config.json`, and that file
+  is the project's.
+
 **Expiry.** Fine-grained tokens expire (default 30 days, max 1 year, or
 "no expiration" if you accept that). An expired token fails quietly in
 the way this pipeline hates: agent runs die at "checkout pipeline", or
@@ -167,6 +188,31 @@ under `.github/workflows/`, whatever permissions it holds. A ticket
 that asks the dev agent to change a workflow will fail at push — those
 edits are yours to make by hand, which is the correct blast radius for
 the files that define what the agents may do.
+
+**No token above carries `Workflows`, and that is on purpose.**
+`AGENT_GITHUB_TOKEN` leaves it unset by the entry above;
+`PIPELINE_REPO_TOKEN` is Contents read-only; `DISPATCH_TOKEN` and
+`STATS_GITHUB_TOKEN` are Actions only. So an agent run can never land a
+workflow file, in any repository — which is the blast radius these
+files want, and the reason a change in this repo that needs a new stub
+ships it as an example under `examples/stubs/` with the real file
+arriving separately.
+
+**Your own credentials are a different question, and the answer is
+yes.** A GitHub App installation token — the kind an assistant session
+holds — does carry workflow scope, and a workflow file pushed with one
+lands normally. Measured on `catapult`, pushing
+`.github/workflows/pipeline-stats.yml`. So "a stub is the author's to
+add" is a statement about the *pipeline's* credentials rather than
+about every credential you have.
+
+Written down because the question comes up every time a change needs a
+stub, and neither answer is discoverable from trying it. A push that is
+refused takes the whole push with it — GitHub rejects it with `refusing
+to allow ... to create or update workflow`, so the run dies carrying
+work that had nothing to do with the workflow file — and a push that
+succeeds tells you nothing about the token the *pipeline* would have
+used.
 
 ## 3. GitHub secrets and settings
 
@@ -798,11 +844,103 @@ both projects appear in one list. That is cosmetic only — the queue and
 the mutex are scoped by project (DESIGN §2), so a `screen:home` in one
 project never collides with a `screen:home` in the other.
 
+## 9. Pipeline stats (optional)
+
+The pipeline's measurement of itself (DESIGN §13): time in each state
+per ticket, per milestone and per day, and the Actions minutes each
+repository spends. It answers cost and trend questions and nothing in
+the loop depends on it, so it can be skipped and added later — the
+tracker keeps the history either way, and the first pass recomputes all
+of it.
+
+**a. The token.** `STATS_GITHUB_TOKEN`, per step 2: Actions →
+Read-only on every repository whose minutes should be counted, this
+repo included. Set it as an Actions secret on the **project** repo.
+
+**b. The stub.** Copy `examples/stubs/pipeline-stats.yml` from the
+pipeline repo into the project's `.github/workflows/` and edit its
+`--repos` list. It runs nightly and on demand. Yours to commit by hand:
+no pipeline credential carries `Workflows` (step 2).
+
+**c. The first run.** Actions → **pipeline-stats** → Run workflow, and
+read the job summary rather than the log. Three things on it are worth
+a look, and each one is there because its failure is silent:
+
+- **Archived count.** A zero on a project old enough to have archived
+  tickets means the enumeration lost `includeArchived`. That does not
+  fail — it drops the oldest tickets, which renders as a downward trend
+  on every per-milestone chart with nothing about the output looking
+  wrong.
+- **Collected vs New.** The run table is insert-only, because GitHub's
+  run data ages out and the stored row becomes the only copy. So a
+  second pass reporting many collected and none new is the mechanism
+  working. A *first* pass reporting that is a watermark being read from
+  somewhere the previous pass did not write.
+- **Backfill.** "budget spent, resumes next pass" is the normal shape
+  of a first backfill, not an error: the jobs endpoint is one call per
+  run, Catapult alone holds thousands, and the hourly API allowance is
+  shared with the sweep. It grinds down a night at a time.
+
+Then hold the month's total against **Settings → Billing**. That
+comparison is the only cross-check the minute arithmetic has, and it
+cannot be automated: account billing is not readable by a
+repository-scoped credential, which is every credential the collector
+runs under. The pass prints its own total so the comparison is one
+glance. A figure that does not land near the host's own means the
+arithmetic here is wrong.
+
+**d. Cloudflare Access, which is what the dashboard authenticates
+against.** The page is served by the metronome Worker at `/dashboard`,
+not from the Pages output — one hostname for page and API means no CORS
+and one Access application. It carries no credential of its own: a page
+holding `PIPELINE_STATE_TOKEN` would hand it to everyone who opened the
+page, and that token writes the move record too. Its viewer is the
+credential instead, and an Access identity buys reads only.
+
+Until `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` are set on the Worker, no
+identity is accepted and the dashboard shows a 401 with the reason on
+it. That is the shipped state, so the deploy carrying the page opens
+nothing.
+
+1. dash.cloudflare.com → **Zero Trust** → Access → **Applications** →
+   Add an application → **Self-hosted**.
+2. Give it the subdomain of the zone you already own — a hostname
+   nothing is serving yet is fine, and doing this first means there is
+   no window where it is public.
+3. Policy: **Allow**, with an **Emails** include naming your own
+   address. One rule; the point is a fence, not a directory.
+4. Login method: **One-time PIN** needs no identity provider and works
+   from a phone.
+5. Copy the application's **Audience (AUD) tag** — it is on the
+   application's Overview — and set both values on the Worker: Workers
+   & Pages → `pipeline-metronome` → Settings → Variables and Secrets.
+   `ACCESS_TEAM_DOMAIN` is the `yourteam` in
+   `yourteam.cloudflareaccess.com`; `ACCESS_AUD` is that tag. Plain
+   variables, not secrets — neither is one.
+6. Point the hostname at the Worker: `pipeline-metronome` → Settings →
+   Domains & Routes → Add custom domain. Then open
+   `https://<that hostname>/dashboard`.
+
+**Do not put Access in front of the `workers.dev` origin's paths, and
+do not turn `workers_dev` off.** The webhooks post there and Access
+would block them. That origin stays open, which is exactly why the
+Worker verifies the Access token's signature and audience rather than
+trusting the header Access sets: on `workers.dev` that header is
+whatever the caller typed.
+
+Cloudflare renames things in this dashboard from time to time, so treat
+the labels above as the shape rather than the exact words. What matters
+is that the hostname has an Access application in front of it before it
+resolves to anything, and that `ACCESS_AUD` names *that* application —
+one team signs for all of its applications with the same keys, so the
+audience is what keeps a token minted elsewhere in the account out.
+
 ## Secrets recap
 
 | Where | Name |
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
+| project repo Actions secrets | the dummy repo's set, plus `PIPELINE_STATE_TOKEN` and — with step 9 wired — `STATS_GITHUB_TOKEN` |
 | pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
 

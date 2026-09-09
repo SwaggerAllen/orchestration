@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,18 +103,52 @@ func TestCIRunsTheWorkerSuiteOnPullRequests(t *testing.T) {
 	if !strings.Contains(ci, "pull_request") {
 		t.Fatal("ci.yml no longer runs on pull requests; nothing below gates a merge")
 	}
-	if !strings.Contains(ci, "index.test.ts") {
-		t.Error("ci.yml does not run worker/index.test.ts, so the worker suite gates the " +
-			"deploy and not the merge — a PR breaking it merges clean and fails the deploy, " +
-			"where a failure is indistinguishable from a metronome nobody redeployed")
-	}
-	// Same runtime as the deploy gate, or the two can disagree: the
-	// merge gate passes and the deploy gate still fails after it.
 	deploy := repoFile(t, filepath.Join(".github", "workflows", "worker-deploy.yml"))
+
+	// The glob, not a filename. This asserted `index.test.ts` until a
+	// second suite was added, and a named file is a gate that silently
+	// stops covering whatever arrives next to it: the new suite runs
+	// locally, passes, and is executed by neither the merge gate nor the
+	// deploy gate, so a green pipeline says nothing at all about it.
+	//
+	// A directory argument is the wrong fix and was the reason the
+	// filename was there — Node tries to load `worker` as a module and
+	// fails.
+	const workerSuite = "node --test --experimental-strip-types *.test.ts"
 	for _, w := range []struct{ name, body string }{{"ci.yml", ci}, {"worker-deploy.yml", deploy}} {
+		if !strings.Contains(w.body, workerSuite) {
+			t.Errorf("%s does not run the worker suite as %q. Named alone, ci.yml would gate "+
+				"the deploy and not the merge — a PR breaking it merges clean and fails the "+
+				"deploy, where a failure is indistinguishable from a metronome nobody "+
+				"redeployed. Named as one file, a suite added beside it is never run at all.",
+				w.name, workerSuite)
+		}
+		// Same runtime in both, or they can disagree: the merge gate
+		// passes and the deploy gate still fails after it.
 		if !strings.Contains(w.body, `node-version: "22"`) {
 			t.Errorf("%s does not pin node 22; the merge gate and the deploy gate would "+
 				"test different runtimes", w.name)
+		}
+	}
+}
+
+// The gate is pinned in prose as well as in the two workflows, and a
+// change to one that misses the others leaves a contributor running
+// something CI does not. Six consecutive design-review rounds in the
+// project this pipeline drives each corrected one statement of a rule
+// and left its siblings; this is the same shape, in this repo.
+func TestTheWorkerSuiteCommandIsPinnedEverywhereItIsStated(t *testing.T) {
+	const workerSuite = "node --test --experimental-strip-types *.test.ts"
+	for _, path := range []string{
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".github", "workflows", "worker-deploy.yml"),
+		"CLAUDE.md",
+		filepath.Join("worker", "README.md"),
+	} {
+		body := repoFile(t, path)
+		if !strings.Contains(body, workerSuite) {
+			t.Errorf("%s does not state the worker suite as %q — the four statements of this "+
+				"command have drifted, so what a contributor runs is not what CI runs", path, workerSuite)
 		}
 	}
 }
@@ -344,8 +379,92 @@ func TestModelRunPassesThePromptOnStdin(t *testing.T) {
 	}
 	// Two attempts, subscription and API key, and the failover has to
 	// re-read the file rather than inherit a drained stream.
-	if n := strings.Count(body, `< "$PROMPT_PATH"`); n != 2 {
+	//
+	// The redirect reads a parameter rather than $PROMPT_PATH directly,
+	// since the resume feeds a different file through the same two arms
+	// — so the invariant is asserted where it now lives: both arms
+	// redirect, and the ordinary pass hands them the prompt file.
+	if n := strings.Count(body, `< "$stdin"`); n != 2 {
 		t.Errorf("the prompt is redirected into %d attempt(s), want both", n)
+	}
+	if !strings.Contains(body, `attempt "$mode" "$PROMPT_PATH"`) {
+		t.Error("the ordinary attempt does not read the prompt file")
+	}
+}
+
+// An exit 0 from the CLI means the turn ended, which is not the same
+// event as the pass being finished: `-p` is non-interactive, nothing
+// waits on a command the model put in the background, and a pass that
+// stops mid-work exits 0 and reads as a success. Catapult's ORC-230 went
+// to Blocked twice inside twenty-five minutes that way, on consecutive
+// dev reworks that each ended on a sentence about waiting.
+//
+// The role's required artifact is the signal, and the resume is bounded
+// at one. Guarded because the shape is easy to "simplify" into either of
+// its two broken neighbours: a loop, or a failure — and failing is the
+// worse of them, because the steps after this one are what commit and
+// push the tree.
+func TestModelRunResumesATurnThatEndedEarly(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	for _, want := range []string{
+		"EXPECT_FILE: ${{ inputs.expect_file }}",
+		`resume_if_unfinished "$mode"`,
+		`attempt "$mode" "$RESUME_PATH" --continue`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run-agent-model does not %q", want)
+		}
+	}
+	// One resume, not a loop: a pass that will not finish must not be
+	// paid for over and over.
+	if n := strings.Count(body, "--continue"); n != 1 {
+		t.Errorf("--continue appears %d time(s); the resume is bounded at one", n)
+	}
+	// And the resume must not decide the step's fate. Skipping the push
+	// loses the run's work outright, which is the older failure its
+	// safety net exists for, so a resume that comes back empty exits 0
+	// and leaves the report to finish.
+	fn := body[strings.Index(body, "resume_if_unfinished() {"):]
+	fn = fn[:strings.Index(fn, "\n        }\n")]
+	if strings.Contains(fn, "exit ") {
+		t.Error("the resume exits the step; that skips the push and discards the run's work")
+	}
+	if !strings.Contains(fn, "|| true") {
+		t.Error("a resume that errors is not tolerated; an unverified flag must not be able to fail the step")
+	}
+}
+
+// The resume is only armed for the roles whose output IS a file. Dev's
+// hand-back and reconcile's verdict are each required by finish, so
+// their absence is a stopped pass; design's product is the tree it
+// wrote and boundary's proposals file is optional by construction, so
+// neither has a signal to read and neither claims one.
+func TestOnlyTheRolesWithARequiredArtifactDeclareIt(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		expect string
+	}{
+		{"agent-dev", "${{ runner.temp }}/pipeline/handback.md"},
+		{"agent-reconcile", "${{ runner.temp }}/pipeline/verdict.json"},
+		{"agent-design", ""},
+		{"agent-boundary", ""},
+	} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", tc.action, "action.yml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := stripComments(string(raw))
+		got := strings.Contains(body, "expect_file:")
+		if want := tc.expect != ""; got != want {
+			t.Errorf("%s declares expect_file = %v, want %v", tc.action, got, want)
+		}
+		if tc.expect != "" && !strings.Contains(body, "expect_file: "+tc.expect) {
+			t.Errorf("%s does not point expect_file at %s — the file finish reads back", tc.action, tc.expect)
+		}
 	}
 }
 
@@ -388,6 +507,37 @@ func TestModelRunFollowsTheStableChannel(t *testing.T) {
 	// runs a different version from the one that was tested.
 	if n := strings.Count(body, `"@anthropic-ai/claude-code@$CLI_VERSION"`); n != 2 {
 		t.Errorf("the pin reaches %d attempt(s), want both", n)
+	}
+}
+
+// The stub and the correlation regexp live in different files, and only
+// one of them can fail a test. This reads the stub's own run-name and
+// checks the name it gives a detached run against the real regexp, so
+// renaming it to something that correlates is caught here rather than by
+// a detached run quietly attaching itself to the protocol.
+func TestTheStubsDetachedRunNameCannotCorrelate(t *testing.T) {
+	stub := repoFile(t, filepath.Join("examples", "stubs", "pipeline-live-suite.yml"))
+
+	// The literal the stub falls back to when no ticket is given. Pulled
+	// out of the file rather than restated, which is the whole point.
+	i := strings.Index(stub, "|| '")
+	if i < 0 {
+		t.Fatal("the stub's run-name has no `|| '<literal>'` no-ticket fallback. Either it lost one — a detached run would then be named \"pipeline: live-suite \" and half-match the convention — or the fallback is now an expression this test cannot read, in which case it also cannot check that it fails to correlate")
+	}
+	rest := stub[i+len("|| '"):]
+	j := strings.Index(rest, "'")
+	if j < 0 {
+		t.Fatal("could not read the fallback run name out of the stub")
+	}
+	detached := rest[:j]
+
+	if m := github.RunNameFields(detached); m != nil {
+		t.Errorf("the stub names a detached run %q, which correlates as kind %q ticket %q — it would reach the plane as an agent run",
+			detached, m[0], m[1])
+	}
+	// And the ticketed branch is still the exact convention.
+	if !strings.Contains(stub, "format('pipeline: live-suite {0}', inputs.ticket)") {
+		t.Error("the stub no longer builds the ticketed run name as \"pipeline: live-suite <ticket>\", which is the correlation")
 	}
 }
 

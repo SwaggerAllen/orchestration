@@ -66,4 +66,4 @@ jobs:
 
       - name: worker test
         working-directory: worker
-        run: node --test --experimental-strip-types index.test.ts
+        run: node --test --experimental-strip-types *.test.ts

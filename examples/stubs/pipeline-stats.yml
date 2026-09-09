@@ -1,0 +1,82 @@
+# Project stub: the pipeline's measurement of itself. Copy into the
+# project repo's .github/workflows/.
+#
+# It runs from the PROJECT repo rather than from the pipeline repo, for
+# the same reason every other command does: the config that names the
+# tracker's team and project, the state-store origin and the
+# protocol-state → tracker-name map is `pipeline.config.json`, and that
+# file lives here. A collector in the pipeline repo would have to check
+# this one out to read it.
+#
+# `schedule:` here, unlike the sweep. That file's comment explains why
+# GitHub's cron is wrong for the control plane — its 5-15 minute jitter
+# compounds across every hop of a ticket's life. None of that applies to
+# a nightly recompute: nothing is waiting on it, and a pass that lands
+# at 03:12 instead of 03:00 measures exactly the same history.
+name: pipeline-stats
+run-name: "pipeline: stats"
+
+on:
+  schedule:
+    # Nightly, well clear of the working day: the pass spends the
+    # account's GitHub API allowance on a per-run jobs call, and the
+    # sweep needs that allowance during the hours tickets move.
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read # checkout
+  actions: read # this repository's own run list and per-run jobs
+
+# One collector at a time. Two concurrent passes would each read the
+# same watermark, walk the same runs and pay the jobs call twice for
+# rows the store's insert-only rule then ignores — spending the
+# allowance the backfill needs to make progress.
+concurrency:
+  group: pipeline-stats
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: vars.PIPELINE_KILL_SWITCH != 'true'
+    runs-on: ubuntu-latest
+    env:
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+      PIPELINE_STATE_TOKEN: ${{ secrets.PIPELINE_STATE_TOKEN }}
+      # NOT github.token. The bill is the account's, not this
+      # repository's — the pipeline repo and every project it drives
+      # spend the same minutes — and the in-workflow token can only read
+      # the runs of the repository it is running in. Measuring one of
+      # them would answer the cost question with a fraction of the cost.
+      #
+      # STATS_GITHUB_TOKEN is a fine-grained PAT with Actions →
+      # Read-only on every repository named in --repos below, and
+      # nothing else (SETUP §2). Read-only is the whole of what a
+      # collector needs; it is the least powerful credential in the
+      # system.
+      GITHUB_TOKEN: ${{ secrets.STATS_GITHUB_TOKEN }}
+    steps:
+      - name: checkout project (for pipeline.config.json)
+        uses: actions/checkout@v4
+
+      - name: set up the pipeline
+        uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+        with:
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+          pipeline_ref: main # pin to @v1 once released
+
+      - name: collect
+        run: |
+          # --repos names every repository whose minutes this project's
+          # store should hold. The pipeline repo is on the list because
+          # its CI, worker deploys and rehearsals are part of the same
+          # bill.
+          #
+          # Safe to re-run at any point, and that is load-bearing rather
+          # than incidental: the tracker half is an idempotent recompute
+          # and the run half is insert-only, so a pass that stops on the
+          # host's rate limit resumes from its watermark and one that
+          # runs twice changes nothing the second time.
+          pipeline stats collect \
+            --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+            --repos "${{ github.repository }},swaggerallen/orchestration"

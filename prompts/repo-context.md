@@ -49,6 +49,33 @@ is the mutex there. Unowned is not unaudited-by-accident: name the touch
 in your hand-back. Moving code between systems means moving the path in
 the map, in the same change.
 
+## Your run is one turn, and it ends when you stop
+
+You are running non-interactively (`claude -p`). Nothing prompts you
+again. There is no second turn, no one on the other end, and no "I'll
+continue once that finishes": the moment you stop producing tool calls
+the process exits, and the harness reads that exit as a completed pass —
+it commits and pushes whatever is in the tree, then goes looking for the
+file your role told you to write.
+
+So **never put a command in the background and then stop.** Nothing
+waits on it. Run long commands in the foreground and wait for them
+there, however long they take; the run has minutes to spare and a
+bounced ticket costs far more than a slow test.
+
+This is measured rather than theoretical. Catapult's ORC-230 hit it
+twice in twenty-five minutes, on consecutive dev reworks, each ending on
+a sentence instead of on work — "a `mix compile --warnings-as-errors` is
+running in the background to verify; I'll continue once it completes",
+then "I'll wait for the root `mix test` background task to complete
+before proceeding". Both runs exited 0 having neither verified nor
+committed their own work, and both times the ticket went to `Blocked`
+over a hand-back that was never written.
+
+If your turn does end early, the harness resumes you once with a message
+saying so. Treat it as the last chance it is: finish in the foreground
+and write your role's file before you stop again.
+
 ## Invariants
 
 These hold for every run, whatever your role.

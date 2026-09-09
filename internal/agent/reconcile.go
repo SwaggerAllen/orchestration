@@ -126,6 +126,13 @@ const (
 // LoadVerdict reads and validates a verdict file.
 func LoadVerdict(path string) (*Verdict, error) {
 	raw, err := os.ReadFile(path)
+	// Split for the reason the hand-back's read is: absent is the model
+	// pass having stopped before it finished, not the harness having
+	// lost a file, and the two want different hunts. See the note in
+	// `cmd/pipeline`'s finish for the ORC-230 measurement.
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("verdict: none at %s — the model pass stopped before it finished, and a reconcile run that produced no verdict did not reconcile. `claude -p` exits 0 the moment the turn ends and nothing waits on a backgrounded command, so a run that stopped mid-work looks exactly like one that succeeded until this. The end of the model step's output in the run log says which", path)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("verdict: %w (a reconcile run that produced no verdict did not reconcile)", err)
 	}
