@@ -55,6 +55,22 @@ var (
 	// invalidates the work in flight (DESIGN §7).
 	CollisionVerdicts = []string{CollisionHolds, CollisionBites}
 
+	// RecordReviewVerdicts are the record review's two answers (DESIGN
+	// §4): a design pass's doc diff either carries pass narration to
+	// send back, or it does not. Two rather than three because the
+	// reviewer holds the diff, the reasons behind what it touched, and
+	// the rule, so "cannot tell" would be a reader asking for context it
+	// was deliberately not given — and the answer to that is pass, not a
+	// park.
+	RecordReviewVerdicts = []string{"pass", "decline"}
+
+	// RecordFindingKinds are what one record-review finding can be
+	// (DESIGN §4): narration, or a rule changed without its reason kept
+	// or amended. Not an outcome — a finding of either kind rides inside
+	// a decline — so §13's outcome table has no row for it, and the
+	// vocabulary is held to the reviewer's prompt instead.
+	RecordFindingKinds = []string{"narration", "contradiction"}
+
 	// LiveSuiteResults are the milestone live suite's three verdicts
 	// (DESIGN §10). Three rather than two because a runner handed a tag
 	// filter matching nothing exits non-zero, so a project that has not

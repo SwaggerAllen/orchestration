@@ -540,3 +540,177 @@ func TestTheStubsDetachedRunNameCannotCorrelate(t *testing.T) {
 		t.Error("the stub no longer builds the ticketed run name as \"pipeline: live-suite <ticket>\", which is the correlation")
 	}
 }
+
+// The record review runs as a second model pass inside the design job
+// (DESIGN §4), and the shape of that step is what keeps it a proposal
+// rather than a gate: through the shared runner, continue-on-error, and
+// its own log directory so its death is not the design run's.
+func TestTheRecordReviewRunsThroughTheSharedRunnerAndCannotFailThePass(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-design", "action.yml")))
+	i := strings.Index(body, "name: run the record review")
+	if i < 0 {
+		t.Fatal("the design action has no record review step")
+	}
+	// The step's own block: up to the next step.
+	j := strings.Index(body[i+1:], "\n    - name:")
+	step := body[i:]
+	if j >= 0 {
+		step = body[i : i+1+j]
+	}
+	for _, want := range []struct{ text, why string }{
+		{"actions/run-agent-model@", "its credential policy is the shared runner's, not its own"},
+		{"continue-on-error: true", "a reviewer that dies must not fail a good design pass (DESIGN §4)"},
+		{"log_dir: ${{ runner.temp }}/pipeline/review", "its death rattle must not land where the design abort reads this run's cause"},
+		{"steps.record.outputs.reviewable == 'true'", "no model run when the pass wrote nothing under designOwnedPaths"},
+	} {
+		if !strings.Contains(step, want.text) {
+			t.Errorf("the record review step does not carry %q — %s", want.text, want.why)
+		}
+	}
+	// And the finish step reads both files the review can leave behind.
+	finish := body[strings.Index(body, "pipeline agent finish"):]
+	for _, want := range []string{`--review "$RUNNER_TEMP/pipeline/review/review.json"`, `--review-error "$RUNNER_TEMP/pipeline/review/run-error.txt"`} {
+		if !strings.Contains(finish, want) {
+			t.Errorf("the finish step does not pass %s; the review would run and never be read", want)
+		}
+	}
+}
+
+// A declined pass has nothing to preview, and a preview build installs
+// a toolchain and spends a metered deployment. All three preview steps
+// are gated, not one: a build with no publish wastes the toolchain, a
+// publish with no build fails.
+func TestThePreviewIsSkippedOnARecordReviewDecline(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-design", "action.yml")))
+	for _, step := range []string{"build the storybook export", "read the preview target", "publish the preview"} {
+		i := strings.Index(body, "name: "+step)
+		if i < 0 {
+			t.Fatalf("no step %q", step)
+		}
+		block := body[i:]
+		if j := strings.Index(block[1:], "\n    - name:"); j >= 0 {
+			block = block[:j+1]
+		}
+		if !strings.Contains(block, "steps.verdict.outputs.verdict != 'decline'") {
+			t.Errorf("step %q runs on a declined pass", step)
+		}
+	}
+}
+
+// run-agent-model's log directory is an input with the old path as its
+// default, so the four agent actions that pass none keep writing where
+// their abort steps read.
+func TestTheModelRunnerTakesALogDirAndDefaultsToTheAbortsPath(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "actions", "run-agent-model", "action.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	for _, want := range []string{
+		"  log_dir:",
+		"LOG_DIR: ${{ inputs.log_dir }}",
+		`LOGDIR="${LOG_DIR:-$RUNNER_TEMP/pipeline}"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run-agent-model does not carry %q", want)
+		}
+	}
+}
+
+// The record review is handed the tree from the pass's start commit,
+// not the merge-base, and the export precedes the assembly that reads
+// it. `steps.base.outputs.sha` is the wrong sha for it: on a second pass
+// after a decline the first pass may already have amended an entry.
+func TestTheRecordReviewIsHandedTheTreeFromThePassStart(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-design", "action.yml")))
+	export := strings.Index(body, "name: export the record as it stood at the pass's start")
+	assemble := strings.Index(body, "name: assemble the record review")
+	if export < 0 || assemble < 0 || export > assemble {
+		t.Fatalf("export at %d, assemble at %d — the export must precede the step that reads it", export, assemble)
+	}
+	step := body[export:assemble]
+	for _, want := range []struct{ text, why string }{
+		{`BEFORE="${{ steps.branch.outputs.before }}"`, "the pass's start commit, not the merge-base"},
+		{`git cat-file -e "$BEFORE:$d"`, "git archive fails on a pathspec matching nothing"},
+		{`git archive "$BEFORE" -- "$d" | tar -x -C "$DEST"`, "the export itself"},
+	} {
+		if !strings.Contains(step, want.text) {
+			t.Errorf("the export step does not carry %s — %s", want.text, want.why)
+		}
+	}
+	if strings.Contains(step, "steps.base.outputs.sha") {
+		t.Error("the export reads the merge-base; a second pass after a decline would be shown the first pass's amendment as its own")
+	}
+	if !strings.Contains(body[assemble:], `--base-tree "$RUNNER_TEMP/pipeline/record-base"`) {
+		t.Error("the record review is not handed the exported tree; the section would say no base tree was handed in")
+	}
+}
+
+// Reconcile's reprompt runs after its checkout and before the model,
+// with the merge-base tree and the branch's changed files.
+func TestReconcileRepromptsAfterItsCheckoutWithTheTouchedReasons(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-reconcile", "action.yml")))
+	checkout := strings.Index(body, `git checkout "$BRANCH"`)
+	reprompt := strings.Index(body, "name: export the record at the merge-base")
+	model := strings.Index(body, "name: run the reconcile agent")
+	if checkout < 0 || reprompt < 0 || model < 0 || !(checkout < reprompt && reprompt < model) {
+		t.Fatalf("checkout at %d, reprompt at %d, model at %d — the reprompt needs the branch and the model needs the reprompt", checkout, reprompt, model)
+	}
+	step := body[reprompt:model]
+	for _, want := range []string{
+		`BASE="$(git merge-base origin/main HEAD)"`,
+		`git cat-file -e "$BASE:$d"`,
+		`git diff --name-only origin/main...HEAD > "$RUNNER_TEMP/pipeline/changed.txt"`,
+		"pipeline agent reprompt",
+		"--kind reconcile",
+		`--verdict-path "$RUNNER_TEMP/pipeline/verdict.json"`,
+		`--base-tree "$DEST"`,
+		`--changed-files "$RUNNER_TEMP/pipeline/changed.txt"`,
+	} {
+		if !strings.Contains(step, want) {
+			t.Errorf("the reconcile reprompt step does not carry %s", want)
+		}
+	}
+}
+
+// The replay reads a project and posts nothing: no tracker credential,
+// no finish, no comment. It is a measurement of the reviewer, and a
+// measurement that wrote to the thing it measured would not be one.
+//
+// Two files, because the stub is what a project copies and the action
+// is what a fix reaches: the stub wires three jobs, the action does
+// each one's work. Both are held to the absence list.
+func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
+	action := stripComments(repoFile(t, filepath.Join(".github", "actions", "review-replay", "action.yml")))
+	stub := stripComments(repoFile(t, filepath.Join("examples", "stubs", "pipeline-review-replay.yml")))
+	for _, want := range []struct{ text, why string }{
+		{"pipeline agent record-review", "the same assembly the design action runs"},
+		{`--base-tree "$RUNNER_TEMP/pipeline/record-base"`, "the reviewer is handed the record as it stood before the pass"},
+		{"actions/run-agent-model", "the same runner, so the verdict is the one a real pass would get"},
+		{`git cat-file -e "$BEFORE:$d"`, "the export guard, for a pass whose start had no screens/"},
+		{"xargs -r -I{} git show --format= --cc {} -- '*.md'", "the first-parent, markdown-only extraction the action uses"},
+		{"actions/upload-artifact", "the verdicts are the output"},
+		{`--prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md"`, "the prompt under test is the one pipeline_ref names"},
+	} {
+		if !strings.Contains(action, want.text) {
+			t.Errorf("review-replay/action.yml does not carry %s — %s", want.text, want.why)
+		}
+	}
+	for _, want := range []struct{ text, why string }{
+		{"max-parallel: 1", "one model run at a time"},
+		{"fetch-depth: 0", "the reconstruction walks back from the merge"},
+		{"pipeline_ref: ${{ inputs.pipeline_ref }}", "the reviewer under test is chosen per run, not per edit"},
+		{"actions/review-replay@main", "the reconstruction is the action's, so a fix to it reaches every project"},
+	} {
+		if !strings.Contains(stub, want.text) {
+			t.Errorf("pipeline-review-replay.yml does not carry %s — %s", want.text, want.why)
+		}
+	}
+	for name, body := range map[string]string{"review-replay/action.yml": action, "pipeline-review-replay.yml": stub} {
+		for _, absent := range []string{"pipeline agent finish", "LINEAR_API_KEY", "PIPELINE_STATE_TOKEN", "CommentTicket", "contents: write", "GITHUB_TOKEN:"} {
+			if strings.Contains(body, absent) {
+				t.Errorf("%s carries %q — a replay that writes to what it measures is not a measurement", name, absent)
+			}
+		}
+	}
+}

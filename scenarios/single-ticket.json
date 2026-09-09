@@ -24,10 +24,16 @@
     },
     "files": ["screens/home.md", "systems/greetings.md"],
     "markers": {
-      "farewell": ["dispatch", "merged"]
+      "farewell": ["dispatch", "record-review", "merged"]
     },
     "absentMarkers": {
       "farewell": ["stale-claim", "revert", "ci-red", "reconcile-bounce"]
+    },
+    "markerFields": {
+      "farewell": [
+        { "kind": "record-review", "field": "verdict", "values": ["pass"] },
+        { "kind": "record-review", "field": "verdict", "values": ["decline"], "absent": true }
+      ]
     }
   }
 }

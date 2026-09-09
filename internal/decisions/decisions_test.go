@@ -145,3 +145,40 @@ func TestLoadDirIndexesTheTree(t *testing.T) {
 		t.Errorf("a missing directory indexed %v", docs)
 	}
 }
+
+// The id token (DESIGN §4) rides in the entry: the bold lead is read
+// from its first character and the heading from its first, so nothing
+// here changes for the token to appear — but that is the claim under
+// test, not a fact, because the prompt tells a pass to cite what it
+// sees here.
+func TestTheIdTokenStaysInTheIndexEntry(t *testing.T) {
+	got := Index("## #1 Standing decisions\n\n- **#17 Generated clients are the only door** — and nothing else.\n\n## #3 Cross-project, deliberately\n")
+	want := []string{"#1 Standing decisions", "#17 Generated clients are the only door", "#3 Cross-project, deliberately"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("index = %v, want %v", got, want)
+	}
+}
+
+// Indexed, a reasons sibling lists one decision titled "#17" per rule
+// the doc already lists — measured by removing the skip: the sibling
+// arrived as `systems/dashboard.reasons.md` with entries `#17`, `#3`.
+func TestLoadDirSkipsReasonsFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "systems"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(root, "systems", name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("dashboard.md", "## #1 Standing decisions\n\n- **#17 Reads projections only**\n")
+	write("dashboard.reasons.md", "## #17\n\nBecause.\n\n## #3\n\nAnd.\n")
+	docs, bad := LoadDir(root, "systems", "system:")
+	if len(bad) != 0 {
+		t.Errorf("unreadable = %v", bad)
+	}
+	if len(docs) != 1 || docs[0].Path != "systems/dashboard.md" {
+		t.Fatalf("docs = %+v, want the doc alone", docs)
+	}
+}

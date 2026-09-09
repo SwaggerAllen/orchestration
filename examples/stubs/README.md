@@ -16,6 +16,7 @@ bindings live.
 | `pipeline-admin.yml` | `setup` and `state ingest`, on demand. The two operations the author runs by hand, reachable without a terminal — which matters because both are reached for when something is already wrong. Note its `deployments: read`: `setup` ends by probing the deploy endpoint, and that probe runs on a dry run too |
 | `pipeline-order.yml` | What to start next and what can run beside it, on demand, rendered to the run summary. Reads the tracker; writes nothing |
 | `pipeline-stats.yml` | Nightly recompute of the pipeline's own measurement (DESIGN §13): the tracker half from Linear's state history, the run half from Actions. The one stub that uses `schedule:` — nothing waits on it, so cron jitter costs nothing — and the one that does not run on `github.token`, because the bill spans repositories and the in-workflow token can only read its own |
+| `pipeline-review-replay.yml` | The record reviewer replayed over this project's own merges, on demand (DESIGN §4): reconstructs each pass's diff and starting record, runs the reviewer, keeps every verdict as an artifact under a summary table, posts nothing. Takes the pipeline ref the reviewer comes from as an input, so a reviewer on a pipeline branch is read against real diffs before it merges. Here and not in the pipeline repo because the model credential and the history are both here |
 
 **Every stub that runs the project's own commands carries the same
 environment block, and it is your `ci.yml` job's environment.** An agent

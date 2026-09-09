@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/SwaggerAllen/orchestration/internal/reasons"
 )
 
 // Doc is one screen or system doc's map.
@@ -65,8 +67,17 @@ func ParseFrontMatter(content string) ([]string, error) {
 }
 
 // LoadDir reads every *.md in dir (README.md excepted — it is prose about
-// the directory, not a doc) and returns their maps. A missing dir maps
+// the directory, not a doc; a `.reasons.md` sibling excepted too — it is
+// a doc's reasons, not a doc) and returns their maps. A missing dir maps
 // nothing: a project without system docs simply has no system audit yet.
+//
+// The sibling is skipped here rather than by each caller because four of
+// them read this list as "the docs that exist": the mutex audit, the
+// design pass's declared-doc check, discovered-label resolution and the
+// class audit. Read as a doc, `systems/foundation.reasons.md` is a
+// `Doc{Name: "foundation.reasons"}` with no map, which the audit ignores
+// and the label resolver accepts — a phantom `system:foundation.reasons`
+// label a pass could declare and hold.
 func LoadDir(dir string) ([]Doc, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -78,7 +89,7 @@ func LoadDir(dir string) ([]Doc, error) {
 	var docs []Doc
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") {
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") || reasons.IsReasonsFile(name) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, name))

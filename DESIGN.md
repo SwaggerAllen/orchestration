@@ -144,7 +144,7 @@ and the drift shows up as agents disagreeing about what a state means.
 |---|---|---|
 | `Backlog` | Nobody. Not committed to. | author, grooming pass |
 | `Todo` | Nobody. Committed, not started. | author, milestone pull |
-| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8) |
+| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8), design (a record-review decline, §4) |
 | `Designing` | Design agent, now. | design (claim) |
 | `Design review` | **Author.** Artifacts ready, not yet approved. | design |
 | `Ready for dev` | The queue. Scope is the **description**. | author (sign-off) |
@@ -183,7 +183,9 @@ waiting on the author* as distinct from *design is still working*. Sign-off is t
 `Design review` → `Ready for design` with a comment**, for the same reason the dev agent's push-back
 carries its argument: a rejection without one is a rejection the next pass repeats. The author
 may route straight to `Ready for design` because they are the one who would notice a ticket going
-round; an agent's push-back parks instead (§2.7).
+round; an agent's push-back parks instead (§2.7). The record review declines by the same route,
+before `Design review` is ever entered (§4): its findings are the comment, and the harness makes
+the move from `Designing`.
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
@@ -447,6 +449,124 @@ Catapult's ORC-115, where the prompt stated "never delete" ahead of the placemen
 a pass reasonably read it as governing both: eight passages narrating prior passes across five
 design-owned docs, two of them section headings numbering the review round.
 
+**A rule and its reason are two lines with two lifetimes, joined by an id.** Every h2-or-deeper
+heading in a screen or system doc, and every top-level bullet under `## Standing decisions`,
+carries an integer id at its head — `## #3 Cross-project, deliberately`, `- **#17 Generated
+clients are the only door** …` — unique within its doc, minted as the highest present plus one,
+and never reused or renumbered. The rule line keeps the sentence that states the rule; the
+reason it holds lives in a sibling file, `systems/<name>.reasons.md` beside `systems/<name>.md`,
+under `## #17`, with its metadata lines (`since:` the ticket that established it, `revisit:` the
+condition worth reopening it on, `retired:` the ticket that stopped it and why) before any
+prose. The rule is what every design pass reads; the reason is what one pass reads, the pass
+about to change the rule. Inline, both were paid for on every read: Catapult's `## Standing
+decisions` sections grew from 388 KB to 521 KB in the week to 2026-09-01 and stood at 753 KB
+across 341 bullets on 2026-09-09, with the bold leads that state the rules at 4.4% of that text
+and the bullets' first paragraphs at half of it. An entry is optional — a screen section is a description as often as a
+rule, and a check demanding an entry for every id would be met with a placeholder sentence — so
+an id with no entry answers "no reason recorded", and that answer reaching a reviewer is itself
+information. A retired rule loses its line and keeps its entry, which is what keeps the id from
+being reused and keeps the fact a later pass most needs: that this was tried and why it was
+undone. Ids are per-doc rather than global because the mutex (§6) already holds one ticket per
+doc, so a per-doc counter cannot race; two tickets on two docs minting from one counter could
+mint the same number in parallel. Any line in a doc belongs to the nearest id above it, which is
+what lets a diff say which rules it touched without anyone deciding where a rule ends — and it
+is why the container heading and a system doc's "Initial vs target" and "Depends on" carry ids
+too: a token each, and the attribution rule has no exceptions. No config field is involved: the
+sibling is a sibling by convention, and `systems/*.md` already matches
+`systems/foundation.reasons.md` (a single star does not cross a slash, but it does cross a dot),
+so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
+author-owned moves ahead of this.
+
+**Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
+keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
+it names (the file, the function, the shape), the predicate for when it applies, and the one
+clause of why that sits in the rule's own sentence. The sibling gets what a pass needs only to
+*change* the rule: the argument, the incident, the measurement and its numbers, the alternatives
+that lost, the ticket history. The test for a sentence is whether a pass could still follow the
+rule correctly with it gone — yes, and it moves; no, and it stays. Neither of the two cuts the
+tree suggests is right: the bold lead alone loses the "because" that 239 of Catapult's 341
+bullets carry in their first paragraph, which is the clause that stops the next pass simplifying
+the rule back into the bug, while the whole first paragraph keeps half the text and buys half of
+what the split promised. A bold-led sub-paragraph inside a bullet — Catapult carries 309 of them
+against 341 bullets — is promoted to its own bullet and minted its own id when it *states* a rule,
+and moves to the parent's entry when it *argues* one; folded into the parent it can be neither
+cited nor retired on its own, and a touch to any of them hands the reviewer the whole parent.
+`since:` stays absent where the ticket is not known rather than guessed. The port moves text and
+never rewrites it, and that is checked rather than trusted: every sentence of the original
+appears whole in exactly one of the two files, and every entry's body is a contiguous run of
+the original block of the rule it is keyed to — the second clause is what catches an entry keyed
+to the wrong id, which the audit's join cannot see and which a heading numbered first and a
+bullet numbered later are one off-by-one from. The audit prints each ported doc's rule-side and
+reason-side bytes, as a report and never a gate: a doc a pass reads whole is on the order of
+30–40 KB, which for Catapult's largest doc is roughly 450 bytes of rule per bullet, and that is
+the port's acceptance criterion — a number nobody has hit yet is a guess, and a gate on it would
+need an author-owned config field.
+
+A sibling file is a reason moved out of the doc, and moving a reason out of a design doc is the
+loss Catapult's `docs/conventions.md` §12 records: a commit that moved reasoning "into the code it
+guards" landed one half of it in both places it named and the other half nowhere, and a later
+ticket re-derived the whole chain to restore it. The sibling is not that move, on three counts
+that are each mechanical. It is design-owned by the same glob and written in the same commit, so
+the reason never leaves the pass that changed the rule; it is read by the same record review, so
+narration in an entry is judged where narration in a bullet is; and the id joins the two halves
+under an audit that reports either one idle, so a reason cannot be dropped in silence the way a
+paragraph moved into a moduledoc was. What the split changes is when a reason is paid for: on
+every read before, and now only when the rule it holds is touched — which is the moment the
+review is handed it, whether or not the pass thought to look.
+
+**The record review holds the design pass to that rule, from outside it.** After a design pass
+commits, a second model run inside the same job reads three things — the pass's own diff to the
+record, walked the way the ownership audit walks it so a merge's doc edits are not billed to the
+pass; the rule lines and reason entries behind every rule id that diff touched, as they stood
+before the pass; and the rule above — and nothing else: no ticket, no thread, no non-asks, no
+index. It answers `pass` or `decline`, and a decline names each passage that reads as narration
+rather than as a rule and its reason, or that changes a rule without keeping or amending the
+reason recorded for it — a `contradiction`, which names the rule as `name#n`. The harness posts
+the findings under a `record-review` marker and moves the ticket to `Ready for design` — the
+author's own decline route (§3) — with no PR opened and no preview built, because nothing is ready
+to be looked at.
+
+The reasons are the one input added to that isolation, and the argument for it is that they are
+selected by the diff and not by the ticket: a touched rule's entry is the record's own prior text
+about that rule, the removed side of the diff one file over, and it carries nothing the pass wrote
+about its ticket. Without it a rule rewritten against its own reason is invisible from the diff —
+the reason is in a file the diff did not touch, which is the whole point of the split. Which ids
+were touched is read off two trees rather than off the diff: the action exports `systems/` and
+`screens/` as they stood at the commit the pass started from, and the harness compares each id's
+block — the rule line and every line up to the next id — between that tree and the checkout. The
+pass's start commit rather than the merge-base, because the diff under review is `start..HEAD`,
+and on a second pass after a decline the first pass may already have amended an entry; diffing
+from the merge-base would show that amendment as this pass's. An id present on neither side at
+the start is new; an id whose rule line is gone and whose entry is not retired is reported by the
+audit, and the reviewer is told so. A contradiction is a decline like narration: the design pass
+has the context to argue it once, and a second decline parks the ticket the same way.
+
+Fresh, because the pass that wrote the narration is the wrong reader for it. It is at the end of
+a long run with the reasoning it just did as the freshest thing in its context, and the narration
+is that reasoning's residue; the rule forbidding it sits a hundred thousand tokens behind.
+Measured on Catapult, 2026-09-01: 90 of 284 standing-decision bullets carried pass narration,
+holding 59% of the text in those sections, every one written under a prompt that prohibits it in
+as many words and every one signed off at Design review. The design prompt already carried the
+rule; what was missing was a reader in a position to apply it. Reconcile is the same shape for the
+same reason — a diff against an argument, read cold.
+
+Detect there, fix here. The review has the distance to see narration; the design pass has the
+context to tell a load-bearing incident from an alternative it merely passed over, and from the
+diff alone the two look the same. A reviewer that rewrote would delete the reason with the
+narration, silently. So the findings go back to the writer as the newest comment, and the rewrite
+is the writer's. A finding the writer disputes is argued once in its summary and the passage left
+as it believes it should read; a second decline on the same ticket parks it for the author (§12),
+so the disagreement gets a person after two rounds rather than a loop.
+
+A proposal about the record, never a gate on the work. Nothing under `designOwnedPaths` changed
+means no review is owed and no model run. A reviewer that dies is said on the ticket and the pass
+proceeds, because a broken reviewer must not cost a good design — but a review that silently did
+not run is a gate that looks armed and is not, so the absence is never silent. And it is not a
+state: while it runs the ticket is still `Designing`, held by the same claim, and a dead reviewer
+is a dead design run to the stale-claim rule. Sign-off already refused a second consecutive review
+state because both would answer *who has the ball* with the author; this one answers it with the
+pipeline, inside a state that already does.
+
 **Two kinds have no such home, and they are what the file is for.** Refusals every pass must
 see, and refusals spanning systems — which a per-doc home could serve only by copying into each
 one, and a copy is drift with extra steps. The tell for the second kind is two docs citing a
@@ -509,6 +629,20 @@ A section number may carry a part letter — `§A.1.4`, `§B.3.2` — because a 
 number that way. A citation resolves against a heading's own number or any prefix of it, so
 `§7` is satisfied by `§7.8`; the reverse does not hold, and `§7.12.1` is dangling when the
 document stops at `§7.12`.
+
+**A rule is cited by its id, never by its wording.** `foundation#17` names rule #17 of
+`systems/foundation.md` from anywhere in the tree — a test name, a code comment, another doc —
+and `system:foundation#17` or `screen:board#2` when a name is both a system and a screen doc.
+The name is the doc's basename, the mutex label's name half, so nothing has to be declared for a
+citation to resolve. It resolves when the id is a rule line in the doc or an entry in its
+sibling, retired included: keeping the entry is what lets a citation of a withdrawn rule keep
+meaning something. This is the second resolver beside the section-number one, and the handle
+the design prompt's "cite the decision when you build on one" was missing — the section sweep
+resolves `path §N` against numbered headings only, and the standing-decision bullets those
+citations most wanted to name were dangling by rule (nineteen of the sweep's findings on
+Catapult). Inside a doc the token is written bare, `#17`, and bare `#17` is never a citation:
+the grammar needs a doc name word-bounded before the `#`, which is what keeps `PR #144` and a
+colour code out of the sweep.
 
 Each entry carries either a `path`, the project-relative document the shorthand names, or an
 `unchecked` string recording why no path in this repository can resolve it — another
@@ -1262,6 +1396,22 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   linted, and that is the point — a standing decision naming `farewell/1` is the decision doing
   its job, while a heading with a list under it is the split the rule was written against. A
   check that failed good docs would be switched off, taking the rule with it.
+- the rationale index holds together (§4), in a doc that is ported — one carrying a rule id, or
+  one with a reasons sibling; either arms the checks, so a doc that gained ids without a sibling
+  still has them checked for duplicates. Every h2-or-deeper heading and every bullet under
+  `## Standing decisions` carries an id and no id appears twice; every entry in the sibling that
+  is not retired has a rule line, and every retired one has none; every h2 in the sibling is an
+  entry; and every `name#n` citation anywhere in the tree resolves to a rule line or an entry,
+  retired included. An id with no entry is not a finding. The checks report an idle half in
+  either direction, the way Catapult's `# catapult:allow` reports a tag covering no violation.
+  Unported docs are counted and named as skipped, never as passed, because that is the seam the
+  port runs through one doc at a time and "not ported yet" must not print the same as "clean".
+  A `name#n` whose name no ported doc carries is not a citation — the same whitelist rule the
+  section sweep applies, and measured for the same reason: `PR #144`, `pre-#144`, `commitment
+  #2` and hex colours are what `#<digits>` means in Catapult's docs, and none of them puts a doc
+  name before the `#`. A bare name that is both a system and a screen doc is reported as
+  ambiguous rather than guessed, with the prefixed form to write; a prefixed citation of a doc the
+  prefix's directory does not hold is reported too.
 
 **Design finish (blocking, in the harness — the same rule, one gate earlier):**
 - a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not
@@ -1284,7 +1434,10 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   fine if it's better, but something should say so, and if nothing does it's more likely nobody
   noticed
 - the static storybook renders what the narrative doc describes
-- standing decisions touched by the change landed, and none were contradicted in passing
+- standing decisions touched by the change landed, and none were contradicted in passing —
+  judged against the reasons behind the rule ids the branch changed, handed to the pass as they
+  stood at the merge-base (§4), because "contradicted" is a claim about a reason, and the reason
+  lives in a file the diff did not touch
 - the structure that landed is the structure the sketch named — a deviation is fine if the
   hand-back argues it, and if nothing does it's more likely nobody noticed
 - **a surface changed with no storybook variation at all is called out even on a pass** — a tab
@@ -2298,6 +2451,13 @@ read and no author reliably remembers.
   tick would not reverse. This is the general shape of every marker-counted escalation: the count
   is evidence about the work, and re-reading old evidence as a new finding turns a rule into a
   trap. The three-conflict rule above had the same defect and is fixed the same way.
+- **Second decline from the record review on the same ticket → `Blocked`** (§4). The design pass
+  wrote pass narration into the record, was sent back with the passages named, and wrote it again.
+  Either the finding is a false positive the writer is right to keep — a reason attached to a rule
+  is not narration — or the design prompt is not landing the rule, and neither is a third
+  dispatch's to settle. Counted the way the bounce rule is and firing once per count, with
+  `declines=<n>` on the `blocked` marker: the author may return the ticket to `Ready for design`
+  for one more pass, and the two declines do not go away when they do.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
   redeploy, not a state change, which is why the author decides where it goes next.
@@ -2376,6 +2536,7 @@ permanently idle is permanently dispatchable.
 |---|---|
 | Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused — or paused and either marked blocking the boundary ticket or `Urgent` | State → `Ready for design`, first by the precedence rule (§8) |
 | State → `Ready for design` | Design agent run; its claim writes `Designing` |
+| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job, holding the diff and the reasons behind the rule ids it touched (§4); `decline` → `Ready for design` with the findings; a second decline on one ticket → `Blocked` (§12) |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
 | State → `In progress` / `Reworking` | Dev agent run |
@@ -2581,6 +2742,8 @@ without passing through `Design review`.
 | design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `clear` | unchanged | removes `re-evaluate` | — |
 | design | `demote` | `Ready for design` | — | — |
+| record review | `pass` | `Design review` (the artifacts pass proceeds) | — | record-review, `verdict=pass` |
+| record review | `decline` | **`Ready for design`** | — | record-review, `verdict=decline` |
 | reconcile | `pass` | `Merged` | — | merged |
 | reconcile | `fail` | `Ready for rework` | — | reconcile-bounce |
 | reconcile | `cannot-tell` | `Merged` | **`needs-review`** | merged |
@@ -2597,6 +2760,10 @@ without passing through `Design review`.
 
 `failed` is the only abort reason that takes no label, and that is the rule rather than an
 omission: it means the harness broke, which is not a fact about the ticket.
+
+A record-review finding's kind — `narration` or `contradiction` (§4) — has no row here, and that
+is the rule too: a finding of either kind rides inside one `decline`, so it is not an outcome, and
+the vocabulary is held to the reviewer's prompt rather than to this table.
 
 **What is held to the code and what is not.** The **value** column is asserted against
 `protocol`'s vocabularies in both directions, so a value added to one and not the other fails

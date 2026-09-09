@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/SwaggerAllen/orchestration/internal/reasons"
 )
 
 // DESIGN §9 asks CI to enforce that `screens/*.md` and `systems/*.md`
@@ -83,7 +85,10 @@ func LintDir(dir string) ([]string, error) {
 	var out []string
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") {
+		// A reasons sibling is not a doc: its h2 headings are `## #n`
+		// entries, and an entry's prose may quote a doc's banned heading
+		// while explaining why it is banned.
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || strings.EqualFold(name, "README.md") || reasons.IsReasonsFile(name) {
 			continue
 		}
 		path := filepath.Join(dir, name)
@@ -104,7 +109,11 @@ func LintDoc(name, content string) []string {
 	var out []string
 	for _, m := range headingRe.FindAllStringSubmatch(body, -1) {
 		text := strings.TrimSpace(m[1])
-		key := strings.ToLower(strings.Trim(text, " *_`:#"))
+		// The id token comes off before the normalisation below, which
+		// trims `#` from both ends: without this `## #3 States` reads as
+		// "3 states", not a banned heading, and a token meant to be inert
+		// would have disarmed the lint on exactly the docs that carry it.
+		key := strings.ToLower(strings.Trim(reasons.StripID(text), " *_`:#"))
 		kind, banned := bannedHeadings[key]
 		if !banned {
 			continue

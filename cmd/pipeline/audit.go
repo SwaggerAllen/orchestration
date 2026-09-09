@@ -15,6 +15,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
 
@@ -136,6 +137,57 @@ func cmdAudit(args []string) error {
 		violations = append(violations, found...)
 	}
 
+	// The rationale index (DESIGN §4, §9): a ported doc — one carrying a
+	// rule id, or one with a reasons sibling — is held to numbering every
+	// heading and standing decision, to no id twice, and to each entry in
+	// its sibling having a rule line unless it says it is retired. Unported
+	// docs are counted and named as skipped rather than passed, for the
+	// reason the class audit's skips exist: "this doc has no reasons yet"
+	// and "this doc passed every check" must not print the same, and the
+	// catapult port lands one doc at a time through exactly this seam.
+	var docs []reasons.Index
+	var unported []string
+	ported := 0
+	for _, dir := range []string{"systems", "screens"} {
+		ixs, err := reasons.LoadDir(*root, dir)
+		if err != nil {
+			return err
+		}
+		for _, ix := range ixs {
+			docs = append(docs, ix)
+			if !ix.Ported() {
+				unported = append(unported, ix.Path)
+				continue
+			}
+			ported++
+			violations = append(violations, reasons.Audit(ix)...)
+		}
+	}
+	switch {
+	case ported == 0:
+		fmt.Println("reasons index: skipped — no doc under systems/ or screens/ carries a rule id or a reasons file, so nothing is ported yet and no name#n citation is checked either (DESIGN §4)")
+	case len(unported) > 0:
+		fmt.Printf("reasons index: %d doc(s) checked; skipped %d unported: %s\n", ported, len(unported), strings.Join(unported, ", "))
+	default:
+		fmt.Printf("reasons index: %d doc(s) checked\n", ported)
+	}
+	// The port's progress as a number (DESIGN §4): rule-side bytes per
+	// ported doc, beside the reason-side. A report and never a gate —
+	// the budget a doc has to hit is the port's acceptance criterion,
+	// a number nobody has hit yet is a guess, and a gate on it would
+	// need an author-owned config field.
+	var sizes []string
+	for _, ix := range docs {
+		if !ix.Ported() {
+			continue
+		}
+		rules, reasonsSize := fileSize(filepath.Join(*root, ix.Path)), fileSize(filepath.Join(*root, ix.FilePath))
+		sizes = append(sizes, fmt.Sprintf("%s %.1f KB rules / %.1f KB reasons", ix.Path, float64(rules)/1024, float64(reasonsSize)/1024))
+	}
+	if len(sizes) > 0 {
+		fmt.Printf("reasons index sizes: %s\n", strings.Join(sizes, "; "))
+	}
+
 	// The class audit needs both halves — what arrived, and what the
 	// issue said. Each missing half is reported, never assumed clean:
 	// "no new components" and "I couldn't tell" must not print the same.
@@ -235,6 +287,18 @@ func cmdAudit(args []string) error {
 	for _, d := range dangling {
 		violations = append(violations, d.String())
 	}
+	// The second resolver, for rule citations — `foundation#17` — over
+	// the same files (DESIGN §4). A name no ported doc carries is not a
+	// citation, which is the § sweep's whitelist rule restated: without
+	// it `pre-#144` and `PR #144` in Catapult's own docs would be
+	// findings about the corpus rather than about anything dangling.
+	ruleDangling, err := reasons.SweepCitations(*root, cited, docs)
+	if err != nil {
+		return err
+	}
+	for _, d := range ruleDangling {
+		violations = append(violations, d.String())
+	}
 
 	// The map's own upkeep, and a proposal rather than a gate.
 	//
@@ -300,6 +364,16 @@ func cmdAudit(args []string) error {
 		fmt.Fprintln(w, "\nA mutex nobody took is a collision nobody could prevent (DESIGN §9).")
 	})
 	return fmt.Errorf("audit: %d violations — a mutex nobody took is a collision nobody could prevent (DESIGN §9)", len(violations))
+}
+
+// fileSize is a file's size in bytes, and 0 for one that is not there —
+// a doc with no sibling has no reason-side bytes.
+func fileSize(path string) int64 {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return st.Size()
 }
 
 // readPathList reads a newline-separated path list, treating an empty

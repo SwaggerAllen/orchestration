@@ -96,3 +96,37 @@ func TestLintDirSkipsReadmeAndMissingDirs(t *testing.T) {
 		t.Errorf("missing dir = %v, %v; want nothing, nil", got, err)
 	}
 }
+
+// The normaliser trims `#` from both ends of a heading, so before the id
+// token was stripped first, `## #3 States` normalised to "3 states" and
+// passed — the token meant to be inert disarmed the lint on the docs
+// carrying it. Both directions: the banned heading is still caught
+// through its token, and a heading that merely contains a banned word
+// still is not.
+func TestLintDocSeesThroughARuleId(t *testing.T) {
+	if got := LintDoc("systems/x.md", "# x\n\n## #3 States\n"); len(got) != 1 || !strings.Contains(got[0], `"#3 States"`) {
+		t.Errorf("violations = %v, want the heading flagged through its id", got)
+	}
+	if got := LintDoc("systems/x.md", "# x\n\n## #3 Standing decisions about state\n"); len(got) != 0 {
+		t.Errorf("violations = %v, want none", got)
+	}
+}
+
+// An entry's prose may quote the banned heading it explains, and a
+// reasons file's own h2s are ids. It is not a doc and is not linted.
+func TestLintDirSkipsReasonsFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "billing.reasons.md"), []byte("## #4\n\n## Files\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "billing.md"), []byte("# billing\n\n## #1 Standing decisions\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LintDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("violations = %v, want none", got)
+	}
+}

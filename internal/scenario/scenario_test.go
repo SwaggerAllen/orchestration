@@ -234,6 +234,12 @@ func TestValidateRejectsFixturesThatProveLessThanTheyClaim(t *testing.T) {
 		"no expectations at all": func(s *Scenario) {
 			s.Expect = Expect{}
 		},
+		"a marker field on a ref no ticket defines": func(s *Scenario) {
+			s.Expect.MarkerFields = map[string][]MarkerField{"typo": {{Kind: "record-review", Field: "verdict", Values: []string{"pass"}}}}
+		},
+		"a marker field with no values": func(s *Scenario) {
+			s.Expect.MarkerFields = map[string][]MarkerField{"a": {{Kind: "record-review", Field: "verdict"}}}
+		},
 		"no tickets at all": func(s *Scenario) {
 			s.Tickets = nil
 		},
@@ -537,5 +543,70 @@ func TestResetWritesAnArrayWhenNothingMerged(t *testing.T) {
 	}
 	if string(raw) != "[]" {
 		t.Errorf("merges marshalled to %s; jq '.[]' cannot iterate that", raw)
+	}
+}
+
+// "The review ran" and "the review sent the pass back" are different
+// facts, and a kind alone cannot tell them apart: the record review
+// posts one marker either way, with the verdict in a field (DESIGN
+// §4). Both directions, and both absences — no marker at all, and a
+// marker whose field says something else — are named differently, so
+// a rehearsal reads which it was.
+func TestCheckAssertsWhatAMarkerSaysInBothDirections(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg := world(t)
+	s := basic()
+	s.Expect.MarkerFields = map[string][]MarkerField{"a": {
+		{Kind: "record-review", Field: "verdict", Values: []string{"pass", "decline"}},
+		{Kind: "record-review", Field: "verdict", Values: []string{"decline"}, Absent: true},
+	}}
+	seeded, err := Seed(ctx, tr, cfg, s, &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := seeded.IDs["a"]
+	done := stateID(t, tr, cfg, protocol.Done)
+	if err := tr.UpdateIssueState(ctx, id, done); err != nil {
+		t.Fatal(err)
+	}
+
+	// No review at all: the presence assertion fails and says so.
+	failures, err := Check(ctx, tr, cfg, s, seeded, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failures) != 1 || !strings.Contains(failures[0].Got, "no such marker") {
+		t.Fatalf("with no review: %v", failures)
+	}
+
+	// A pass: both hold.
+	if err := tr.CommentOnIssue(ctx, id, marker.Marker{Kind: marker.RecordReview, Fields: map[string]string{"verdict": "pass"}}.Comment("nothing to send back")); err != nil {
+		t.Fatal(err)
+	}
+	if failures, err = Check(ctx, tr, cfg, s, seeded, nil); err != nil || len(failures) != 0 {
+		t.Fatalf("with a pass: %v, %v", failures, err)
+	}
+
+	// A decline as well: the presence still holds, the absence fails
+	// and shows every verdict it saw.
+	if err := tr.CommentOnIssue(ctx, id, marker.Marker{Kind: marker.RecordReview, Fields: map[string]string{"verdict": "decline"}}.Comment("sent back")); err != nil {
+		t.Fatal(err)
+	}
+	failures, err = Check(ctx, tr, cfg, s, seeded, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(failures) != 1 || !strings.Contains(failures[0].Want, "no record-review marker with verdict in [decline]") || !strings.Contains(failures[0].Got, "pass, decline") {
+		t.Fatalf("with a decline: %v", failures)
+	}
+}
+
+// A fixture that asserts only what a marker says is still a fixture
+// that can fail for a reason other than a crash.
+func TestValidateAcceptsAMarkerOnlyFixture(t *testing.T) {
+	s := basic()
+	s.Expect = Expect{MarkerFields: map[string][]MarkerField{"a": {{Kind: "record-review", Field: "verdict", Values: []string{"pass", "decline"}}}}}
+	if err := s.Validate(); err != nil {
+		t.Errorf("a marker-only fixture was rejected: %v", err)
 	}
 }

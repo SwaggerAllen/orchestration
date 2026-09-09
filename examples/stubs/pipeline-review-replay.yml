@@ -1,0 +1,105 @@
+# Project stub: review replay. Copy into the project repo's .github/workflows/.
+#
+# Reads the record reviewer's verdicts on this project's own merges and
+# posts nothing (DESIGN §4). Run it by hand before trusting a reviewer
+# on a new kind of writing, or when a decline looks wrong: the summary
+# table is the output, and the per-merge prompts and verdicts are the
+# artifacts to open when a row does. A count of declines is not a count
+# of defects.
+#
+# It lives here rather than in the pipeline repo because this is where
+# the model credential and the history both are: the replay reads git
+# and pipeline.config.json and nothing else, so it needs no token onto
+# any other repository. The reviewer under test — binary and prompt —
+# comes from the pipeline ref given as an input, so reading a reviewer
+# on a pipeline branch against real diffs is a form field, not an edit.
+# The action itself stays @main like the agent stubs; a replay of a
+# reconstruction that has not merged yet is the one case where that
+# line changes too.
+#
+# Not a protocol run: the run-name deliberately cannot correlate to a
+# ticket, and no job here holds a tracker credential.
+name: pipeline-review-replay
+run-name: "review replay: ${{ inputs.ref }}, last ${{ inputs.merges }} (pipeline@${{ inputs.pipeline_ref }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch whose merges are replayed
+        required: true
+        type: string
+        default: main
+      merges:
+        description: How many doc-touching merges back to replay
+        required: true
+        type: string
+        default: "10"
+      pipeline_ref:
+        description: Pipeline repo ref the reviewer under test comes from
+        required: true
+        type: string
+        default: main
+
+# Reads only. No pull-requests or actions scope: the replay builds no
+# snapshot, and a read-only report should not be able to fail on a
+# permission it never uses.
+permissions:
+  contents: read
+
+jobs:
+  # One job lists the merges so the next can fan out over them: a
+  # composite action cannot be called in a shell loop, and one model run
+  # per job keeps a dead run from taking the others with it.
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.merges.outputs.shas }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - id: merges
+        uses: SwaggerAllen/orchestration/.github/actions/review-replay@main
+        with:
+          phase: list
+          merges: ${{ inputs.merges }}
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+          pipeline_ref: ${{ inputs.pipeline_ref }}
+
+  replay:
+    needs: list
+    if: ${{ needs.list.outputs.shas != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1 # one model run at a time
+      matrix:
+        sha: ${{ fromJSON(needs.list.outputs.shas) }}
+    steps:
+      # fetch-depth: 0 — the reconstruction walks from the merge back to
+      # the pass's start and reads the tree there.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 0
+      - uses: SwaggerAllen/orchestration/.github/actions/review-replay@main
+        with:
+          phase: replay
+          sha: ${{ matrix.sha }}
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+          pipeline_ref: ${{ inputs.pipeline_ref }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  summary:
+    needs: [list, replay]
+    if: always() && needs.list.outputs.shas != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: SwaggerAllen/orchestration/.github/actions/review-replay@main
+        with:
+          phase: summary
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+          pipeline_ref: ${{ inputs.pipeline_ref }}

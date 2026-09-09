@@ -308,13 +308,32 @@ value behaves exactly as no value always did. Widening that mapping is a
 claim about the API and belongs with the measurement that supports it —
 the same rule the `tracker.Memory` section above states for fakes.
 
-## The project repos are not this repo
+## A project's workflows are the author's, and the author works here too
 
 `pipeline.config.json` and `.github/workflows/**` are author-owned in
-every project (DESIGN §5): agent push tokens carry no `workflow` scope,
-so a commit touching them is rejected and takes the run down with it.
-When a change here needs one of those files edited, that edit is the
-author's to make and belongs in its own change, ahead of this one.
+every project (DESIGN §5): an *agent's* push token carries no
+`workflow` scope, so a commit from a run touching them is rejected and
+takes the run down with it. That is a fact about agent runs and
+nothing else. A session working in this repo with the author edits a
+project's stubs freely, and logic goes where it belongs: a composite
+action here and the stub that calls it in the project are one change,
+landed together, with the project's copy edited in the same session.
+Orchestration changes land while the project is drained — nothing
+dispatched, nothing mid-flight — so there is no running pipeline for
+the pair to straddle.
+
+The failure this stops: the review replay was first built as a
+workflow *here*, to leave catapult's workflows alone, and so needed a
+second copy of the model credential in this repo's secrets and a read
+token onto every project it measured — to read a history and a config
+the project's own runner already holds. Actions secrets are per
+repository; a workflow here cannot see a project's. It moved to a
+project stub the day the secrets question was asked.
+
+The two ordering rules above are not this rule's exceptions. They are
+about validation, not ownership: a state or a config field has a side
+that must merge first because the other side rejects it, drained or
+not.
 
 ## The move store holds two pairs, and both are wired now
 
@@ -364,8 +383,9 @@ ninety seconds `core.VerifyPickup` records between a dispatch and the proof
 it happened. Five minutes matches the Durable Object's own fallback
 deliberately, so the two halves of one mechanism cannot disagree about how
 long a lock lasts. If a project ever needs a different number it becomes a
-`pipeline.config.json` key, which is an author-owned edit in that project
-and belongs ahead of the change here.
+`pipeline.config.json` key: declared here first, then set in the project,
+in the order the config-field rule above gives — a key the binary has
+not declared fails the project's every command.
 
 Note also that DESIGN §1's store table lists Linear, the project repo, the
 pipeline repo and the preview, and does not mention this store at all — its

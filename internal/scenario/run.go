@@ -353,6 +353,37 @@ func Check(ctx context.Context, t tracker.Tracker, cfg *config.Config, s *Scenar
 			}
 		}
 	}
+	for _, ref := range sortedKeys(s.Expect.MarkerFields) {
+		key := seeded.Keys[ref]
+		markers := markersOf(byKey[key])
+		for _, want := range s.Expect.MarkerFields[ref] {
+			var seen []string
+			hit := false
+			for _, m := range markers {
+				if string(m.Kind) != want.Kind {
+					continue
+				}
+				v, ok := m.Fields[want.Field]
+				if !ok {
+					v = "(no " + want.Field + ")"
+				}
+				seen = append(seen, v)
+				for _, allowed := range want.Values {
+					if v == allowed {
+						hit = true
+					}
+				}
+			}
+			switch {
+			case want.Absent && hit:
+				fail(Failure{Ref: ref, Key: key, Want: want.String(), Got: fmt.Sprintf("%s values seen: %s", want.Field, strings.Join(seen, ", "))})
+			case !want.Absent && !hit && len(seen) == 0:
+				fail(Failure{Ref: ref, Key: key, Want: want.String(), Got: "no such marker on the ticket"})
+			case !want.Absent && !hit:
+				fail(Failure{Ref: ref, Key: key, Want: want.String(), Got: fmt.Sprintf("%s values seen: %s", want.Field, strings.Join(seen, ", "))})
+			}
+		}
+	}
 
 	if hasFile != nil {
 		for _, path := range s.Expect.Files {
@@ -369,12 +400,22 @@ func Check(ctx context.Context, t tracker.Tracker, cfg *config.Config, s *Scenar
 // not an error.
 func markerKinds(i tracker.Issue) map[string]bool {
 	kinds := map[string]bool{}
-	for _, c := range i.Comments {
-		if m, ok, err := marker.Parse(c.Body); ok && err == nil {
-			kinds[string(m.Kind)] = true
-		}
+	for _, m := range markersOf(i) {
+		kinds[string(m.Kind)] = true
 	}
 	return kinds
+}
+
+// markersOf is every pipeline marker on a ticket, fields kept, in
+// comment order.
+func markersOf(i tracker.Issue) []marker.Marker {
+	var out []marker.Marker
+	for _, c := range i.Comments {
+		if m, ok, err := marker.Parse(c.Body); ok && err == nil {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 func stateIDs(ctx context.Context, t tracker.Tracker, cfg *config.Config) (map[protocol.State]string, error) {

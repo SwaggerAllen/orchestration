@@ -447,3 +447,184 @@ func TestTheSweepSkipsANestedCheckoutButStillReadsTheProject(t *testing.T) {
 		t.Errorf("the project's own dangling citation is not reported:\n%s", out)
 	}
 }
+
+// portedProject is project(t) with its system doc carrying ids and a
+// reasons sibling, so the rationale index's checks are armed on it.
+func portedProject(t *testing.T) string {
+	t.Helper()
+	root := project(t)
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("systems/billing.md", "---\npaths:\n  - lib/app/billing/**\n---\n\n# billing\n\n## #1 Standing decisions\n\n- **#17 The cap is enforced server-side.** Prose.\n\n## #2 Depends on\n\n- nothing.\n")
+	write("systems/billing.reasons.md", "# billing — reasons\n\n## #17\nsince: ORC-22\n\nA second copy of the rules drifts.\n\n## #9\nretired: ORC-90 — the guard moved into the compiler\n")
+	return root
+}
+
+func runAudit(t *testing.T, root string, extra ...string) (string, error) {
+	t.Helper()
+	t.Chdir(t.TempDir())
+	var err error
+	out := captureStdout(t, func() {
+		err = cmdAudit(append([]string{
+			"--config", filepath.Join(root, "pipeline.config.json"),
+			"--root", root,
+			"--changed-files", listFile(t, "README.md"),
+			"--labels", "system:billing",
+		}, extra...))
+	})
+	return out, err
+}
+
+// The index's checks skip an unported tree and say so. "Nothing is
+// ported" and "everything checked out" must not print the same, because
+// the port lands one doc at a time and a green audit on an unported doc
+// is not evidence about it.
+func TestAuditSaysTheReasonsIndexIsSkippedOnAnUnportedTree(t *testing.T) {
+	out, err := runAudit(t, project(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "reasons index: skipped") {
+		t.Errorf("no skip line: %s", out)
+	}
+}
+
+func TestAuditNamesTheUnportedDocsItSkipped(t *testing.T) {
+	out, err := runAudit(t, portedProject(t))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "reasons index: 1 doc(s) checked; skipped 1 unported: screens/home.md") {
+		t.Errorf("out = %s", out)
+	}
+}
+
+func TestAuditHoldsAPortedDocToItsIds(t *testing.T) {
+	cases := []struct{ name, doc, reasons, want string }{
+		{"a heading without an id", "# billing\n\n## #1 Standing decisions\n\n- **#17 Lead.**\n\n## Depends on\n", "", `systems/billing.md:12: heading "Depends on" carries no id`},
+		{"a standing decision without an id", "# billing\n\n## #1 Standing decisions\n\n- **Lead without a number.** Prose.\n", "", `systems/billing.md:10: standing decision "Lead without a number." carries no id`},
+		{"a duplicate id", "# billing\n\n## #1 Standing decisions\n\n- **#1 Lead.**\n", "", `systems/billing.md: id #1 appears 2 times (lines 8, 10)`},
+		{"an entry whose rule is gone and not retired", "# billing\n\n## #1 Standing decisions\n", "## #17\n\nOrphan.\n", `entry #17 has no rule line in systems/billing.md and is not retired`},
+		{"a retired entry whose rule line survives", "# billing\n\n## #1 Standing decisions\n\n- **#9 Still here.**\n", "## #9\nretired: ORC-90 — gone\n", `entry #9 is retired (ORC-90 — gone) but systems/billing.md still carries rule #9`},
+		{"a reasons heading that is not an id", "# billing\n\n## #1 Standing decisions\n", "## Why\n", `systems/billing.reasons.md:1: heading "Why" is not an entry`},
+		{"a duplicate entry", "# billing\n\n## #1 Standing decisions\n\n- **#17 Lead.**\n", "## #17\n\nA.\n\n## #17\n\nB.\n", `systems/billing.reasons.md: entry #17 appears 2 times (lines 1, 5)`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := project(t)
+			if err := os.WriteFile(filepath.Join(root, "systems", "billing.md"), []byte("---\npaths:\n  - lib/app/billing/**\n---\n\n"+c.doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if c.reasons != "" {
+				if err := os.WriteFile(filepath.Join(root, "systems", "billing.reasons.md"), []byte(c.reasons), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var err error
+			stderr := captureStderr(t, func() { _, err = runAudit(t, root) })
+			if err == nil {
+				t.Fatalf("the audit passed; stderr: %s", stderr)
+			}
+			if !strings.Contains(stderr, c.want) {
+				t.Errorf("stderr = %s\nwant %q", stderr, c.want)
+			}
+		})
+	}
+}
+
+// Both directions: the well-formed pair passes, including a retired
+// entry with no rule line, which is what retirement looks like.
+func TestAuditPassesAPortedDocWhoseIdsAllHold(t *testing.T) {
+	out, err := runAudit(t, portedProject(t))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "audit clean") {
+		t.Errorf("out = %s", out)
+	}
+}
+
+// The whole-tree sweep resolves rule citations wherever they are written
+// — a `.ex` file here — and the whitelist keeps Catapult's PR numbers
+// and colour codes out of it.
+func TestAuditResolvesARuleCitationAnywhereInTheTree(t *testing.T) {
+	root := portedProject(t)
+	write := func(rel, body string) {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("lib/ok.ex", "# billing#17 is a rule; billing#9 is a retired entry; PR #144, pre-#144, `#17ff00`, home#1 is unported\n")
+	if out, err := runAudit(t, root); err != nil {
+		t.Fatalf("live citations failed the audit: %v\n%s", err, out)
+	}
+	write("lib/bad.ex", "# billing#99 names nothing\n")
+	var err error
+	stderr := captureStderr(t, func() { _, err = runAudit(t, root) })
+	if err == nil || !strings.Contains(stderr, "lib/bad.ex:1: cites billing#99, which is not a rule in systems/billing.md or an entry in systems/billing.reasons.md") {
+		t.Errorf("err = %v, stderr = %s", err, stderr)
+	}
+}
+
+func TestAuditReportsAnAmbiguousUnprefixedRuleCitationAndResolvesAPrefixedOne(t *testing.T) {
+	root := portedProject(t)
+	write := func(rel, body string) {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("screens/billing.md", "---\nfiles:\n  - lib/sample_web/components/billing.ex\n---\n\n# billing\n\n## #1 One screen\n")
+	write("lib/ok.ex", "# system:billing#17 and screen:billing#1\n")
+	if out, err := runAudit(t, root); err != nil {
+		t.Fatalf("prefixed citations failed: %v\n%s", err, out)
+	}
+	write("lib/bad.ex", "# billing#17\n")
+	var err error
+	stderr := captureStderr(t, func() { _, err = runAudit(t, root) })
+	if err == nil || !strings.Contains(stderr, "cites billing#17, which is ambiguous: billing is both systems/billing.md and screens/billing.md — write system:billing or screen:billing") {
+		t.Errorf("err = %v, stderr = %s", err, stderr)
+	}
+}
+
+// A reasons file is swept too: an entry may cite another rule, and a
+// dangling one there rots as fast as anywhere.
+func TestAuditSweepsReasonsFilesForRuleCitations(t *testing.T) {
+	root := portedProject(t)
+	if err := os.WriteFile(filepath.Join(root, "systems", "billing.reasons.md"), []byte("## #17\n\nSee billing#77.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	stderr := captureStderr(t, func() { _, err = runAudit(t, root) })
+	if err == nil || !strings.Contains(stderr, "systems/billing.reasons.md:3: cites billing#77") {
+		t.Errorf("err = %v, stderr = %s", err, stderr)
+	}
+}
+
+// The port's progress is a number, printed per ported doc and never
+// gated: the budget is the port's acceptance criterion, not a rule a
+// ticket can be failed on (DESIGN §4).
+func TestAuditReportsRuleSideBytesPerPortedDoc(t *testing.T) {
+	out, err := runAudit(t, portedProject(t))
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !strings.Contains(out, "reasons index sizes: systems/billing.md 0.2 KB rules / 0.1 KB reasons") {
+		t.Errorf("out = %s", out)
+	}
+	if strings.Contains(out, "screens/home.md 0") {
+		t.Error("an unported doc was sized; the report is about the port's progress")
+	}
+}
