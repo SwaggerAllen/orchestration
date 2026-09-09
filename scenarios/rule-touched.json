@@ -1,6 +1,6 @@
 {
   "name": "rule-touched",
-  "description": "One ticket whose argument changes a rule that has a recorded reason: the farewell leaves the greetings system, against greetings#4 in systems/greetings.md, whose entry in systems/greetings.reasons.md argues why it belongs there. The design pass is meant to read that entry before it retires or rewrites the rule; the record review is handed the entry beside the diff and reaches a verdict on it. Which verdict is the model's, so the fixture asserts that the review ran and reached one, that the pass went through the whole loop, and that the audit on the ticket branch held the index together on the way. The verdict itself is what a human reads on the ticket afterwards, which is the point of running this here rather than on a real project.",
+  "description": "One ticket whose argument changes a rule that has a recorded reason: the greeting follows the hour, against greetings#2 in systems/greetings.md (pure functions of the name; no I/O ever enters the system), whose entry in systems/greetings.reasons.md argues why anything the wording depends on arrives as an argument rather than being read inside. The design pass is meant to read that entry before it rewrites the rule; the record review is handed the entry beside the diff and reaches a verdict on it. Which verdict is the model's — a rule rewritten to 'pure functions of what they are handed' with the entry amended is a pass, a clock inside the system with the entry untouched is a contradiction — so the fixture asserts that the review ran and reached one, that the pass went through the whole loop, and that the audit on the ticket branch held the index together on the way. The verdict itself is what a human reads on the ticket afterwards, which is the point of running this here rather than on a real project.",
   "milestones": [
     {
       "name": "Rehearsal 1",
@@ -9,10 +9,12 @@
   ],
   "tickets": [
     {
-      "ref": "farewells",
-      "title": "The farewell becomes its own system",
-      "description": "Move the farewell out of the greetings system into a second system, `farewells`, with its own doc and its own test file. The greeting stays where it is, and the home screen still renders both lines verbatim.\n\nOne screen, two systems, no new dependencies.",
-      "labels": ["frontend"],
+      "ref": "hour",
+      "title": "Greet by the time of day",
+      "description": "The home screen greets the visitor by name. Make the greeting follow the hour: `Good morning, <name>!` before noon, `Good afternoon, <name>!` until six, `Good evening, <name>!` after. The greeting stays worded by the greetings system and rendered verbatim by the screen (see systems/greetings.md).\n\nOne screen, one system, no new dependencies.",
+      "labels": [
+        "frontend"
+      ],
       "milestone": "Rehearsal 1",
       "priority": 2,
       "state": "ready_for_design"
@@ -20,18 +22,38 @@
   ],
   "expect": {
     "finalStates": {
-      "farewells": "done"
+      "hour": "done"
     },
-    "files": ["systems/farewells.md", "systems/greetings.md", "systems/greetings.reasons.md"],
+    "files": [
+      "systems/greetings.md",
+      "systems/greetings.reasons.md",
+      "screens/home.md"
+    ],
     "markers": {
-      "farewells": ["dispatch", "record-review", "merged"]
+      "hour": [
+        "dispatch",
+        "record-review",
+        "merged"
+      ]
     },
     "absentMarkers": {
-      "farewells": ["stale-claim", "revert", "ci-red", "reconcile-bounce"]
+      "hour": [
+        "stale-claim",
+        "revert",
+        "ci-red",
+        "reconcile-bounce"
+      ]
     },
     "markerFields": {
-      "farewells": [
-        { "kind": "record-review", "field": "verdict", "values": ["pass", "decline"] }
+      "hour": [
+        {
+          "kind": "record-review",
+          "field": "verdict",
+          "values": [
+            "pass",
+            "decline"
+          ]
+        }
       ]
     }
   }

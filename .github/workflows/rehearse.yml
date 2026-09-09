@@ -161,7 +161,7 @@ jobs:
       # started from a stale scaffold still reports a pass.
       #
       # Reverting instead needs no force, so branch protection on main
-      # and rehearsals can coexist, and the seed tag becomes a reference
+      # and rehearsals can coexist, and the baseline becomes a reference
       # point rather than a destination that has to be kept moving.
       #
       # Which commits are the rehearsal's is not guessed from subjects
@@ -172,6 +172,8 @@ jobs:
       - name: revert what the last rehearsal merged
         if: inputs.phase == 'reset' || inputs.phase == 'full'
         working-directory: .project
+        env:
+          GH_TOKEN: ${{ secrets.REHEARSAL_REPO_TOKEN }}
         run: |
           set -euo pipefail
           git config user.name "pipeline-rehearsal"
@@ -275,14 +277,46 @@ jobs:
           fi
 
           # What survived, so a stale baseline is visible rather than
-          # assumed. The seed tag is the anchor this is measured from.
+          # assumed. The anchor is the newest GitHub release's tag, read
+          # from the API rather than from a `seed` tag in the checkout:
+          # a release is cut from the repository's own page, which a
+          # phone can do, while a tag has to be pushed from a clone —
+          # and the `seed` tag this used to read was last moved before
+          # the port that changed the scaffold, so it named a tree
+          # nobody was starting from. No release yet means the first
+          # commit, and the summary says which it used.
           #
           # Into the run summary as well as the log: the whole point of
           # this list is to be *noticed*, and a line nobody expands is a
           # line nobody reads. A rehearsal started from a scaffold that
           # has quietly drifted still reports a pass.
-          KEPT="$(git log --oneline --first-parent "$(git rev-parse refs/tags/seed 2>/dev/null || git rev-list --max-parents=0 HEAD)"..HEAD || true)"
-          echo "kept on main since the seed tag:"
+          ANCHOR="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          ANCHOR_DESC="the first commit (no release exists yet)"
+          REL="$RUNNER_TEMP/release.json"
+          CODE="$(curl -sS -o "$REL" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/SwaggerAllen/orchestration-dummy/releases/latest")"
+          case "$CODE" in
+          200)
+            TAG="$(jq -r .tag_name "$REL")"
+            if git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null; then
+              ANCHOR="$(git rev-parse "refs/tags/$TAG^{commit}")"
+              ANCHOR_DESC="release $TAG"
+            else
+              echo "::warning::the latest release is tagged $TAG but this checkout has no such tag — measuring from the first commit instead"
+            fi
+            ;;
+          404)
+            echo "no release yet; measuring from the first commit"
+            ;;
+          *)
+            echo "::warning::could not read the latest release (HTTP $CODE) — measuring from the first commit instead"
+            ;;
+          esac
+          KEPT="$(git log --oneline --first-parent "$ANCHOR..HEAD" || true)"
+          echo "kept on main since $ANCHOR_DESC:"
           echo "$KEPT" | sed 's/^/  /'
           {
             echo "## Baseline"
@@ -296,9 +330,9 @@ jobs:
               echo
             fi
             if [ -z "$KEPT" ]; then
-              echo "Nothing on \`main\` since the seed tag — this rehearsal starts from the scaffold itself."
+              echo "Nothing on \`main\` since $ANCHOR_DESC — this rehearsal starts from the scaffold itself."
             else
-              echo "Kept on \`main\` since the seed tag. These are infrastructure commits the reset deliberately did not revert, and they are the tree this rehearsal starts from:"
+              echo "Kept on \`main\` since $ANCHOR_DESC. These are infrastructure commits the reset deliberately did not revert, and they are the tree this rehearsal starts from:"
               echo
               echo '```'
               echo "$KEPT"
