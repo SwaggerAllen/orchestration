@@ -174,6 +174,38 @@ func TestRehearsalResetClearsRetroNotesBetweenTheRevertsAndThePush(t *testing.T)
 	}
 }
 
+// The reset's baseline is the newest GitHub release, read from the API,
+// never a tag in the checkout. A `seed` tag has to be pushed from a
+// clone, so it went stale the moment the scaffold moved without one —
+// it was last moved before the port that changed every doc — and a
+// release is cut from the repository's own page. The step must also be
+// able to read the API: the same token the checkout used.
+func TestTheRehearsalBaselineIsTheLatestRelease(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "rehearse.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := stripComments(string(raw))
+	step := strings.Index(body, "name: revert what the last rehearsal merged")
+	if step < 0 {
+		t.Fatal("the revert step was renamed")
+	}
+	rest := body[step:]
+	for _, want := range []string{
+		"/releases/latest",
+		"jq -r .tag_name",
+		`GH_TOKEN: ${{ secrets.REHEARSAL_REPO_TOKEN }}`,
+		`git rev-list --max-parents=0 HEAD`,
+	} {
+		if !strings.Contains(rest, want) {
+			t.Errorf("the revert step does not carry %s — the baseline summary would measure from the wrong place, or fail to read the API", want)
+		}
+	}
+	if strings.Contains(body, "refs/tags/seed") {
+		t.Error("rehearse.yml still reads a seed tag — that tag has to be pushed from a clone, and it was stale the last time anyone read it")
+	}
+}
+
 // A stub that runs `pipeline setup` must grant deployments: read.
 //
 // Setup ends by probing the configured deploy endpoint, which for

@@ -676,6 +676,14 @@ way to tidy up after a run.
 | `seed` | Create the scenario's milestones and tickets |
 | `check` | Assert the final states, files, markers and what the markers say |
 
+**The baseline is the latest release.** The reset's summary lists what
+`main` carries since the newest GitHub release's tag — the
+infrastructure commits it deliberately did not revert, which are the
+tree the rehearsal starts from. Cut a release from the repository page
+whenever the scaffold moves on purpose (a port, a new stub); nothing
+has to be pushed from a clone, which is what let the old `seed` tag go
+stale under a scaffold that had moved.
+
 There is no exercise phase, because there is nothing for the harness to
 run: after seeding, the metronome, the webhooks and the agents carry
 the tickets. Your part is the designed touchpoints — sign-off at
