@@ -132,9 +132,9 @@ func VerifyPickup(s *Snapshot, ticketID string, kind AgentKind, runID string) er
 		// Designing, the same way dev's claim writes In progress. A
 		// design run that finds the ticket already in Designing is a
 		// second agent on work someone else claimed.
-		if t.State != protocol.ReadyForDesign &&
+		if t.State != protocol.ReadyForDesign && t.State != protocol.ReadyForRedesign &&
 			!((t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && t.HasLabel(LabelReEvaluate)) {
-			return refuse("pickup %s: design runs on Ready for design tickets or re-evaluate re-reads, not %q", t.Key, t.State)
+			return refuse("pickup %s: design runs on Ready for design or Ready for redesign tickets, or re-evaluate re-reads, not %q", t.Key, t.State)
 		}
 	case AgentReconcile:
 		if t.State != protocol.Reconciling {

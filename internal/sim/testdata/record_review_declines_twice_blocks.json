@@ -1,5 +1,5 @@
 {
-  "name": "second record-review decline: Blocked, once per count — the author's return to the design queue stands (DESIGN 4, 12)",
+  "name": "second record-review decline: Blocked, once per count — a decline lands in Ready for redesign, and the author's return to the design queue stands (DESIGN 3, 4, 12)",
   "steps": [
     {
       "kind": "seed",
@@ -35,7 +35,7 @@
     {
       "kind": "transition",
       "key": "T1",
-      "to": "ready_for_design",
+      "to": "ready_for_redesign",
       "actor": "design"
     },
     {
@@ -48,7 +48,7 @@
     {
       "kind": "expect",
       "key": "T1",
-      "state": "ready_for_design",
+      "state": "ready_for_redesign",
       "runKind": "design",
       "runLive": true,
       "markers": {
@@ -75,7 +75,7 @@
     {
       "kind": "transition",
       "key": "T1",
-      "to": "ready_for_design",
+      "to": "ready_for_redesign",
       "actor": "design"
     },
     {
@@ -132,7 +132,7 @@
     {
       "kind": "transition",
       "key": "T1",
-      "to": "ready_for_design",
+      "to": "ready_for_redesign",
       "actor": "design"
     },
     {

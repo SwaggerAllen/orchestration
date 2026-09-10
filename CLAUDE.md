@@ -141,28 +141,39 @@ them. The one that did not is the one above.
 
 If what is under test is that something *runs*, assert the run.
 
-## Adding a protocol state is a two-repo change, and the order matters
+## Adding a protocol state is a two-repo change, and there is no safe order
 
 `protocol.AllStates` is the canonical set, and every project's
 `pipeline.config.json` maps every member of it to a tracker state name.
-Config validation requires the whole mapping, so a state added here
-without the corresponding line in a project's config makes that project's
-config invalid — and validation runs before anything else, so **every**
-`pipeline` command fails, not just the one that needed the new state. The
-sweep stops; nothing dispatches, promotes or reverts.
+Config validation requires the whole mapping and rejects any key outside
+it, and validation runs before anything else, so **every** `pipeline`
+command fails, not just the one that needed the new state. The sweep
+stops; nothing dispatches, promotes or reverts.
 
-That strictness is deliberate: a state the pipeline will try to write
-needs a tracker name, and failing at config load beats failing mid-flight.
-The order is the part that has to be got right.
+Measured 2026-09-10 with `ready_for_redesign`, because this section used
+to say the project config should merge first and that order fails too:
 
-1. Add the state's line to every project config, and merge that first.
-2. Then merge the change here.
-3. Then `pipeline setup --apply` on each project, which creates the
-   tracker state — `setup` enumerates `AllStates`, so it needs no edit.
+```
+config with the new key, yesterday's binary  -> states.ready_for_redesign: not a protocol state
+config without it, the new binary            -> states.ready_for_redesign: missing
+```
 
-Adding `ready_for_design` in the other order took Catapult's pipeline
-down for about ninety minutes, with a ticket sitting in a queue nothing
-was sweeping.
+So whichever side lands first, the project's every command fails until
+the other lands. The strictness is deliberate — a state the pipeline
+will try to write needs a tracker name, and failing at config load beats
+failing mid-flight — so the window is closed by making it short, not by
+ordering it away:
+
+1. Park the project (`PIPELINE_KILL_SWITCH=true`), or do this while
+   nothing is mid-flight.
+2. Merge the project configs and the change here back to back.
+3. `pipeline setup --apply` on each project, which creates the tracker
+   state — `setup` enumerates `AllStates`, so it needs no edit.
+4. Unpark.
+
+Adding `ready_for_design` left that window open for about ninety
+minutes, with a ticket sitting in a queue nothing was sweeping. The
+window was the cost; the order was never the fix.
 
 ## Adding a config field is that same change in reverse
 
@@ -176,12 +187,12 @@ So the order inverts:
 
 | the change | merges first | because |
 | --- | --- | --- |
-| a new protocol state | the project config | validation requires the *whole* state mapping, so a state we know and it lacks is invalid |
+| a new protocol state | neither — both together, project parked | the whole mapping is required *and* an unknown key is rejected, so each side alone is invalid |
 | a new config field | this repo | `DisallowUnknownFields` rejects extras, so a key it has and we lack is invalid |
 
-Config validation is strict in both directions; which side moves first
-depends on which kind of strictness the change trips. Getting it wrong
-does not fail gracefully in either direction.
+Config validation is strict in both directions; a field has a side that
+can go first and a state does not. Getting it wrong does not fail
+gracefully in either direction.
 
 This is not hypothetical either. Catapult's `citationShorthands` edit
 landed on its PR ahead of the field being declared here, and that PR's
@@ -330,10 +341,10 @@ the project's own runner already holds. Actions secrets are per
 repository; a workflow here cannot see a project's. It moved to a
 project stub the day the secrets question was asked.
 
-The two ordering rules above are not this rule's exceptions. They are
-about validation, not ownership: a state or a config field has a side
-that must merge first because the other side rejects it, drained or
-not.
+The two validation rules above are not this rule's exceptions. They are
+about validation, not ownership: a config field has a side that must
+merge first because the other rejects it, and a state has no safe side
+at all, drained or not.
 
 ## The move store holds two pairs, and both are wired now
 

@@ -2085,3 +2085,70 @@ func TestAThirdRecordReviewDeclineEscalatesAgain(t *testing.T) {
 		t.Errorf("want the escalation to record declines=3, got %v", a.Marker)
 	}
 }
+
+// Ready for redesign is a queue the design dispatcher reads exactly as
+// it reads Ready for design: a record-review decline or a demote lands
+// there so the bounce is visible in the state column rather than only
+// in a marker, and a ticket parked in a state nobody dispatches from is
+// the failure Designing-as-queue already had once.
+func TestDesignDispatchesFromTheRedesignQueue(t *testing.T) {
+	d := find(Sweep(snap(tk("T1", protocol.ReadyForRedesign))), ActDispatch, "T1")
+	if d == nil || d.Agent != AgentDesign {
+		t.Fatalf("a ticket in Ready for redesign was not dispatched: %v", d)
+	}
+}
+
+// A bounced design reached the record review once, so it outranks a
+// fresh one the way rework outranks fresh dev (DESIGN §7). The
+// dispatcher walks tickets in precedence order and takes the first, so
+// the rank is what puts the redesign in front — an older fresh design
+// does not win on age.
+func TestARedesignIsDispatchedBeforeAFreshDesign(t *testing.T) {
+	fresh := tk("T1", protocol.ReadyForDesign, func(t *Ticket) { t.CreatedAt = t0.Add(-48 * time.Hour) })
+	bounced := tk("T2", protocol.ReadyForRedesign)
+	acts := Sweep(snap(fresh, bounced))
+	if d := find(acts, ActDispatch, "T2"); d == nil || d.Agent != AgentDesign {
+		t.Fatalf("the redesign was not the one dispatched: %v", acts)
+	}
+	if d := find(acts, ActDispatch, "T1"); d != nil {
+		t.Errorf("the fresh design was dispatched alongside the redesign (the agent is singular): %+v", *d)
+	}
+}
+
+// The queue rescue sends an unclaimed Designing ticket back to the queue
+// it was claimed from. One claimed out of Ready for redesign goes back
+// there, so the bounce it carries stays visible; sending it to Ready for
+// design would quietly promote a redesign into a fresh design.
+func TestAnUnclaimedDesignReturnsToTheQueueItCameFrom(t *testing.T) {
+	for _, c := range []struct{ from, want protocol.State }{
+		{protocol.ReadyForDesign, protocol.ReadyForDesign},
+		{protocol.ReadyForRedesign, protocol.ReadyForRedesign},
+	} {
+		t.Run(string(c.from), func(t *testing.T) {
+			stranded := tk("T1", protocol.Designing, arrived(c.from, RoleDesign))
+			s := snap(stranded)
+			delete(s.Recorded, "T1") // the tracker's history says where it came from; the pipeline never wrote it
+			a := find(Sweep(s), ActTransition, "T1")
+			if a == nil {
+				t.Fatalf("a stranded Designing ticket from %s was left where it was", c.from)
+			}
+			if a.To != c.want {
+				t.Errorf("moved to %q, want the queue it was claimed from (%q)", a.To, c.want)
+			}
+		})
+	}
+}
+
+// The claim assertion mirrors the dispatcher: design may pick up from
+// either queue, and nothing else may pick up from the redesign queue.
+func TestPickupAdmitsTheRedesignQueueForDesignOnly(t *testing.T) {
+	s := snap(tk("T1", protocol.ReadyForRedesign))
+	if err := VerifyPickup(s, "T1", AgentDesign, "r1"); err != nil {
+		t.Errorf("design refused the redesign queue: %v", err)
+	}
+	for _, kind := range []AgentKind{AgentDev, AgentReconcile} {
+		if err := VerifyPickup(s, "T1", kind, "r1"); err == nil {
+			t.Errorf("%s picked up from the redesign queue", kind)
+		}
+	}
+}

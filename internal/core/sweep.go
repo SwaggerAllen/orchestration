@@ -244,6 +244,8 @@ func pipelineDepth(s protocol.State) int {
 		return 30
 	case protocol.Designing:
 		return 20
+	case protocol.ReadyForRedesign:
+		return 16
 	case protocol.ReadyForDesign:
 		return 15
 	case protocol.Todo:
@@ -513,7 +515,7 @@ func correctionsFor(s *Snapshot, t *Ticket) []Action {
 	// back to where it came from, which is the more precise answer. A
 	// run means an agent is either working (leave it) or dead (the
 	// stale-claim rule's), and neither is this.
-	if q, ok := queueFeeding(t.State); ok && t.Run == nil && !t.IsBoundary() && !t.Unmanaged() {
+	if q, ok := queueFeeding(t); ok && t.Run == nil && !t.IsBoundary() && !t.Unmanaged() {
 		if _, known := arrival(s, t); !known {
 			acts = append(acts, Action{
 				Kind: ActTransition, TicketID: t.ID, To: q,
@@ -774,7 +776,9 @@ func escalationsFor(s *Snapshot, t *Ticket) []Action {
 	// pass, the two declines do not go away when they do, and the
 	// escalation must not undo that choice on the next tick. It fires
 	// once per count and records the count on the `blocked` marker.
-	if n := recordDeclines(t); t.State == protocol.ReadyForDesign &&
+	// Either design queue: the decline lands the ticket in Ready for
+	// redesign, and the author may return it to Ready for design.
+	if n := recordDeclines(t); (t.State == protocol.ReadyForRedesign || t.State == protocol.ReadyForDesign) &&
 		n >= 2 && !alreadyEscalatedAt(t, "declines", n) {
 		return block(t, &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{
 			"declines": strconv.Itoa(n),
@@ -1032,8 +1036,10 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 				continue
 			}
 			switch {
-			case t.State == protocol.ReadyForDesign:
-				// The queue, not the agent's state. Dispatching from
+			case t.State == protocol.ReadyForDesign || t.State == protocol.ReadyForRedesign:
+				// Either queue, not the agent's state; the precedence
+				// rank puts a redesign ahead of a fresh design in
+				// `ordered`, so it is reached first. Dispatching from
 				// Designing meant Designing said two things — "queued
 				// for design" and "a design agent is working on this" —
 				// and a run that died before claiming left the second
@@ -1272,9 +1278,15 @@ func blockedByOpen(s *Snapshot, t *Ticket) bool {
 // somewhere no PR backs it. A ticket hand-dropped into either still
 // sits; it is a stranger place to drop one, and inventing a destination
 // is worse than leaving it visible.
-func queueFeeding(st protocol.State) (protocol.State, bool) {
-	switch st {
+func queueFeeding(t *Ticket) (protocol.State, bool) {
+	switch t.State {
 	case protocol.Designing:
+		// A design claimed out of Ready for redesign goes back there,
+		// so the bounce it carries stays visible; the claim is the one
+		// move the record holds for it.
+		if t.Last != nil && t.Last.From == protocol.ReadyForRedesign {
+			return protocol.ReadyForRedesign, true
+		}
 		return protocol.ReadyForDesign, true
 	case protocol.InProgress:
 		return protocol.ReadyForDev, true

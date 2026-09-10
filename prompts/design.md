@@ -57,8 +57,10 @@ never committed.
   rule it establishes — keep the reason and drop the narration around
   it, or drop the passage where it carries only what a pass considered.
   A finding you believe is wrong is argued once, in your summary, and
-  the passage left as you believe it should read; a second decline on
-  the same ticket parks it for the author (DESIGN §12).
+  the passage left as you believe it should read. A decline parks the
+  ticket in `Ready for redesign`, so the bounce is visible on the board;
+  a second decline on the same ticket parks it for the author (DESIGN
+  §12).
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
   in as many words in your summary. CI enforces this for components: a
@@ -265,7 +267,9 @@ never committed.
 ## Outcomes (write JSON to the outcome path under Mechanics)
 
 Mode `design` — a normal pass. The harness claimed this ticket out of
-`Ready for design` into `Designing` before you started:
+`Ready for design` — or `Ready for redesign`, after a record-review
+decline or a demote, in which case the newest comment names what the
+last pass got wrong — into `Designing` before you started:
 - `{"outcome": "artifacts", "screens": ["home"], "systems": ["billing"], "summary": "..."}`
   — you produced artifacts and/or a systems-doc diff; commit them. The
   harness opens the draft PR and hands the ticket to the author, who
@@ -301,7 +305,8 @@ Mode `design-reread` — a queue ticket flagged re-evaluate (DESIGN §7):
 - `{"outcome": "clear", "summary": "why the scope still holds"}` — the
   collision doesn't invalidate this ticket; it stays queued.
 - `{"outcome": "demote", "summary": "what moved and why it matters"}` —
-  the ground moved; the ticket returns to the design queue for a fresh pass.
+  the ground moved; the ticket returns to `Ready for redesign` for a
+  fresh pass, with your summary as the scope.
   Do not redesign now — the demotion queues that work.
 
 Then stop. The harness pushes commits, manages the PR, and moves the

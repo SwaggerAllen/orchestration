@@ -144,9 +144,10 @@ and the drift shows up as agents disagreeing about what a state means.
 |---|---|---|
 | `Backlog` | Nobody. Not committed to. | author, grooming pass |
 | `Todo` | Nobody. Committed, not started. | author, milestone pull |
-| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8), design (a record-review decline, §4) |
+| `Ready for design` | The queue. Scope is the **description**. | author, control plane (§8) |
 | `Designing` | Design agent, now. | design (claim) |
 | `Design review` | **Author.** Artifacts ready, not yet approved. | design |
+| `Ready for redesign` | The queue, for a design sent back. Scope is the **description**; the **newest comment** names what the last pass got wrong. | design (a record-review decline, §4; a demote, §7), author (declining at `Design review`) |
 | `Ready for dev` | The queue. Scope is the **description**. | author (sign-off) |
 | `In progress` | Dev agent, now. | dev (claim) |
 | `Checks` | CI. Draft flag off, gates running. | dev |
@@ -180,12 +181,16 @@ is a confusion every agent prompt would have to fight.
 **Why `Design review` exists.** Without it there is no signal for *design is finished and
 waiting on the author* as distinct from *design is still working*. Sign-off is the transition
 `Design review` → `Ready for dev`, and it is the author's, always. **Declining is
-`Design review` → `Ready for design` with a comment**, for the same reason the dev agent's push-back
-carries its argument: a rejection without one is a rejection the next pass repeats. The author
-may route straight to `Ready for design` because they are the one who would notice a ticket going
+`Design review` → `Ready for redesign` with a comment**, for the same reason the dev agent's
+push-back carries its argument: a rejection without one is a rejection the next pass repeats. The
+author may route straight back to a queue because they are the one who would notice a ticket going
 round; an agent's push-back parks instead (§2.7). The record review declines by the same route,
 before `Design review` is ever entered (§4): its findings are the comment, and the harness makes
-the move from `Designing`.
+the move from `Designing`. `Ready for redesign` rather than `Ready for design` for the same reason
+`Ready for rework` is not `Ready for dev`: a bounce queued beside fresh tickets is a bounce nobody
+sees on the board, and the state's name is the signal. The dispatcher reads both queues and takes a
+redesign first (§7), and the claim treats them alike — the description is still the scope, and the
+newest comment is what the pass rewrites against.
 
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
@@ -224,9 +229,10 @@ exactly as `In progress` is the dev agent's (§6, §9). A dead run in `Designing
 unambiguously a stale claim, because nothing else can put a ticket there.
 
 Everything that meant "queue this for design" moves with it: the author's send-back from `Design
-review`, a re-evaluate flag on a `Design review` ticket, and a design pass's own `demote`
-outcome all target `Ready for design`. Demoting into `Designing` would park a ticket in a state
-nothing dispatches from — sent back for redesign, and never redesigned.
+review` and a re-evaluate flag on a `Design review` ticket target `Ready for design`; a design
+pass's own `demote` outcome and the record review's decline target `Ready for redesign`. Demoting
+into `Designing` would park a ticket in a state nothing dispatches from — sent back for redesign,
+and never redesigned.
 
 **Why the queue and the agent get separate states on both sides.** `Ready for dev` /
 `In progress` and `Ready for rework` / `Reworking` are the same split for the same reason:
@@ -522,7 +528,7 @@ before the pass; and the rule above — and nothing else: no ticket, no thread, 
 index. It answers `pass` or `decline`, and a decline names each passage that reads as narration
 rather than as a rule and its reason, or that changes a rule without keeping or amending the
 reason recorded for it — a `contradiction`, which names the rule as `name#n`. The harness posts
-the findings under a `record-review` marker and moves the ticket to `Ready for design` — the
+the findings under a `record-review` marker and moves the ticket to `Ready for redesign` — the
 author's own decline route (§3) — with no PR opened and no preview built, because nothing is ready
 to be looked at.
 
@@ -1076,9 +1082,9 @@ surprise at merge.
 | State | What happens | Cleared by |
 |---|---|---|
 | `Backlog` / `Todo` | Nothing. Cleared automatically on entry to `Ready for design`. | — |
-| `Ready for design` / `Designing` | Folded into the pass. | design |
+| `Ready for design` / `Ready for redesign` / `Designing` | Folded into the pass. | design |
 | `Design review` | Returns to `Ready for design`. Nothing is built; revision is cheap. | design |
-| `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for design`. | design |
+| `Ready for dev` | **Blocks pickup.** Design re-reads: clear and hold, or demote to `Ready for redesign`. | design |
 | `Ready for rework` | **Blocks pickup.** As above; scope is the newest comment. | design |
 | `In progress` / `Reworking` | Dev finishes the current step, then reads. Does **not** restart. Clear and note in the hand-back, or push back if genuinely unbuildable (§2.7). | dev |
 | `Checks` | Nothing. The flag travels with the ticket into `Reconciling`, which is the thread that answers it. | — |
@@ -1253,7 +1259,9 @@ snapshot of a moment, and the log of past runs is a log of past moments, not a p
 The report says what to start next; the control plane starts it. The sweep moves a ticket from
 `Todo` to `Ready for design` when all of the following hold.
 
-- **`Ready for design` is empty.** One at a time, so that promotion order *is* execution order.
+- **Both design queues are empty.** `Ready for design` and `Ready for redesign` alike — a redesign
+  waiting to be dispatched is a ticket ahead of the promoted one. One at a time, so that promotion
+  order *is* execution order.
   The design agent is singular (§6), so a deeper queue buys no throughput — what it costs is the
   ordering. Two tickets sitting in that queue are separated by the precedence rule alone, which
   at equal state falls through to age, and age is not the layering: a ticket freed later by a
@@ -2456,7 +2464,7 @@ read and no author reliably remembers.
   Either the finding is a false positive the writer is right to keep — a reason attached to a rule
   is not narration — or the design prompt is not landing the rule, and neither is a third
   dispatch's to settle. Counted the way the bounce rule is and firing once per count, with
-  `declines=<n>` on the `blocked` marker: the author may return the ticket to `Ready for design`
+  `declines=<n>` on the `blocked` marker: the author may return the ticket to either design queue
   for one more pass, and the two declines do not go away when they do.
 - **A ticket in `Merged` past the deploy timeout → `Blocked`,** which is how a failed production
   build becomes visible rather than a ticket that quietly stops moving. Recovering it is a
@@ -2535,8 +2543,8 @@ permanently idle is permanently dispatchable.
 | Condition | Action |
 |---|---|
 | Ticket in `Todo`, current milestone, every blocker at `Merged` or later, design queue empty, not paused — or paused and either marked blocking the boundary ticket or `Urgent` | State → `Ready for design`, first by the precedence rule (§8) |
-| State → `Ready for design` | Design agent run; its claim writes `Designing` |
-| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job, holding the diff and the reasons behind the rule ids it touched (§4); `decline` → `Ready for design` with the findings; a second decline on one ticket → `Blocked` (§12) |
+| State → `Ready for design` / `Ready for redesign` | Design agent run, a redesign before a fresh design (§7); its claim writes `Designing` |
+| Design pass committed, and it wrote markdown under `designOwnedPaths` | Record review run, inside the design job, holding the diff and the reasons behind the rule ids it touched (§4); `decline` → `Ready for redesign` with the findings; a second decline on one ticket → `Blocked` (§12) |
 | State → `Design review` | Notify author. No agent action. |
 | State → `Ready for dev` / `Ready for rework` | Enqueue; dispatch if the dev agent is idle |
 | State → `In progress` / `Reworking` | Dev agent run |
@@ -2741,9 +2749,9 @@ without passing through `Design review`.
 | design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
 | design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
 | design | `clear` | unchanged | removes `re-evaluate` | — |
-| design | `demote` | `Ready for design` | — | — |
+| design | `demote` | `Ready for redesign` | — | — |
 | record review | `pass` | `Design review` (the artifacts pass proceeds) | — | record-review, `verdict=pass` |
-| record review | `decline` | **`Ready for design`** | — | record-review, `verdict=decline` |
+| record review | `decline` | **`Ready for redesign`** | — | record-review, `verdict=decline` |
 | reconcile | `pass` | `Merged` | — | merged |
 | reconcile | `fail` | `Ready for rework` | — | reconcile-bounce |
 | reconcile | `cannot-tell` | `Merged` | **`needs-review`** | merged |

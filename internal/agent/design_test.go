@@ -135,8 +135,8 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 	if err := FinishDesign(ctx, p, h, res2, o2, "", "", nil, nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForDesign {
-		t.Errorf("demote: state = %q, want the design queue", got)
+	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForRedesign {
+		t.Errorf("demote: state = %q, want the redesign queue", got)
 	}
 }
 
@@ -894,8 +894,8 @@ func TestARecordReviewDeclineSendsTheTicketBackWithItsFindings(t *testing.T) {
 	if err := FinishDesign(ctx, p, h, res, o, "https://preview.example", "", nil, nil, review, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDesign {
-		t.Errorf("state = %q, want ready_for_design: a decline takes the author's own decline route (DESIGN §3)", got)
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForRedesign {
+		t.Errorf("state = %q, want ready_for_redesign: a decline takes the author's own decline route, into the queue whose name says so (DESIGN §3)", got)
 	}
 	if len(h.PRs) != 0 {
 		t.Errorf("a declined pass opened a PR: %+v", h.PRs)
@@ -1111,8 +1111,8 @@ func TestAContradictionDeclineNamesTheRuleOnTheTicket(t *testing.T) {
 	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, review, ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDesign {
-		t.Errorf("state = %q, want ready_for_design", got)
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForRedesign {
+		t.Errorf("state = %q, want ready_for_redesign", got)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
 	found := false
@@ -1130,5 +1130,25 @@ func TestAContradictionDeclineNamesTheRuleOnTheTicket(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no record-review marker")
+	}
+}
+
+// The redesign queue is claimed exactly as the fresh one is: a normal
+// pass, whose scope is the description and whose newest comment names
+// what the last pass got wrong. Reading it as a re-read would hand the
+// agent the wrong instructions for the wrong state.
+func TestAClaimFromTheRedesignQueueIsANormalPass(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForRedesign)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_95", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Mode != "design" {
+		t.Errorf("mode = %q, want a normal pass", res.Mode)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
+		t.Errorf("state = %q, want the claim to have taken it out of the redesign queue", got)
 	}
 }

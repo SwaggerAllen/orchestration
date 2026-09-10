@@ -10,6 +10,7 @@
     "ready_for_design": "Ready for design",
     "designing": "Designing",
     "design_review": "Design review",
+    "ready_for_redesign": "Ready for redesign",
     "ready_for_dev": "Ready for dev",
     "in_progress": "In progress",
     "checks": "Checks",

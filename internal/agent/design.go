@@ -58,7 +58,7 @@ func ClaimDesign(ctx context.Context, p *plane.Plane, ticketKey, dispatchID, dis
 	p.ReleaseDispatchReservation(ctx, core.AgentDesign, t.ID)
 
 	mode := "design"
-	if t.State != protocol.ReadyForDesign {
+	if t.State != protocol.ReadyForDesign && t.State != protocol.ReadyForRedesign {
 		mode = "design-reread"
 	}
 	res := &ClaimResult{
@@ -410,8 +410,11 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 			}
 			// No PR, no preview, no label reconciliation: nothing here is
 			// ready to be reviewed, and the labels are the next pass's to
-			// declare. The queue, not Designing, for demote's reason.
-			return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDesign, core.RoleDesign)
+			// declare. The redesign queue, not Designing, for demote's
+			// reason — and not Ready for design, because a bounce that
+			// lands beside fresh tickets is a bounce nobody sees on the
+			// board (DESIGN §3).
+			return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRedesign, core.RoleDesign)
 		}
 		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
@@ -485,11 +488,13 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		if err := p.CommentTicket(ctx, res.TicketID, o.Summary); err != nil {
 			return err
 		}
-		// The queue, not Designing: dispatch reads Ready for design, so
+		// The queue, not Designing: dispatch reads the queues, so
 		// demoting into Designing would park the ticket in a state
 		// nothing picks up — a ticket sent back for redesign that no
-		// design pass ever runs on.
-		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForDesign, core.RoleDesign)
+		// design pass ever runs on. The redesign queue by name: the
+		// summary above is the scope, and the state says why it is
+		// there (DESIGN §3).
+		return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRedesign, core.RoleDesign)
 	}
 	return fmt.Errorf("design finish %s: unknown outcome %q", res.TicketKey, o.Outcome)
 }

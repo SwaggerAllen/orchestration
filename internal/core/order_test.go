@@ -390,3 +390,15 @@ func TestOrderFlagsUncommittedTickets(t *testing.T) {
 		}
 	}
 }
+
+// Ready for redesign is a queue, and a queue is work waiting rather than
+// work happening — reading a bounced ticket as in flight is the same
+// confusion splitting Designing from its queue removed.
+func TestARedesignWaitingIsNotStartedWork(t *testing.T) {
+	stray := tk("A", protocol.ReadyForRedesign, func(t *Ticket) { t.Milestone = "M2" })
+	s := snap(stray)
+	s.CurrentMilestone = "M1"
+	if got := layerOf(ComputeOrder(s, ""), "A"); got == LayerStarted {
+		t.Errorf("a ticket waiting in the redesign queue is in %q — it is queued, not in flight", got)
+	}
+}
