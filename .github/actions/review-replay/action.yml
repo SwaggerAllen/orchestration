@@ -93,6 +93,13 @@ runs:
     # branch took, newest first, that touched a screen or system doc. A
     # squash merge has one parent and is its own pass; a merge commit's
     # pass is its second parent's side.
+    #
+    # The count is git's own -n, never `| head`: under pipefail, head
+    # closing the pipe after N lines kills git with SIGPIPE on a repo
+    # that has more than N such merges, and the step exits 141 with
+    # nothing listed. The dummy never had more merges than the cap, so
+    # the first replay on catapult (32 asked, more on main) was the
+    # first to hit it.
     - name: list the last doc-touching merges
       if: inputs.phase == 'list'
       id: merges
@@ -101,8 +108,7 @@ runs:
         MERGES: ${{ inputs.merges }}
       run: |
         set -euo pipefail
-        git log --first-parent --format=%H -n 400 HEAD -- 'screens/*.md' 'systems/*.md' \
-          | head -n "$MERGES" \
+        git log --first-parent --format=%H -n "$MERGES" HEAD -- 'screens/*.md' 'systems/*.md' \
           | jq -R . | jq -sc . > "$RUNNER_TEMP/shas.json"
         echo "shas=$(cat "$RUNNER_TEMP/shas.json")" >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/shas.json"
@@ -261,7 +267,14 @@ runs:
           echo
           echo "| merge | reviewable | verdict | narration | contradiction |"
           echo "|---|---|---|---|---|"
-          for row in verdicts/*/row.txt; do
+          # nullglob, so a run whose replays all died still renders a
+          # table that says so instead of failing on the literal glob.
+          shopt -s nullglob
+          rows=(verdicts/*/row.txt)
+          if [ "${#rows[@]}" -eq 0 ]; then
+            echo "| (no verdicts — every replay job failed before recording one; read the replay jobs) | | | | |"
+          fi
+          for row in "${rows[@]}"; do
             . "$row"
             echo "| \`${sha:0:9}\` | ${reviewable:-} | ${verdict:-} | ${narration:-} | ${contradiction:-} |"
           done
