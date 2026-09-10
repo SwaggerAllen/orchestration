@@ -254,6 +254,19 @@ never committed.
   comes back from the record review as a `contradiction` finding, a
   decline. The shape and the reasoning are DESIGN §4; the audit holds
   the rest.
+- **The doc keeps what a pass needs to obey the rule; the sibling
+  keeps what a pass needs to change it.** The rule, the mechanism it
+  names, the predicate, and one clause of why stay in the rule's own
+  sentence; the incident behind it and the failure that was measured go
+  in the `.reasons.md` entry. A measurement that *passed* goes in
+  neither. "Run against both schemes; under the other all three fail,
+  under this one all three pass" says the rule held on the day the
+  sentence was written, not why it holds, and it reads as evidence long
+  after the code under it has moved — which is exactly what stops the
+  next pass checking again. Its durable form is a test. The record
+  review declines it as narration, and the first ticket through the
+  index cut on the wrong side of this line, which is why the line is
+  stated here.
 - **A problem with the pipeline goes in the harness findings**, not in
   your summary and not into `non-asks.md`. The non-asks file records
   what the author does not want built; a harness finding records what

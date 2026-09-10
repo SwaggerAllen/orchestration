@@ -59,7 +59,10 @@ a rule and its reason. The shapes, read off real docs:
   rule now depends on.
 - A check recorded as a finding: "held against entry N, which already
   answers it", "neither adds a new state", "what stays refused is
-  unchanged". A check that passed is not a finding.
+  unchanged". A check that passed is not a finding, and a measurement
+  reported as passing — "run against both schemes, all three pass" —
+  is the same shape: it says the rule held when the sentence was
+  written, not why it holds.
 - The record narrating its own scope: "not built as part of this
   pass", "whether that reverts is that diff's to settle".
 

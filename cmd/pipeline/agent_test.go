@@ -1049,6 +1049,7 @@ func TestRecordReviewRolePromptCarriesBothHalvesOfTheRule(t *testing.T) {
 		{"a rule whose reason the diff amends alongside it", "the never-flag half of the new kind: the entry moving with the rule is the split working"},
 		{"no reason recorded", "a rule with no entry has nothing to contradict"},
 		{"an entry's body", "an entry is the reason attached to its rule by construction, and the place an incident is told"},
+		{"a measurement reported as passing", "the check-recorded-as-finding shape, in the form the catapult replay met it"},
 	} {
 		if !strings.Contains(lower, want.text) {
 			t.Errorf("prompts/record-review.md does not carry %q — %s", want.text, want.why)
@@ -1070,6 +1071,8 @@ func TestDesignRolePromptCarriesTheRationaleIndexRules(t *testing.T) {
 		{"retired: <ticket>", "how a rule is withdrawn without losing its id"},
 		{"cite a rule as `name#n`, never by its wording", "the citation form the audit resolves"},
 		{"`contradiction` finding", "what the record review sends back for a rule changed against its reason"},
+		{"the sibling keeps what a pass needs to change it", "the cut: the first ticket through the index put the reason in the doc"},
+		{"a measurement that *passed* goes in neither", "a passing check is not a reason; its durable form is a test"},
 	} {
 		if !strings.Contains(lower, want.text) {
 			t.Errorf("prompts/design.md does not carry %q — %s", want.text, want.why)
