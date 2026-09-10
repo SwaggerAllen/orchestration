@@ -229,9 +229,22 @@ runs:
           echo "before=$BEFORE"
           echo "reviewable=$REVIEWABLE"
           if [ -f "$P/review/review.json" ]; then
-            echo "verdict=$(jq -r '.verdict' "$P/review/review.json")"
-            echo "narration=$(jq '[.findings[] | select((.kind // "narration") == "narration")] | length' "$P/review/review.json")"
-            echo "contradiction=$(jq '[.findings[] | select(.kind == "contradiction")] | length' "$P/review/review.json")"
+            verdict=$(jq -r '.verdict' "$P/review/review.json")
+            echo "verdict=$verdict"
+            # Findings on a decline are what the plane acts on. On a
+            # pass they are callouts (prompts/record-review.md): posted
+            # on the ticket, acted on by nobody. One column for both
+            # read a pass carrying one callout as a pass with one
+            # narration finding, on the first catapult replay.
+            if [ "$verdict" = decline ]; then
+              echo "narration=$(jq '[.findings[] | select((.kind // "narration") == "narration")] | length' "$P/review/review.json")"
+              echo "contradiction=$(jq '[.findings[] | select(.kind == "contradiction")] | length' "$P/review/review.json")"
+              echo "callouts=0"
+            else
+              echo "narration=0"
+              echo "contradiction=0"
+              echo "callouts=$(jq '.findings | length' "$P/review/review.json")"
+            fi
           else
             echo "verdict=(none)"
           fi
@@ -265,18 +278,18 @@ runs:
           echo
           echo "A count of declines is not a count of defects: open the artifact and read the findings before drawing anything from a row."
           echo
-          echo "| merge | reviewable | verdict | narration | contradiction |"
-          echo "|---|---|---|---|---|"
+          echo "| merge | reviewable | verdict | narration | contradiction | callouts |"
+          echo "|---|---|---|---|---|---|"
           # nullglob, so a run whose replays all died still renders a
           # table that says so instead of failing on the literal glob.
           shopt -s nullglob
           rows=(verdicts/*/row.txt)
           if [ "${#rows[@]}" -eq 0 ]; then
-            echo "| (no verdicts — every replay job failed before recording one; read the replay jobs) | | | | |"
+            echo "| (no verdicts — every replay job failed before recording one; read the replay jobs) | | | | | |"
           fi
           for row in "${rows[@]}"; do
             . "$row"
-            echo "| \`${sha:0:9}\` | ${reviewable:-} | ${verdict:-} | ${narration:-} | ${contradiction:-} |"
+            echo "| \`${sha:0:9}\` | ${reviewable:-} | ${verdict:-} | ${narration:-} | ${contradiction:-} | ${callouts:-} |"
           done
         } >> "$GITHUB_STEP_SUMMARY"
         cat "$GITHUB_STEP_SUMMARY"

@@ -488,8 +488,12 @@ keeps what a pass needs to *obey* the rule without opening anything else: the ru
 it names (the file, the function, the shape), the predicate for when it applies, and the one
 clause of why that sits in the rule's own sentence. The sibling gets what a pass needs only to
 *change* the rule: the argument, the incident, the measurement and its numbers, the alternatives
-that lost, the ticket history. The test for a sentence is whether a pass could still follow the
-rule correctly with it gone — yes, and it moves; no, and it stays. Neither of the two cuts the
+that lost, the ticket history. A measurement that *passed* goes in neither: "run against both
+schemes, all three pass" says the rule held on the day it was written, not why it holds, and a
+sentence like that reads as evidence long after the code under it has moved — which is what stops
+the next pass checking again. Its durable form is a test; the record review declines it as
+narration (a check that passed is not a finding). The test for a sentence is whether a pass could
+still follow the rule correctly with it gone — yes, and it moves; no, and it stays. Neither of the two cuts the
 tree suggests is right: the bold lead alone loses the "because" that 239 of Catapult's 341
 bullets carry in their first paragraph, which is the clause that stops the next pass simplifying
 the rule back into the bug, while the whole first paragraph keeps half the text and buys half of

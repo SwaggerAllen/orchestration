@@ -753,3 +753,20 @@ func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
 		}
 	}
 }
+
+// A pass's findings are callouts (prompts/record-review.md): posted,
+// acted on by nobody. The first catapult replay counted one in the
+// narration column, so a pass read as a pass with a finding. The row
+// counts findings the plane acts on and callouts apart.
+func TestTheReplayTableCountsAPassesFindingsAsCallouts(t *testing.T) {
+	action := stripComments(repoFile(t, filepath.Join(".github", "actions", "review-replay", "action.yml")))
+	for _, want := range []struct{ text, why string }{
+		{`if [ "$verdict" = decline ]; then`, "the narration and contradiction counts are taken on a decline only"},
+		{`echo "callouts=$(jq '.findings | length'`, "a pass's findings are counted as callouts"},
+		{"| narration | contradiction | callouts |", "the table shows them apart"},
+	} {
+		if !strings.Contains(action, want.text) {
+			t.Errorf("review-replay/action.yml does not carry %s — %s", want.text, want.why)
+		}
+	}
+}
