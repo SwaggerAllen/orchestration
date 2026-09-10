@@ -127,6 +127,21 @@ fields its own section names.
 ## Gates
 
 Everything in `pipeline.config.json` → `qualityGates` must pass before
-a ticket moves on. Green gates are the next state's entry condition, so
-finishing red just bounces the ticket back with a marker. Run them
-before you finish; the project's `CLAUDE.md` has the commands.
+a ticket moves on from dev. Green gates are `Checks`' entry condition,
+so a dev pass finishing red just bounces the ticket back with a marker.
+Run them before you finish a dev or reconcile pass; the project's
+`CLAUDE.md` has the commands.
+
+A design pass is held to a different gate (DESIGN §9): the ownership
+audit, and a storybook export that builds — that export is what Design
+review reads. Its finish is not gated on the suite, and on a ticket
+that changes what a system says or the shape of a call it cannot be:
+the module and the tests asserting the old strings are dev's, outside
+`designOwnedPaths`, so the suite stays red until the dev pass lands and
+no design-only change makes it green short of a dead clause kept to
+satisfy an assertion dev will delete. Run format and compile, build
+the export, and report a red suite as the dev half not landed yet
+rather than as your own failure. The paragraph above used to address
+every role, and a design pass on the dummy spent its run trying both
+component shapes against a gate it could not reach before filing the
+contradiction as a harness finding.
