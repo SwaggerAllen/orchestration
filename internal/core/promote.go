@@ -76,7 +76,10 @@ func nextPromotion(s *Snapshot, skip map[string]bool) Promotion {
 // the boundary ticket, which has its own state meanings.
 func queueHolder(s *Snapshot) *Ticket {
 	for _, t := range s.Tickets {
-		if t.State != protocol.ReadyForDesign {
+		// Both design queues occupy it: a redesign waiting is a design
+		// pass owed, and promoting a second ticket in beside it would
+		// queue two for one dispatcher.
+		if t.State != protocol.ReadyForDesign && t.State != protocol.ReadyForRedesign {
 			continue
 		}
 		if t.IsBoundary() || t.Unmanaged() {

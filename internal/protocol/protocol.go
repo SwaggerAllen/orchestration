@@ -14,17 +14,23 @@ const (
 	ReadyForDesign State = "ready_for_design"
 	Designing      State = "designing"
 	DesignReview   State = "design_review"
-	ReadyForDev    State = "ready_for_dev"
-	InProgress     State = "in_progress"
-	Checks         State = "checks"
-	Reconciling    State = "reconciling"
-	ReadyForRework State = "ready_for_rework"
-	Reworking      State = "reworking"
-	Merged         State = "merged"
-	BoundaryReview State = "boundary_review"
-	Blocked        State = "blocked"
-	Done           State = "done"
-	Canceled       State = "canceled"
+	// ReadyForRedesign is the design queue a pass is sent back to with a
+	// scope comment — a record-review decline or a demote (DESIGN §3,
+	// §4) — the mirror of ReadyForRework. Ready for design is where a
+	// fresh ticket waits; a bounced design waited there too until this
+	// state existed, and on the board a bounce looked like a new ticket.
+	ReadyForRedesign State = "ready_for_redesign"
+	ReadyForDev      State = "ready_for_dev"
+	InProgress       State = "in_progress"
+	Checks           State = "checks"
+	Reconciling      State = "reconciling"
+	ReadyForRework   State = "ready_for_rework"
+	Reworking        State = "reworking"
+	Merged           State = "merged"
+	BoundaryReview   State = "boundary_review"
+	Blocked          State = "blocked"
+	Done             State = "done"
+	Canceled         State = "canceled"
 )
 
 // AllStates is the full canonical set in rough pipeline order. The exact
@@ -37,6 +43,7 @@ var AllStates = []State{
 	ReadyForDesign,
 	Designing,
 	DesignReview,
+	ReadyForRedesign,
 	ReadyForDev,
 	InProgress,
 	Checks,
@@ -80,22 +87,23 @@ const (
 // (`Ready for dev`, `Ready for rework`) are "unstarted" because nobody has
 // the ball (DESIGN §3); everything agent- or author-held is "started".
 var Categories = map[State]Category{
-	Backlog:        CategoryBacklog,
-	Todo:           CategoryUnstarted,
-	ReadyForDesign: CategoryUnstarted,
-	Designing:      CategoryStarted,
-	DesignReview:   CategoryStarted,
-	ReadyForDev:    CategoryUnstarted,
-	InProgress:     CategoryStarted,
-	Checks:         CategoryStarted,
-	Reconciling:    CategoryStarted,
-	ReadyForRework: CategoryUnstarted,
-	Reworking:      CategoryStarted,
-	Merged:         CategoryStarted,
-	BoundaryReview: CategoryStarted,
-	Blocked:        CategoryStarted,
-	Done:           CategoryCompleted,
-	Canceled:       CategoryCanceled,
+	Backlog:          CategoryBacklog,
+	Todo:             CategoryUnstarted,
+	ReadyForDesign:   CategoryUnstarted,
+	Designing:        CategoryStarted,
+	DesignReview:     CategoryStarted,
+	ReadyForRedesign: CategoryUnstarted,
+	ReadyForDev:      CategoryUnstarted,
+	InProgress:       CategoryStarted,
+	Checks:           CategoryStarted,
+	Reconciling:      CategoryStarted,
+	ReadyForRework:   CategoryUnstarted,
+	Reworking:        CategoryStarted,
+	Merged:           CategoryStarted,
+	BoundaryReview:   CategoryStarted,
+	Blocked:          CategoryStarted,
+	Done:             CategoryCompleted,
+	Canceled:         CategoryCanceled,
 }
 
 // Colors are the hex colors the pipeline's states are created with.
@@ -120,22 +128,23 @@ var Categories = map[State]Category{
 // Nothing reads these back; they exist so the author can see the queue
 // without reading it.
 var Colors = map[State]string{
-	Backlog:        "#bec2c8", // grey — not scheduled
-	Todo:           "#e2e2e2", // light grey — queued
-	ReadyForDesign: "#e2e2e2", // light grey — queued, like the other queues
-	Designing:      "#9b8fd4", // violet — design agent
-	DesignReview:   "#f2994a", // orange — YOUR sign-off
-	ReadyForDev:    "#e2e2e2", // light grey — queued
-	InProgress:     "#4cb782", // green — dev agent building
-	Checks:         "#f2c94c", // yellow — CI verifying
-	Reconciling:    "#26b5ce", // cyan — reconcile agent
-	ReadyForRework: "#e2e2e2", // light grey — queued
-	Reworking:      "#4cb782", // green — dev agent again
-	Merged:         "#f2c94c", // yellow — waiting on the deploy
-	BoundaryReview: "#f2994a", // orange — YOUR pass
-	Blocked:        "#eb5757", // red — needs you
-	Done:           "#95a2b3", // dark grey — terminal, out of mind
-	Canceled:       "#95a2b3", // dark grey — terminal
+	Backlog:          "#bec2c8", // grey — not scheduled
+	Todo:             "#e2e2e2", // light grey — queued
+	ReadyForDesign:   "#e2e2e2", // light grey — queued, like the other queues
+	Designing:        "#9b8fd4", // violet — design agent
+	DesignReview:     "#f2994a", // orange — YOUR sign-off
+	ReadyForRedesign: "#e2e2e2", // light grey — queued; the name is the signal, not the colour
+	ReadyForDev:      "#e2e2e2", // light grey — queued
+	InProgress:       "#4cb782", // green — dev agent building
+	Checks:           "#f2c94c", // yellow — CI verifying
+	Reconciling:      "#26b5ce", // cyan — reconcile agent
+	ReadyForRework:   "#e2e2e2", // light grey — queued
+	Reworking:        "#4cb782", // green — dev agent again
+	Merged:           "#f2c94c", // yellow — waiting on the deploy
+	BoundaryReview:   "#f2994a", // orange — YOUR pass
+	Blocked:          "#eb5757", // red — needs you
+	Done:             "#95a2b3", // dark grey — terminal, out of mind
+	Canceled:         "#95a2b3", // dark grey — terminal
 }
 
 // Labels is the fixed label set every project team carries (DESIGN §8).

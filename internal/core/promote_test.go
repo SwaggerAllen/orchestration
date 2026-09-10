@@ -297,3 +297,17 @@ func TestKillSwitchPromotesNothing(t *testing.T) {
 		t.Errorf("want the kill switch named and nothing promoted, got %+v", p)
 	}
 }
+
+// A redesign waiting in Ready for redesign is a design pass owed, so it
+// occupies the queue exactly as a fresh ticket in Ready for design does;
+// promoting a second ticket in beside it queues two for one dispatcher,
+// which is the ordering loss the one-deep rule exists to prevent.
+func TestTheRedesignQueueHoldsPromotionToo(t *testing.T) {
+	s := snap(tk("R", protocol.ReadyForRedesign), tk("T1", protocol.Todo))
+	if got := promotions(s); len(got) != 0 {
+		t.Errorf("promoted %v while a redesign occupied the queue", got)
+	}
+	if p := NextPromotion(s); !strings.Contains(p.Why, "R") {
+		t.Errorf("the report has to name the redesign occupying the queue, got %q", p.Why)
+	}
+}

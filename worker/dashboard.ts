@@ -152,6 +152,7 @@ const MIN = 60000;
 // the moment a state has no rows in the window.
 const NAMED = {
   designing:"#3b6ea5", design_review:"#6a9bd1", ready_for_design:"#9dbfe0",
+  ready_for_redesign:"#7fa3c9",
   in_progress:"#4f8a5b", reconciling:"#7fae86", checks:"#a8c9ad",
   ready_for_rework:"#c9a227", reworking:"#e0b93c", blocked:"#b1442e",
   merged:"#7a5ea8", boundary_review:"#a98fc4", ready_for_boundary:"#c6b3da",

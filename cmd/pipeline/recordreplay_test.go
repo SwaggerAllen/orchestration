@@ -316,8 +316,8 @@ func TestADesignJobReplayedWithACannedDeclineRoutesOnTheReview(t *testing.T) {
 		}
 	}
 	w.finish(t, `{"verdict":"decline","findings":[{"file":"systems/caps.md","quote":"or connections, whichever is convenient","why":"the entry records that a shared connection is a second owner","kind":"contradiction","id":"caps#17"}],"summary":"The rule was rewritten against its reason and the entry was not amended."}`)
-	if got := w.state(t); got != protocol.ReadyForDesign {
-		t.Errorf("state = %q, want ready_for_design: a decline takes the author's own decline route", got)
+	if got := w.state(t); got != protocol.ReadyForRedesign {
+		t.Errorf("state = %q, want ready_for_redesign: a decline takes the author's own decline route, into the queue whose name says so", got)
 	}
 	if len(w.h.PRs) != 0 {
 		t.Errorf("a declined pass opened a PR: %+v", w.h.PRs)

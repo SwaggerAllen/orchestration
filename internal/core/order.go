@@ -329,7 +329,7 @@ func isStarted(t *Ticket) bool {
 	// absent from this list because it did not exist — Designing meant
 	// both, and reading a queued ticket as in flight is exactly the
 	// confusion splitting them removed.
-	case protocol.Backlog, protocol.Todo, protocol.ReadyForDesign:
+	case protocol.Backlog, protocol.Todo, protocol.ReadyForDesign, protocol.ReadyForRedesign:
 		return false
 	}
 	return true
