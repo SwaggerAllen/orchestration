@@ -33,6 +33,30 @@ func TestAssembledPromptOrdersRoleContextTicket(t *testing.T) {
 	}
 }
 
+// The shared Gates paragraph is scoped by role. It used to tell every
+// role to finish green on qualityGates, and a design pass cannot on any
+// ticket that changes copy or a signature: the module and the tests
+// asserting the old strings are dev-owned, so the suite is red until dev
+// lands. DESIGN §9 makes design's finish gate the ownership audit; the
+// prompt has to say the same or a design pass designs around a gate that
+// was never its own (the dummy's ORC-238 filed exactly that).
+func TestTheGatesParagraphHoldsDesignToItsOwnGate(t *testing.T) {
+	body := repoFile(t, filepath.Join("prompts", "repo-context.md"))
+	i := strings.Index(body, "## Gates")
+	if i < 0 {
+		t.Fatal("repo-context.md has no Gates section")
+	}
+	section := body[i:]
+	if j := strings.Index(section[1:], "\n## "); j >= 0 {
+		section = section[:j+1]
+	}
+	for _, want := range []string{"A design pass", "ownership", "DESIGN §9", "export that builds", "moves on from dev"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("the Gates section does not say %q — a design pass reads it as a gate on the suite it cannot green", want)
+		}
+	}
+}
+
 // Without a repo-context path the prompt is unchanged, so a project
 // pinned to an older pipeline ref keeps working rather than gaining a
 // stray separator.
