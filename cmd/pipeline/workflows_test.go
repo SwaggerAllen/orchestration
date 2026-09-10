@@ -724,6 +724,8 @@ func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
 		{"actions/upload-artifact", "the verdicts are the output"},
 		{`--prompt-template "$GITHUB_WORKSPACE/.pipeline/prompts/record-review.md"`, "the prompt under test is the one pipeline_ref names"},
 		{"name: replay-config", "today's config rides an artifact from the list phase"},
+		{`git log --first-parent --format=%H -n "$MERGES" HEAD`, "the count is git's own -n; `| head` under pipefail kills git with SIGPIPE on a repo with more merges than the cap (catapult's first replay exited 141 with nothing listed)"},
+		{"shopt -s nullglob", "a run with no verdicts renders a table that says so rather than failing on the literal glob"},
 		{`cp "$RUNNER_TEMP/pipeline/config/pipeline.config.json" "$GITHUB_WORKSPACE/pipeline.config.json"`, "the merge's own config is overlaid before the assemble — 8 of the dummy's first 10 replays failed validation on a config that predated ready_for_design"},
 	} {
 		if !strings.Contains(action, want.text) {
@@ -739,6 +741,9 @@ func TestTheReviewReplayReadsAProjectAndPostsNothing(t *testing.T) {
 		if !strings.Contains(stub, want.text) {
 			t.Errorf("pipeline-review-replay.yml does not carry %s — %s", want.text, want.why)
 		}
+	}
+	if strings.Contains(action, "| head") {
+		t.Error("review-replay/action.yml pipes git into head — under pipefail that is SIGPIPE and exit 141 the moment the repo has more merges than the count")
 	}
 	for name, body := range map[string]string{"review-replay/action.yml": action, "pipeline-review-replay.yml": stub} {
 		for _, absent := range []string{"pipeline agent finish", "LINEAR_API_KEY", "PIPELINE_STATE_TOKEN", "CommentTicket", "contents: write", "GITHUB_TOKEN:"} {
