@@ -23,10 +23,18 @@
 // which is what lets a diff say which rules it touched without anyone
 // deciding where a rule ends.
 //
-// Per-doc rather than global ids, because the mutex (DESIGN §6) already
-// holds one ticket per doc, so a per-doc counter cannot race; two tickets
-// on two docs minting from one global counter could mint the same next
-// number in parallel.
+// An id is `17` when minted outside a ticket — the port, or the author —
+// and `ORC-247-2` when a ticket's design pass mints it: the ticket key and
+// a counter that pass keeps per doc. The counter is scoped to the ticket
+// because nothing else scopes it: the mutex (DESIGN §6) holds from
+// `Ready for dev`, so two tickets can be designed against one doc and sit
+// in Design review together, each having minted "the highest present plus
+// one" from the same main — Catapult's ORC-246 and ORC-247 both minted
+// generation#52 and platform_content#64 that way on 2026-09-11, and the
+// record review, whose base is main, could not see it. A ticket has one
+// branch and the design agent is singular, so an id carrying the ticket
+// cannot collide with another ticket's. The ticket in an id is the minter,
+// never the owner: a later pass amending the rule keeps the id.
 //
 // Entries are optional. A screen section is a description as often as it
 // is a rule, and a check demanding an entry for every id would be
@@ -68,7 +76,8 @@ const (
 
 // Rule is one id-bearing line in a doc.
 type Rule struct {
-	ID   int
+	// ID is the token after the `#`: `17`, or `ORC-247-2`.
+	ID   string
 	Kind Kind
 	// Line is 1-based, in the file as read: fences and front matter are
 	// masked rather than removed, so a line number here is the file's.
@@ -90,7 +99,7 @@ type Unnumbered struct {
 
 // Dup is an id that appears more than once, with every line it is on.
 type Dup struct {
-	ID    int
+	ID    string
 	Lines []int
 }
 
@@ -102,12 +111,12 @@ type Doc struct {
 	// Blocks holds, per id, every line from the id's line up to the next
 	// id's line — the attribution rule applied. Lines before the first
 	// id belong to nothing.
-	Blocks map[int]string
+	Blocks map[string]string
 }
 
 // Entry is one `## #n` entry in a reasons file.
 type Entry struct {
-	ID   int
+	ID   string
 	Line int
 	// Since is the ticket that established the rule, where known.
 	Since string
@@ -133,21 +142,59 @@ type File struct {
 	// not silently extend the entry above it.
 	Malformed []Unnumbered
 	// Blocks holds each entry's whole text, heading to next h2.
-	Blocks map[int]string
+	Blocks map[string]string
 }
+
+// idPat is the id grammar: digits alone, or a ticket key (`ORC-247`) and
+// a counter joined by hyphens. The key is uppercase by construction, so a
+// doc name — lowercase, in a citation — and a key never read as each
+// other, and a bare ticket reference (`ORC-247`) is not an id: the
+// trailing counter is required.
+const idPat = `(?:[A-Z][A-Z0-9]*-[0-9]+-)?[0-9]+`
 
 var (
 	headingRe = regexp.MustCompile(`^(#{2,6})\s+(.+?)\s*$`)
-	headingID = regexp.MustCompile(`^(#{2,6})\s+#(\d+)(?:\s+(.*?))?\s*$`)
+	headingID = regexp.MustCompile(`^(#{2,6})\s+#(` + idPat + `)(?:\s+(.*?))?\s*$`)
 	// bulletID matches on the bullet's first line only. The bold lead
 	// may wrap — Catapult's systems/substrate.md carries one whose
 	// closing ** is on the second line — and a pattern demanding the
 	// close on line one would read that rule as unnumbered.
-	bulletID = regexp.MustCompile(`^- \*\*#(\d+)\s`)
-	entryRe  = regexp.MustCompile(`^##\s+#(\d+)\s*$`)
+	bulletID = regexp.MustCompile(`^- \*\*#(` + idPat + `)\s`)
+	entryRe  = regexp.MustCompile(`^##\s+#(` + idPat + `)\s*$`)
 	h2Re     = regexp.MustCompile(`^##\s+(.*?)\s*$`)
-	idToken  = regexp.MustCompile(`^#(\d+)(?:\s+|$)`)
+	idToken  = regexp.MustCompile(`^#` + idPat + `(?:\s+|$)`)
+	idExact  = regexp.MustCompile(`^` + idPat + `$`)
 )
+
+// ValidID reports whether s is an id in the grammar.
+func ValidID(s string) bool { return idExact.MatchString(s) }
+
+// Ticket is the key an id was minted under, or "" for a bare id.
+func Ticket(id string) string {
+	i := strings.LastIndex(id, "-")
+	if i < 0 {
+		return ""
+	}
+	return id[:i]
+}
+
+// Seq is an id's counter: the whole of a bare id, the last field of a
+// ticket-minted one.
+func Seq(id string) int {
+	n, _ := strconv.Atoi(id[strings.LastIndex(id, "-")+1:])
+	return n
+}
+
+// Less orders ids for reports: bare ids first by counter, then
+// ticket-minted ones by key and counter. Never by string, or #10 sorts
+// before #2.
+func Less(a, b string) bool {
+	ta, tb := Ticket(a), Ticket(b)
+	if ta != tb {
+		return ta < tb
+	}
+	return Seq(a) < Seq(b)
+}
 
 // StripID returns a heading's text without its id token: "#3 States" is
 // "States". The doc lint normalises through this, because its own
@@ -217,10 +264,10 @@ func masked(lines []string) []string {
 func ParseDoc(content string) Doc {
 	lines := strings.Split(content, "\n")
 	m := masked(lines)
-	d := Doc{Blocks: map[int]string{}}
-	seen := map[int][]int{}
-	blocks := map[int][]string{}
-	cur := 0
+	d := Doc{Blocks: map[string]string{}}
+	seen := map[string][]int{}
+	blocks := map[string][]string{}
+	cur := ""
 	inStanding, standingLevel := false, 0
 	for i, l := range m {
 		n := i + 1
@@ -229,7 +276,7 @@ func ParseDoc(content string) Doc {
 			level := len(headingRe.FindStringSubmatch(l)[1])
 			text := StripID(headingRe.FindStringSubmatch(l)[2])
 			if hm := headingID.FindStringSubmatch(l); hm != nil {
-				id, _ := strconv.Atoi(hm[2])
+				id := hm[2]
 				d.Rules = append(d.Rules, Rule{ID: id, Kind: KindHeading, Line: n, Text: strings.TrimSpace(hm[3]), Raw: lines[i]})
 				seen[id] = append(seen[id], n)
 				cur = id
@@ -243,14 +290,14 @@ func ParseDoc(content string) Doc {
 				inStanding = false
 			}
 		case bulletID.MatchString(l):
-			id, _ := strconv.Atoi(bulletID.FindStringSubmatch(l)[1])
+			id := bulletID.FindStringSubmatch(l)[1]
 			d.Rules = append(d.Rules, Rule{ID: id, Kind: KindBullet, Line: n, Text: boldLead(m, i), Raw: lines[i]})
 			seen[id] = append(seen[id], n)
 			cur = id
 		case inStanding && strings.HasPrefix(l, "- "):
 			d.Unnumbered = append(d.Unnumbered, Unnumbered{Kind: KindBullet, Line: n, Text: boldLead(m, i)})
 		}
-		if cur != 0 {
+		if cur != "" {
 			blocks[cur] = append(blocks[cur], strings.TrimRight(lines[i], " \t"))
 		}
 	}
@@ -304,9 +351,9 @@ func boldLead(lines []string, i int) string {
 // entry is preamble and is dropped.
 func ParseFile(content string) File {
 	lines := strings.Split(content, "\n")
-	f := File{Blocks: map[int]string{}}
-	seen := map[int][]int{}
-	blocks := map[int][]string{}
+	f := File{Blocks: map[string]string{}}
+	seen := map[string][]int{}
+	blocks := map[string][]string{}
 	var cur *Entry
 	var buf []string
 	flush := func() {
@@ -317,22 +364,22 @@ func ParseFile(content string) File {
 		f.Entries = append(f.Entries, *cur)
 		cur, buf = nil, nil
 	}
-	inEntry := 0
+	inEntry := ""
 	for i, l := range lines {
 		n := i + 1
 		if em := entryRe.FindStringSubmatch(l); em != nil {
 			flush()
-			id, _ := strconv.Atoi(em[1])
+			id := em[1]
 			cur = &Entry{ID: id, Line: n}
 			seen[id] = append(seen[id], n)
 			inEntry = id
 		} else if hm := h2Re.FindStringSubmatch(l); hm != nil {
 			flush()
 			f.Malformed = append(f.Malformed, Unnumbered{Kind: KindHeading, Line: n, Text: hm[1]})
-			inEntry = 0
+			inEntry = ""
 			continue
 		}
-		if inEntry != 0 {
+		if inEntry != "" {
 			blocks[inEntry] = append(blocks[inEntry], strings.TrimRight(l, " \t"))
 		}
 		if cur == nil || entryRe.MatchString(l) {
@@ -377,14 +424,14 @@ func metadata(line string) (key, val string, ok bool) {
 	return "", "", false
 }
 
-func dups(seen map[int][]int) []Dup {
+func dups(seen map[string][]int) []Dup {
 	var out []Dup
 	for id, ls := range seen {
 		if len(ls) > 1 {
 			out = append(out, Dup{ID: id, Lines: ls})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool { return Less(out[i].ID, out[j].ID) })
 	return out
 }
 
@@ -412,7 +459,7 @@ func (ix Index) Ported() bool {
 }
 
 // Rule finds the rule line carrying id.
-func (ix Index) Rule(id int) (Rule, bool) {
+func (ix Index) Rule(id string) (Rule, bool) {
 	for _, r := range ix.Doc.Rules {
 		if r.ID == id {
 			return r, true
@@ -422,7 +469,7 @@ func (ix Index) Rule(id int) (Rule, bool) {
 }
 
 // Entry finds the entry recorded for id.
-func (ix Index) Entry(id int) (Entry, bool) {
+func (ix Index) Entry(id string) (Entry, bool) {
 	if ix.File == nil {
 		return Entry{}, false
 	}
@@ -438,7 +485,7 @@ func (ix Index) Entry(id int) (Entry, bool) {
 // line, or an entry — retired included, because keeping the entry is
 // exactly what lets a citation of a withdrawn rule keep meaning
 // something.
-func (ix Index) Resolves(id int) bool {
+func (ix Index) Resolves(id string) bool {
 	if _, ok := ix.Rule(id); ok {
 		return true
 	}
@@ -446,24 +493,42 @@ func (ix Index) Resolves(id int) bool {
 	return ok
 }
 
-// NextID is the id a new rule in this doc mints: the highest present,
-// on either side, plus one. Never a reused number, which is why entries
-// count too.
-func (ix Index) NextID() int {
-	max := 0
-	for _, r := range ix.Doc.Rules {
-		if r.ID > max {
-			max = r.ID
+// HighestID is the highest id minted under ticket in this doc — "" for
+// the bare ids — on either side, and false when there is none. Entries
+// count too, so a retired rule's number is never reissued.
+func (ix Index) HighestID(ticket string) (string, bool) {
+	best, found := "", false
+	consider := func(id string) {
+		if Ticket(id) != ticket {
+			return
 		}
+		if !found || Less(best, id) {
+			best, found = id, true
+		}
+	}
+	for _, r := range ix.Doc.Rules {
+		consider(r.ID)
 	}
 	if ix.File != nil {
 		for _, e := range ix.File.Entries {
-			if e.ID > max {
-				max = e.ID
-			}
+			consider(e.ID)
 		}
 	}
-	return max + 1
+	return best, found
+}
+
+// NextID is the id a new rule in this doc mints under ticket: one above
+// the highest that ticket has minted here, or `<ticket>-1`; a bare
+// counter when ticket is "", which is the author's and the port's.
+func (ix Index) NextID(ticket string) string {
+	n := 1
+	if h, ok := ix.HighestID(ticket); ok {
+		n = Seq(h) + 1
+	}
+	if ticket == "" {
+		return strconv.Itoa(n)
+	}
+	return ticket + "-" + strconv.Itoa(n)
 }
 
 // Load reads one doc and its sibling. ok is false when the doc does not
@@ -491,7 +556,7 @@ func load(root, dir, name string) (Index, error) {
 		Name:     name,
 		Path:     dir + "/" + name + ".md",
 		FilePath: dir + "/" + ReasonsFileFor(name+".md"),
-		Doc:      Doc{Blocks: map[int]string{}},
+		Doc:      Doc{Blocks: map[string]string{}},
 	}
 	raw, err := os.ReadFile(filepath.Join(root, dir, name+".md"))
 	if err == nil {
@@ -541,7 +606,7 @@ func LoadDir(root, dir string) ([]Index, error) {
 // stood on the base side.
 type Touched struct {
 	Dir, Name string
-	ID        int
+	ID        string
 	// BaseRule is the rule line at base, nil when there was none.
 	BaseRule *Rule
 	// BaseEntry is the entry at base, nil when there was none.
@@ -555,7 +620,7 @@ type Touched struct {
 }
 
 // Cite is the id as a citation writes it: foundation#17.
-func (t Touched) Cite() string { return t.Name + "#" + strconv.Itoa(t.ID) }
+func (t Touched) Cite() string { return t.Name + "#" + t.ID }
 
 // TouchedIDs compares the per-id blocks of every changed doc or reasons
 // file under systems/ or screens/ between two trees. An id is touched
@@ -600,7 +665,7 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 		if err != nil {
 			return nil, err
 		}
-		ids := map[int]bool{}
+		ids := map[string]bool{}
 		for _, ix := range []Index{base, head} {
 			for id := range ix.Doc.Blocks {
 				ids[id] = true
@@ -611,11 +676,11 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 				}
 			}
 		}
-		var sorted []int
+		var sorted []string
 		for id := range ids {
 			sorted = append(sorted, id)
 		}
-		sort.Ints(sorted)
+		sort.Slice(sorted, func(i, j int) bool { return Less(sorted[i], sorted[j]) })
 		for _, id := range sorted {
 			if entryBlock(base, id) == entryBlock(head, id) && docBlock(base, id) == docBlock(head, id) {
 				continue
@@ -635,7 +700,7 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 	return out, nil
 }
 
-func docBlock(ix Index, id int) string { return ix.Doc.Blocks[id] }
+func docBlock(ix Index, id string) string { return ix.Doc.Blocks[id] }
 
 func firstParagraph(block string) string {
 	var out []string
@@ -648,7 +713,7 @@ func firstParagraph(block string) string {
 	return strings.Join(out, "\n")
 }
 
-func entryBlock(ix Index, id int) string {
+func entryBlock(ix Index, id string) string {
 	if ix.File == nil {
 		return ""
 	}

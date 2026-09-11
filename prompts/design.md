@@ -243,14 +243,20 @@ never committed.
   they cannot review.
 - **A rule with an id is changed only after you have read its reason.**
   Before you change, move or delete a rule line (`## #3 …`, `- **#17
-  …**`), run `pipeline reasons <doc>#n` — `foundation#17`, or
+  …**`), run `pipeline reasons <doc>#<id>` — `foundation#17`, or
   `system:`/`screen:` in front when a name is both; "no reason is
   recorded" is an answer, not permission. A changed rule amends its
-  entry in the same commit; a new rule mints the next id — the highest
-  in the doc plus one, never a reused number — and writes its entry when
-  there is a reason worth keeping; a retired rule loses its line and its
-  entry gains `retired: <ticket> — why`. Cite a rule as `name#n`, never
-  by its wording. A rule changed without its reason kept or amended
+  entry in the same commit; a new rule mints `<your ticket>-<n>` —
+  `#ORC-247-2`: your ticket key, then one above the highest `ORC-247-`
+  id already in that doc, `1` when there is none — never a bare number,
+  which is the author's, and never a reused id. Two tickets can be
+  designed against one doc at once, and a bare "highest plus one" from
+  the same main collides the moment both land; your own key cannot.
+  The ticket in an id is who minted it, never who owns it: a rule you
+  amend keeps its id. A new rule writes its entry when there is a
+  reason worth keeping; a retired rule loses its line and its entry
+  gains `retired: <ticket> — why`. Cite a rule as `name#17` or
+  `name#ORC-247-2`, never by its wording. A rule changed without its reason kept or amended
   comes back from the record review as a `contradiction` finding, a
   decline. The shape and the reasoning are DESIGN §4; the audit holds
   the rest.

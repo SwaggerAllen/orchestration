@@ -31,24 +31,24 @@ func Audit(ix Index) []string {
 		}
 	}
 	for _, d := range ix.Doc.Duplicates {
-		out = append(out, fmt.Sprintf("%s: id #%d appears %d times (lines %s) — ids are never reused or renumbered", ix.Path, d.ID, len(d.Lines), lines(d.Lines)))
+		out = append(out, fmt.Sprintf("%s: id #%s appears %d times (lines %s) — ids are never reused or renumbered", ix.Path, d.ID, len(d.Lines), lines(d.Lines)))
 	}
 	if ix.File == nil {
 		return out
 	}
 	for _, m := range ix.File.Malformed {
-		out = append(out, fmt.Sprintf("%s:%d: heading %q is not an entry — every h2 in a reasons file is ## #n", ix.FilePath, m.Line, m.Text))
+		out = append(out, fmt.Sprintf("%s:%d: heading %q is not an entry — every h2 in a reasons file is ## #<id>", ix.FilePath, m.Line, m.Text))
 	}
 	for _, d := range ix.File.Duplicates {
-		out = append(out, fmt.Sprintf("%s: entry #%d appears %d times (lines %s) — one entry per rule", ix.FilePath, d.ID, len(d.Lines), lines(d.Lines)))
+		out = append(out, fmt.Sprintf("%s: entry #%s appears %d times (lines %s) — one entry per rule", ix.FilePath, d.ID, len(d.Lines), lines(d.Lines)))
 	}
 	for _, e := range ix.File.Entries {
 		_, hasRule := ix.Rule(e.ID)
 		switch {
 		case !e.IsRetired() && !hasRule:
-			out = append(out, fmt.Sprintf("%s: entry #%d has no rule line in %s and is not retired — restore the rule or add a retired: line", ix.FilePath, e.ID, ix.Path))
+			out = append(out, fmt.Sprintf("%s: entry #%s has no rule line in %s and is not retired — restore the rule or add a retired: line", ix.FilePath, e.ID, ix.Path))
 		case e.IsRetired() && hasRule:
-			out = append(out, fmt.Sprintf("%s: entry #%d is retired (%s) but %s still carries rule #%d — a retired rule loses its line", ix.FilePath, e.ID, e.Retired, ix.Path, e.ID))
+			out = append(out, fmt.Sprintf("%s: entry #%s is retired (%s) but %s still carries rule #%s — a retired rule loses its line", ix.FilePath, e.ID, e.Retired, ix.Path, e.ID))
 		}
 	}
 	return out
@@ -62,26 +62,29 @@ func lines(ls []int) string {
 	return strings.Join(s, ", ")
 }
 
-// citeRe is the citation grammar: `foundation#17`, or `system:foundation#17`
-// / `screen:board#2` when a name is both a system and a screen doc. The
-// name must be word-bounded on the left and the digits on the right, so
-// a hex colour (`#17ff00`) and a bare `#144` never match; and the name
-// must be a doc this project has — measured on Catapult's tree, the
-// `#<digits>` forms in its docs are `PR #144`, `pre-#144`, `commitment
-// #2` and colour codes, and none of them puts a doc name before the `#`.
-// That whitelist is the § resolver's own rule (DESIGN §4): a token
-// resolves only when the project declared it, or the sweep reports the
-// corpus rather than its defects.
-var citeRe = regexp.MustCompile(`\b(?:(system|screen):)?([a-z0-9_-]+)#(\d+)\b`)
+// citeRe is the citation grammar: `foundation#17` or `generation#ORC-247-2`,
+// with `system:` / `screen:` in front when a name is both a system and a
+// screen doc. The name must be word-bounded on the left and the id on
+// the right, so a hex colour (`#17ff00`) and a bare `#144` never match,
+// and a ticket reference with no counter (`generation#ORC-247`) is not
+// an id; and the name must be a doc this project has — measured on
+// Catapult's tree, the `#<digits>` forms in its docs are `PR #144`,
+// `pre-#144`, `commitment #2` and colour codes, and none of them puts a
+// doc name before the `#`. That whitelist is the § resolver's own rule
+// (DESIGN §4): a token resolves only when the project declared it, or
+// the sweep reports the corpus rather than its defects.
+var (
+	citeRe      = regexp.MustCompile(`\b(?:(system|screen):)?([a-z0-9_-]+)#(` + idPat + `)\b`)
+	citeExactRe = regexp.MustCompile(`^(?:(system|screen):)?([a-z0-9_-]+)#(` + idPat + `)$`)
+)
 
 // ParseCite reads one citation exactly, for a command argument.
-func ParseCite(s string) (prefix, name string, id int, ok bool) {
-	m := regexp.MustCompile(`^(?:(system|screen):)?([a-z0-9_-]+)#(\d+)$`).FindStringSubmatch(strings.TrimSpace(s))
+func ParseCite(s string) (prefix, name, id string, ok bool) {
+	m := citeExactRe.FindStringSubmatch(strings.TrimSpace(s))
 	if m == nil {
-		return "", "", 0, false
+		return "", "", "", false
 	}
-	id, _ = strconv.Atoi(m[3])
-	return m[1], m[2], id, true
+	return m[1], m[2], m[3], true
 }
 
 // CiteProblem is a rule citation that lands on nothing.
@@ -90,7 +93,7 @@ type CiteProblem struct {
 	Line   int
 	Prefix string
 	Name   string
-	ID     int
+	ID     string
 	Why    string
 }
 
@@ -99,7 +102,7 @@ func (p CiteProblem) String() string {
 	if p.Prefix != "" {
 		written = p.Prefix + ":" + p.Name
 	}
-	return fmt.Sprintf("%s:%d: cites %s#%d, which %s", p.Path, p.Line, written, p.ID, p.Why)
+	return fmt.Sprintf("%s:%d: cites %s#%s, which %s", p.Path, p.Line, written, p.ID, p.Why)
 }
 
 // Resolve finds the doc a citation names among the indexes, applying the
@@ -140,8 +143,7 @@ func SweepCitations(root string, paths []string, docs []Index) ([]CiteProblem, e
 		s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		for line := 1; s.Scan(); line++ {
 			for _, m := range citeRe.FindAllStringSubmatch(s.Text(), -1) {
-				prefix, name := m[1], m[2]
-				id, _ := strconv.Atoi(m[3])
+				prefix, name, id := m[1], m[2], m[3]
 				ix, ok, why := Resolve(prefix, name, docs)
 				switch {
 				case why != "":

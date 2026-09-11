@@ -3,6 +3,7 @@ package reasons
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestARuleIdIsReadOffAHeadingAndABoldBullet(t *testing.T) {
 	d := ParseDoc(ported)
 	var got []string
 	for _, r := range d.Rules {
-		got = append(got, string(r.Kind)+":"+itoa(r.ID)+"@"+itoa(r.Line)+":"+r.Text)
+		got = append(got, string(r.Kind)+":"+r.ID+"@"+itoa(r.Line)+":"+r.Text)
 	}
 	want := "heading:1@8:Standing decisions|bullet:17@10:Generated clients are the only door to the backend|bullet:3@12:One Repo.|heading:2@14:Depends on"
 	if strings.Join(got, "|") != want {
@@ -62,7 +63,7 @@ func TestARuleIdIsReadOffAHeadingAndABoldBullet(t *testing.T) {
 // would then fail a doc the port had numbered correctly.
 func TestABoldLeadThatWrapsIsReadFromItsFirstLine(t *testing.T) {
 	d := ParseDoc("## #1 Standing decisions\n\n- **#42 The apps list that arms that declaration is checked for\n  completeness, by `Catapult.Audit.BoundaryApps`** (ORC-50). The entry\n  above buys compile-grade enforcement.\n")
-	if len(d.Rules) != 2 || d.Rules[1].ID != 42 {
+	if len(d.Rules) != 2 || d.Rules[1].ID != "42" {
 		t.Fatalf("rules = %+v, want the container and #42", d.Rules)
 	}
 	if got := d.Rules[1].Text; got != "The apps list that arms that declaration is checked for completeness, by `Catapult.Audit.BoundaryApps`" {
@@ -106,7 +107,7 @@ func TestTheContainerHeadingNeedsAnIdToo(t *testing.T) {
 	if len(d.Unnumbered) != 1 || d.Unnumbered[0].Kind != KindHeading || d.Unnumbered[0].Text != "Standing decisions" {
 		t.Errorf("unnumbered = %+v, want the container heading", d.Unnumbered)
 	}
-	if len(d.Rules) != 1 || d.Rules[0].ID != 3 {
+	if len(d.Rules) != 1 || d.Rules[0].ID != "3" {
 		t.Errorf("rules = %+v: the bullet is still read under an unnumbered container", d.Rules)
 	}
 }
@@ -118,7 +119,7 @@ func TestTheContainerHeadingNeedsAnIdToo(t *testing.T) {
 func TestFrontMatterAndFencesAreNotRules(t *testing.T) {
 	doc := "---\npaths:\n  - lib/x/**\n---\n\n# x\n\n```markdown\n## #9 Not a rule\n- **#8 Nor this**\n```\n\n## #1 Standing decisions\n"
 	d := ParseDoc(doc)
-	if len(d.Rules) != 1 || d.Rules[0].ID != 1 || d.Rules[0].Line != 13 {
+	if len(d.Rules) != 1 || d.Rules[0].ID != "1" || d.Rules[0].Line != 13 {
 		t.Errorf("rules = %+v, want #1 alone, on line 13", d.Rules)
 	}
 	if len(d.Unnumbered) != 0 {
@@ -128,25 +129,25 @@ func TestFrontMatterAndFencesAreNotRules(t *testing.T) {
 
 func TestDuplicateIdsAreReportedWithBothLines(t *testing.T) {
 	d := ParseDoc("## #1 Standing decisions\n\n- **#7 A.**\n- **#7 B.**\n\n## #7 Depends on\n")
-	if len(d.Duplicates) != 1 || d.Duplicates[0].ID != 7 || len(d.Duplicates[0].Lines) != 3 {
+	if len(d.Duplicates) != 1 || d.Duplicates[0].ID != "7" || len(d.Duplicates[0].Lines) != 3 {
 		t.Errorf("duplicates = %+v, want #7 on three lines", d.Duplicates)
 	}
 }
 
 func TestEveryLineBelongsToTheNearestIdAbove(t *testing.T) {
 	d := ParseDoc("# x\n\nIntro belongs to nothing.\n\n## #1 Standing decisions\n\n- **#17 Lead.** Rule sentence.\n\n  A second paragraph of #17.\n- **#3 Next.**\n")
-	if got := d.Blocks[17]; got != "- **#17 Lead.** Rule sentence.\n\n  A second paragraph of #17." {
+	if got := d.Blocks["17"]; got != "- **#17 Lead.** Rule sentence.\n\n  A second paragraph of #17." {
 		t.Errorf("Blocks[17] = %q", got)
 	}
-	if got := d.Blocks[1]; got != "## #1 Standing decisions" {
+	if got := d.Blocks["1"]; got != "## #1 Standing decisions" {
 		t.Errorf("Blocks[1] = %q", got)
 	}
-	if got := d.Blocks[3]; got != "- **#3 Next.**" {
+	if got := d.Blocks["3"]; got != "- **#3 Next.**" {
 		t.Errorf("Blocks[3] = %q", got)
 	}
 	for id, b := range d.Blocks {
 		if strings.Contains(b, "Intro belongs") {
-			t.Errorf("the preamble was attributed to #%d", id)
+			t.Errorf("the preamble was attributed to #%s", id)
 		}
 	}
 }
@@ -162,7 +163,7 @@ func TestAnEntryIsItsIdAndItsMetadataBeforeProse(t *testing.T) {
 		t.Fatalf("entries = %+v", f.Entries)
 	}
 	e := f.Entries[0]
-	if e.ID != 17 || e.Line != 5 || e.Since != "ORC-22" || e.Revisit != "when a second client appears" || e.Retired != "" {
+	if e.ID != "17" || e.Line != 5 || e.Since != "ORC-22" || e.Revisit != "when a second client appears" || e.Retired != "" {
 		t.Errorf("entry = %+v", e)
 	}
 	if !strings.HasPrefix(e.Body, "A hand-written fetch") || !strings.Contains(e.Body, "retired: this is prose") {
@@ -171,8 +172,8 @@ func TestAnEntryIsItsIdAndItsMetadataBeforeProse(t *testing.T) {
 	if r := f.Entries[1]; !r.IsRetired() || r.Retired != "ORC-90 — the guard moved into the compiler" || r.Body != "" {
 		t.Errorf("retired entry = %+v", r)
 	}
-	if !strings.HasPrefix(f.Blocks[17], "## #17\nsince: ORC-22") {
-		t.Errorf("Blocks[17] = %q", f.Blocks[17])
+	if !strings.HasPrefix(f.Blocks["17"], "## #17\nsince: ORC-22") {
+		t.Errorf("Blocks[17] = %q", f.Blocks["17"])
 	}
 }
 
@@ -184,14 +185,14 @@ func TestAnH2ThatIsNotAnIdIsMalformedAndExtendsNoEntry(t *testing.T) {
 	if len(f.Entries) != 1 {
 		t.Fatalf("entries = %+v, want #17 alone", f.Entries)
 	}
-	if strings.Contains(f.Entries[0].Body, "Stray") || strings.Contains(f.Blocks[17], "Stray") {
-		t.Errorf("the malformed heading's lines were attributed to #17: %q", f.Blocks[17])
+	if strings.Contains(f.Entries[0].Body, "Stray") || strings.Contains(f.Blocks["17"], "Stray") {
+		t.Errorf("the malformed heading's lines were attributed to #17: %q", f.Blocks["17"])
 	}
 }
 
 func TestDuplicateEntriesAreReported(t *testing.T) {
 	f := ParseFile("## #17\n\nA.\n\n## #17\n\nB.\n")
-	if len(f.Duplicates) != 1 || f.Duplicates[0].ID != 17 || len(f.Duplicates[0].Lines) != 2 {
+	if len(f.Duplicates) != 1 || f.Duplicates[0].ID != "17" || len(f.Duplicates[0].Lines) != 2 {
 		t.Errorf("duplicates = %+v", f.Duplicates)
 	}
 }
@@ -259,11 +260,11 @@ func TestLoadDirPairsSiblingsAndSkipsReadme(t *testing.T) {
 	if f.File == nil || f.Path != "systems/foundation.md" || f.FilePath != "systems/foundation.reasons.md" {
 		t.Errorf("foundation = %+v", f)
 	}
-	if !f.Resolves(17) || !f.Resolves(9) || f.Resolves(99) || !f.Resolves(1) {
-		t.Errorf("Resolves: 17=%v 9(retired)=%v 99=%v 1=%v", f.Resolves(17), f.Resolves(9), f.Resolves(99), f.Resolves(1))
+	if !f.Resolves("17") || !f.Resolves("9") || f.Resolves("99") || !f.Resolves("1") {
+		t.Errorf("Resolves: 17=%v 9(retired)=%v 99=%v 1=%v", f.Resolves("17"), f.Resolves("9"), f.Resolves("99"), f.Resolves("1"))
 	}
-	if got := f.NextID(); got != 18 {
-		t.Errorf("NextID = %d, want 18", got)
+	if got := f.NextID(""); got != "18" {
+		t.Errorf("NextID = %q, want 18", got)
 	}
 	if ixs[0].File != nil || ixs[0].Ported() {
 		t.Errorf("engine = %+v, want unported with no sibling", ixs[0])
@@ -297,20 +298,20 @@ func TestTouchedIdsAreTheBlocksThatDiffer(t *testing.T) {
 	if strings.Join(ids, ",") != "foundation#5,foundation#9,foundation#17,foundation#24" {
 		t.Fatalf("touched = %v", ids)
 	}
-	byID := map[int]Touched{}
+	byID := map[string]Touched{}
 	for _, x := range got {
 		byID[x.ID] = x
 	}
-	if x := byID[17]; x.BaseRule == nil || x.BaseEntry == nil || x.BaseEntry.Since != "ORC-22" || x.New {
+	if x := byID["17"]; x.BaseRule == nil || x.BaseEntry == nil || x.BaseEntry.Since != "ORC-22" || x.New {
 		t.Errorf("#17 = %+v, want its base rule and entry", x)
 	}
-	if x := byID[24]; !x.New || x.BaseRule != nil || x.BaseEntry != nil {
+	if x := byID["24"]; !x.New || x.BaseRule != nil || x.BaseEntry != nil {
 		t.Errorf("#24 = %+v, want new", x)
 	}
-	if x := byID[5]; x.BaseRule == nil || x.BaseEntry != nil || x.New {
+	if x := byID["5"]; x.BaseRule == nil || x.BaseEntry != nil || x.New {
 		t.Errorf("#5 = %+v, want the base rule and no entry", x)
 	}
-	if x := byID[9]; x.BaseRule != nil || x.BaseEntry == nil || !x.BaseEntry.IsRetired() {
+	if x := byID["9"]; x.BaseRule != nil || x.BaseEntry == nil || !x.BaseEntry.IsRetired() {
 		t.Errorf("#9 = %+v, want the retired base entry", x)
 	}
 }
@@ -469,10 +470,99 @@ func TestParseCiteReadsOneCitationExactly(t *testing.T) {
 		prefix, name, id, ok := ParseCite(in)
 		got := ""
 		if ok {
-			got = prefix + "/" + name + "/" + itoa(id)
+			got = prefix + "/" + name + "/" + id
 		}
 		if got != want {
 			t.Errorf("ParseCite(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A ticket-minted id is the ticket key and a per-ticket counter, read on
+// every shape a bare id is — heading, bullet, entry — and a bare ticket
+// reference is not one: the counter is required, so `#ORC-247` in a
+// heading is an unnumbered heading, not rule "ORC-247".
+func TestATicketMintedIdIsReadOnEveryShape(t *testing.T) {
+	d := ParseDoc("## #ORC-247-1 Policies\n\n## Standing decisions\n\n- **#ORC-247-2 Applies cites, never re-mints.** Rule.\n- **#17 Bare.** Rule.\n\n## #ORC-247 Not an id\n")
+	var got []string
+	for _, r := range d.Rules {
+		got = append(got, r.ID)
+	}
+	if strings.Join(got, ",") != "ORC-247-1,ORC-247-2,17" {
+		t.Errorf("rules = %v", got)
+	}
+	if len(d.Unnumbered) != 2 || d.Unnumbered[1].Text != "#ORC-247 Not an id" {
+		t.Errorf("unnumbered = %+v, want the container heading and the bare ticket reference", d.Unnumbered)
+	}
+	f := ParseFile("## #ORC-247-2\nsince: ORC-247\n\nBecause.\n")
+	if len(f.Entries) != 1 || f.Entries[0].ID != "ORC-247-2" || f.Entries[0].Since != "ORC-247" {
+		t.Errorf("entries = %+v", f.Entries)
+	}
+	if got := StripID("#ORC-247-1 Policies"); got != "Policies" {
+		t.Errorf("StripID = %q", got)
+	}
+}
+
+// Two tickets designed against one doc from the same main each mint
+// "the highest plus one" and collide — Catapult's ORC-246 and ORC-247
+// both minted generation#52. Under a ticket the counter is the ticket's
+// own, so the next id depends on nothing another branch holds.
+func TestNextIDIsScopedToTheMintingTicket(t *testing.T) {
+	ix := Index{Doc: ParseDoc("- **#52 A.** x\n- **#ORC-246-1 B.** x\n- **#ORC-246-2 C.** x\n"), File: &File{Entries: []Entry{{ID: "ORC-246-3", Retired: "ORC-250 — undone"}}}}
+	for ticket, want := range map[string]string{"": "53", "ORC-246": "ORC-246-4", "ORC-247": "ORC-247-1"} {
+		if got := ix.NextID(ticket); got != want {
+			t.Errorf("NextID(%q) = %q, want %q", ticket, got, want)
+		}
+	}
+	if h, ok := ix.HighestID("ORC-246"); !ok || h != "ORC-246-3" {
+		t.Errorf("HighestID(ORC-246) = %q,%v — a retired entry's number is never reissued", h, ok)
+	}
+}
+
+// Ids order for reports as numbers under their key, never as strings,
+// or #10 sorts before #2 and ORC-247-10 before ORC-247-2.
+func TestIdsOrderByKeyThenCounter(t *testing.T) {
+	ids := []string{"ORC-247-10", "10", "ORC-246-1", "2", "ORC-247-2"}
+	sort.Slice(ids, func(i, j int) bool { return Less(ids[i], ids[j]) })
+	if strings.Join(ids, ",") != "2,10,ORC-246-1,ORC-247-2,ORC-247-10" {
+		t.Errorf("sorted = %v", ids)
+	}
+	for in, want := range map[string]bool{"17": true, "ORC-247-2": true, "ORC-247": false, "orc-247-2": false, "#17": false, "17a": false} {
+		if got := ValidID(in); got != want {
+			t.Errorf("ValidID(%q) = %v", in, got)
+		}
+	}
+	if Ticket("ORC-247-2") != "ORC-247" || Ticket("17") != "" || Seq("ORC-247-2") != 2 || Seq("17") != 17 {
+		t.Errorf("Ticket/Seq misread: %q %q %d %d", Ticket("ORC-247-2"), Ticket("17"), Seq("ORC-247-2"), Seq("17"))
+	}
+}
+
+// The citation grammar reads a ticket-minted id wherever it read a bare
+// one, and still reads nothing where nothing was cited: a ticket named
+// after a doc with no counter, and the forms the bare grammar excluded.
+func TestTheCitationGrammarReadsATicketMintedId(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "systems/generation.md", "## #1 Generation\n\n## Standing decisions\n\n- **#ORC-247-2 Applies.** x\n- **#17 Bare.** x\n")
+	write(t, dir, "lib/x.ex", "# generation#ORC-247-2 and generation#17 resolve; generation#ORC-247-9 and generation#99 do not; generation#ORC-247 is a ticket, PR #144 a PR, #17ff00 a colour\n")
+	docs, err := LoadDir(dir, "systems")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := SweepCitations(dir, []string{"lib/x.ex"}, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, p := range got {
+		ids = append(ids, p.ID)
+	}
+	if strings.Join(ids, ",") != "ORC-247-9,99" {
+		t.Errorf("dangling = %v, want exactly the two that resolve to nothing", ids)
+	}
+	if _, _, id, ok := ParseCite("system:generation#ORC-247-2"); !ok || id != "ORC-247-2" {
+		t.Errorf("ParseCite = %q,%v", id, ok)
+	}
+	if _, _, _, ok := ParseCite("generation#ORC-247"); ok {
+		t.Error("a ticket reference with no counter parsed as a citation")
 	}
 }

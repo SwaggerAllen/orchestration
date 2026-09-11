@@ -245,7 +245,9 @@ type RecordFinding struct {
 	ID string `json:"id,omitempty"`
 }
 
-var findingID = regexp.MustCompile(`^(?:(?:system|screen):)?[a-z0-9_-]+#\d+$`)
+// findingID is the citation grammar (reasons.ParseCite), held here as a
+// regexp so the loader stays a loader: `caps#17` or `caps#ORC-247-2`.
+var findingID = regexp.MustCompile(`^(?:(?:system|screen):)?[a-z0-9_-]+#(?:[A-Z][A-Z0-9]*-[0-9]+-)?[0-9]+$`)
 
 // LoadRecordReview reads and validates the review the model wrote.
 //

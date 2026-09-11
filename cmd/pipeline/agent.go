@@ -758,7 +758,7 @@ func decisionsSection(d *agent.Decisions, scope *ticketScope) string {
 	var b strings.Builder
 	b.WriteString("\n## Already decided — read before deciding it again (DESIGN 4)\n\n")
 	b.WriteString("Headings and decision leads from this project's screen and system docs. This is an index, not the text: it tells you a decision exists and where it is stated. Open the file before you contradict one, and cite it when you build on one.\n\n")
-	b.WriteString("An entry beginning `#n` is a rule with a stable id: cite it as `<doc>#n` (`foundation#17`), and run `pipeline reasons <doc>#n` before you change it — the reason it holds lives in the doc's `.reasons.md` sibling and is not in this index.\n\n")
+	b.WriteString("An entry beginning `#17` or `#ORC-247-2` is a rule with a stable id: cite it as `<doc>#<id>` (`foundation#17`, `generation#ORC-247-2`), and run `pipeline reasons <doc>#<id>` before you change it — the reason it holds lives in the doc's `.reasons.md` sibling and is not in this index.\n\n")
 	b.WriteString("A design pass once spent a full run re-verifying a fact two of these docs already stated in near-identical words. Re-deriving a settled decision is not a cheap mistake — it arrives at Design review looking like new work.\n")
 
 	var shown, rest []decisions.Doc
@@ -1162,8 +1162,8 @@ func assembleRecordReviewPrompt(template string, files []string, diff string, to
 	add(touchedReasonsSection(touched, touchedNote))
 	add("\n## Verdict\n\n")
 	add(fmt.Sprintf("Write JSON to `%s`:\n\n", outcomePath))
-	add("```\n{\"verdict\": \"pass\"|\"decline\", \"findings\": [{\"file\": \"...\", \"quote\": \"...\", \"why\": \"...\", \"kind\": \"narration\"|\"contradiction\", \"id\": \"name#n (contradiction only)\"}], \"summary\": \"...\"}\n```\n\n")
-	add("A decline needs at least one finding; each names the file and quotes enough of the passage to find it — the opening words, not the whole bullet — and says what it reads as. A contradiction names the rule it contradicts as `name#n`. A pass may carry findings as callouts. Then stop: commit nothing, edit nothing, touch no tracker state. The harness posts your verdict and moves the ticket.\n")
+	add("```\n{\"verdict\": \"pass\"|\"decline\", \"findings\": [{\"file\": \"...\", \"quote\": \"...\", \"why\": \"...\", \"kind\": \"narration\"|\"contradiction\", \"id\": \"name#17 or name#ORC-247-2 (contradiction only)\"}], \"summary\": \"...\"}\n```\n\n")
+	add("A decline needs at least one finding; each names the file and quotes enough of the passage to find it — the opening words, not the whole bullet — and says what it reads as. A contradiction names the rule it contradicts as `name#17` or `name#ORC-247-2`. A pass may carry findings as callouts. Then stop: commit nothing, edit nothing, touch no tracker state. The harness posts your verdict and moves the ticket.\n")
 	return string(b)
 }
 

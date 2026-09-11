@@ -1065,11 +1065,13 @@ func TestRecordReviewRolePromptCarriesBothHalvesOfTheRule(t *testing.T) {
 func TestDesignRolePromptCarriesTheRationaleIndexRules(t *testing.T) {
 	lower := strings.Join(strings.Fields(strings.ToLower(repoFile(t, "prompts/design.md"))), " ")
 	for _, want := range []struct{ text, why string }{
-		{"pipeline reasons <doc>#n", "the command, not an invitation to open a file"},
-		{"the highest in the doc plus one, never a reused number", "how an id is minted"},
+		{"pipeline reasons <doc>#<id>", "the command, not an invitation to open a file"},
+		{"a new rule mints `<your ticket>-<n>`", "how an id is minted: under the ticket, so two tickets designed against one doc cannot collide"},
+		{"never a bare number, which is the author's", "the bare counter is not a ticket's to mint"},
+		{"the ticket in an id is who minted it, never who owns it", "an amended rule keeps its id"},
 		{"amends its entry in the same commit", "a changed rule's reason moves with it"},
 		{"retired: <ticket>", "how a rule is withdrawn without losing its id"},
-		{"cite a rule as `name#n`, never by its wording", "the citation form the audit resolves"},
+		{"cite a rule as `name#17` or `name#orc-247-2`, never by its wording", "the citation form the audit resolves, in both shapes"},
 		{"`contradiction` finding", "what the record review sends back for a rule changed against its reason"},
 		{"the sibling keeps what a pass needs to change it", "the cut: the first ticket through the index put the reason in the doc"},
 		{"a measurement that *passed* goes in neither", "a passing check is not a reason; its durable form is a test"},
@@ -1324,7 +1326,7 @@ func TestRepromptStillRefusesTheBoundary(t *testing.T) {
 func TestTheDecisionIndexSaysAnIdIsCitableAndHasAReason(t *testing.T) {
 	d := &agent.Decisions{Docs: []decisions.Doc{{Path: "systems/caps.md", Name: "caps", Label: "system:caps", Entries: []string{"#1 Standing decisions", "#17 One Repo."}}}}
 	got := decisionsSection(d, nil)
-	for _, want := range []string{"pipeline reasons <doc>#n", "`foundation#17`", "- #17 One Repo.", ".reasons.md"} {
+	for _, want := range []string{"pipeline reasons <doc>#<id>", "`foundation#17`", "- #17 One Repo.", ".reasons.md"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("index section does not carry %q:\n%s", want, got)
 		}
