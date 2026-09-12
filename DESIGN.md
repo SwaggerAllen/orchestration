@@ -457,9 +457,13 @@ design-owned docs, two of them section headings numbering the review round.
 
 **A rule and its reason are two lines with two lifetimes, joined by an id.** Every h2-or-deeper
 heading in a screen or system doc, and every top-level bullet under `## Standing decisions`,
-carries an integer id at its head — `## #3 Cross-project, deliberately`, `- **#17 Generated
-clients are the only door** …` — unique within its doc, minted as the highest present plus one,
-and never reused or renumbered. The rule line keeps the sentence that states the rule; the
+carries an id at its head — `## #3 Cross-project, deliberately`, `- **#17 Generated
+clients are the only door** …`, `- **#ORC-247-2 A component cites a policy** …` — unique within
+its doc and never reused or renumbered. A bare number is an id minted outside a ticket, by the
+port or by the author, one above the doc's highest bare id; a ticket's design pass mints
+`<ticket>-<n>`, the ticket key and a counter that pass keeps per doc, one above the highest it
+has minted there. The ticket in an id is the minter, never the owner: a later pass amending the
+rule keeps the id. The rule line keeps the sentence that states the rule; the
 reason it holds lives in a sibling file, `systems/<name>.reasons.md` beside `systems/<name>.md`,
 under `## #17`, with its metadata lines (`since:` the ticket that established it, `revisit:` the
 condition worth reopening it on, `retired:` the ticket that stopped it and why) before any
@@ -472,9 +476,14 @@ rule, and a check demanding an entry for every id would be met with a placeholde
 an id with no entry answers "no reason recorded", and that answer reaching a reviewer is itself
 information. A retired rule loses its line and keeps its entry, which is what keeps the id from
 being reused and keeps the fact a later pass most needs: that this was tried and why it was
-undone. Ids are per-doc rather than global because the mutex (§6) already holds one ticket per
-doc, so a per-doc counter cannot race; two tickets on two docs minting from one counter could
-mint the same number in parallel. Any line in a doc belongs to the nearest id above it, which is
+undone. The counter is scoped to the ticket because nothing else scopes it. The mutex (§6) holds
+from `Ready for dev`, so two tickets can be designed against one doc and sit in Design review
+together, each having minted "the highest present plus one" from the same main: Catapult's
+ORC-246 and ORC-247 both minted `generation#52` and `platform_content#64`, for different rules,
+and the record review — whose base is main — passed both, because from main each was new. A
+ticket has one branch and the design agent is singular, so an id carrying the ticket cannot
+collide with another ticket's, and the author, who mints bare ids, is one person working in
+series. Any line in a doc belongs to the nearest id above it, which is
 what lets a diff say which rules it touched without anyone deciding where a rule ends — and it
 is why the container heading and a system doc's "Initial vs target" and "Depends on" carry ids
 too: a token each, and the attribution rule has no exceptions. No config field is involved: the
@@ -642,7 +651,9 @@ document stops at `§7.12`.
 
 **A rule is cited by its id, never by its wording.** `foundation#17` names rule #17 of
 `systems/foundation.md` from anywhere in the tree — a test name, a code comment, another doc —
-and `system:foundation#17` or `screen:board#2` when a name is both a system and a screen doc.
+`generation#ORC-247-2` names a ticket-minted one the same way, and `system:foundation#17` or
+`screen:board#2` when a name is both a system and a screen doc. `generation#ORC-247` is a
+ticket reference, not a citation: the grammar needs the counter.
 The name is the doc's basename, the mutex label's name half, so nothing has to be declared for a
 citation to resolve. It resolves when the id is a rule line in the doc or an entry in its
 sibling, retired included: keeping the entry is what lets a citation of a withdrawn rule keep

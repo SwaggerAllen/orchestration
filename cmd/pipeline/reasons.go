@@ -35,14 +35,13 @@ func cmdReasons(args []string) error {
 		return fmt.Errorf("reasons: name one or more rules, e.g. foundation#17 or system:foundation#17")
 	}
 	type query struct {
-		prefix, name string
-		id           int
+		prefix, name, id string
 	}
 	var queries []query
 	for _, a := range fs.Args() {
 		prefix, name, id, ok := reasons.ParseCite(a)
 		if !ok {
-			return fmt.Errorf("reasons: %q is not a rule citation — the form is name#n, or system:name#n / screen:name#n when a name is both", a)
+			return fmt.Errorf("reasons: %q is not a rule citation — the form is name#17 or name#ORC-247-2, with system: or screen: in front when a name is both", a)
 		}
 		queries = append(queries, query{prefix, name, id})
 	}
@@ -71,7 +70,7 @@ func cmdReasons(args []string) error {
 		if i > 0 {
 			fmt.Println()
 		}
-		cite := q.name + "#" + fmt.Sprint(q.id)
+		cite := q.name + "#" + q.id
 		if q.prefix != "" {
 			cite = q.prefix + ":" + cite
 		}
@@ -103,35 +102,51 @@ func cmdReasons(args []string) error {
 // "no entry for this id" and "no rule carries this id" license
 // different confidence in a change, and a pass reading only one of
 // them would treat all three as permission.
-func printReason(ix reasons.Index, id int) {
+func printReason(ix reasons.Index, id string) {
 	rule, hasRule := ix.Rule(id)
 	entry, hasEntry := ix.Entry(id)
 	switch {
 	case !hasRule && !hasEntry:
-		fmt.Printf("%s#%d: no rule carries this id and no entry records it. The doc's highest id is #%d.\n", ix.Path, id, ix.NextID()-1)
+		fmt.Printf("%s#%s: no rule carries this id and no entry records it. %s\n", ix.Path, id, highestUnder(ix, reasons.Ticket(id)))
 		return
 	case !hasRule && entry.IsRetired():
-		fmt.Printf("%s#%d is retired (retired: %s). The rule line is gone from %s; the entry is kept as the record of why.\n\n", ix.Path, id, entry.Retired, ix.Path)
+		fmt.Printf("%s#%s is retired (retired: %s). The rule line is gone from %s; the entry is kept as the record of why.\n\n", ix.Path, id, entry.Retired, ix.Path)
 		fmt.Print(renderEntry(entry))
 		return
 	case !hasRule:
-		fmt.Printf("%s#%d: no rule carries this id, and %s records an entry for it that is not retired — the audit reports this.\n\n", ix.Path, id, ix.FilePath)
+		fmt.Printf("%s#%s: no rule carries this id, and %s records an entry for it that is not retired — the audit reports this.\n\n", ix.Path, id, ix.FilePath)
 		fmt.Print(renderEntry(entry))
 		return
 	}
-	fmt.Printf("%s#%d\n%s\n", ix.Path, id, ruleAsItStands(ix, rule))
+	fmt.Printf("%s#%s\n%s\n", ix.Path, id, ruleAsItStands(ix, rule))
 	switch {
 	case ix.File == nil:
 		fmt.Printf("\nNo %s exists: no reason is recorded for any rule in this doc. Checked, not skipped.\n", ix.FilePath)
 	case !hasEntry:
-		fmt.Printf("\n%s records no entry for #%d: the rule stands without a recorded reason.\n", ix.FilePath, id)
+		fmt.Printf("\n%s records no entry for #%s: the rule stands without a recorded reason.\n", ix.FilePath, id)
 	case entry.IsRetired():
-		fmt.Printf("\n%s marks #%d retired (retired: %s) while the rule line still stands — the audit reports this.\n\n", ix.FilePath, id, entry.Retired)
+		fmt.Printf("\n%s marks #%s retired (retired: %s) while the rule line still stands — the audit reports this.\n\n", ix.FilePath, id, entry.Retired)
 		fmt.Print(renderEntry(entry))
 	default:
 		fmt.Printf("\n%s:\n", ix.FilePath)
 		fmt.Print(renderEntry(entry))
 	}
+}
+
+// highestUnder says how far a doc's ids run under a ticket, or bare, so
+// a miss reads as "the next one is #ORC-247-3" rather than as a bare
+// count that says nothing about what this ticket has minted.
+func highestUnder(ix reasons.Index, ticket string) string {
+	h, ok := ix.HighestID(ticket)
+	switch {
+	case ticket == "" && ok:
+		return fmt.Sprintf("The doc's highest bare id is #%s.", h)
+	case ticket == "":
+		return "The doc carries no bare ids."
+	case ok:
+		return fmt.Sprintf("The doc's highest %s- id is #%s.", ticket, h)
+	}
+	return fmt.Sprintf("The doc carries no %s- ids yet; the first one this ticket mints here is #%s-1.", ticket, ticket)
 }
 
 // ruleAsItStands is the heading, or the bullet's first paragraph: the
@@ -153,7 +168,7 @@ func ruleAsItStands(ix reasons.Index, r reasons.Rule) string {
 
 func renderEntry(e reasons.Entry) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "## #%d\n", e.ID)
+	fmt.Fprintf(&b, "## #%s\n", e.ID)
 	if e.Since != "" {
 		fmt.Fprintf(&b, "since: %s\n", e.Since)
 	}

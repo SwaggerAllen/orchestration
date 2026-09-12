@@ -75,7 +75,16 @@ func TestReasonsCommandSaysWhenTheIdIsUnknownAndNamesTheHighest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "systems/billing.md#99: no rule carries this id and no entry records it. The doc's highest id is #17.") {
+	if !strings.Contains(out, "systems/billing.md#99: no rule carries this id and no entry records it. The doc's highest bare id is #17.") {
+		t.Errorf("out = %s", out)
+	}
+	// A miss under a ticket names what that ticket has minted here, which
+	// is the number the pass is about to need.
+	out, _, err = runReasons(t, cfg, "billing#ORC-247-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "The doc carries no ORC-247- ids yet; the first one this ticket mints here is #ORC-247-1.") {
 		t.Errorf("out = %s", out)
 	}
 }
@@ -167,17 +176,17 @@ func TestReasonsCommandAgreesWithTheAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for id, wantResolves := range map[int]bool{17: true, 9: true, 1: true, 99: false} {
+	for id, wantResolves := range map[string]bool{"17": true, "9": true, "1": true, "99": false} {
 		ix, ok, _ := reasons.Resolve("", "billing", docs)
 		if !ok {
 			t.Fatal("billing did not resolve")
 		}
-		out, _, err := runReasons(t, cfg, "billing#"+itoa(id))
+		out, _, err := runReasons(t, cfg, "billing#"+id)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got := !strings.Contains(out, "no rule carries this id"); got != wantResolves || ix.Resolves(id) != wantResolves {
-			t.Errorf("#%d: command resolves=%v, audit resolves=%v, want %v", id, got, ix.Resolves(id), wantResolves)
+			t.Errorf("#%s: command resolves=%v, audit resolves=%v, want %v", id, got, ix.Resolves(id), wantResolves)
 		}
 	}
 }

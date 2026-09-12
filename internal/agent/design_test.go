@@ -857,6 +857,9 @@ func TestLoadRecordReviewValidation(t *testing.T) {
 		{"finding with no quote", `{"verdict":"decline","findings":[{"file":"systems/a.md","why":"x"}]}`, "names no file or no passage"},
 		{"contradiction", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"the entry says stores never share","kind":"contradiction","id":"foundation#17"}]}`, ""},
 		{"prefixed contradiction", `{"verdict":"decline","findings":[{"file":"screens/board.md","quote":"Two tabs","why":"x","kind":"contradiction","id":"screen:board#2"}]}`, ""},
+		{"ticket-minted contradiction", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"contradiction","id":"generation#ORC-247-2"}]}`, ""},
+		// A ticket reference is not an id: the counter is what names a rule.
+		{"contradiction naming a ticket, not a rule", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"contradiction","id":"generation#ORC-247"}]}`, "names no rule"},
 		// The writer has to find the entry, and the rule's wording is
 		// exactly what changed, so the id is the only handle.
 		{"contradiction with no id", `{"verdict":"decline","findings":[{"file":"systems/a.md","quote":"One Repo","why":"x","kind":"contradiction"}]}`, "names no rule"},

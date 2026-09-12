@@ -69,8 +69,9 @@ a rule and its reason. The shapes, read off real docs:
 ## A rule changed without its reason
 
 The second kind of finding, `contradiction`. A rule line carries an
-id — `## #3 …`, `- **#17 …**` — and the reason it holds is recorded
-beside the doc, under `## #17` in `<name>.reasons.md`, where the diff
+id — `## #3 …`, `- **#17 …**`, `- **#ORC-247-2 …**` — and the reason it
+holds is recorded beside the doc, under the same `## #17` or
+`## #ORC-247-2` in `<name>.reasons.md`, where the diff
 did not necessarily go (DESIGN §4). A section below lists every rule id
 this diff touched with the rule and its entry *as they stood before the
 pass*. Read each against the diff. The shape you flag: the diff
