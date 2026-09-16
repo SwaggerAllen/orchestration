@@ -150,6 +150,45 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+        # The conflict briefing, computed before the merge while HEAD is
+        # still the branch tip. DESIGN §2.4 says the resolution rule for a
+        # moved base "is semantic and has no git equivalent"; the spec
+        # file's history is that equivalent, so a pass resolving a
+        # conflict reads the argument each change was for rather than
+        # inferring it from a diff.
+        #
+        # Every intervening commit is listed, not only the ones carrying a
+        # spec: a commit that changed code without touching CHANGE.md is
+        # the author's own undesigned work (DESIGN §2.5), and the absence
+        # is the signal. Annotating rather than filtering is what makes
+        # that readable.
+        BASE="$(git merge-base HEAD origin/main || true)"
+        if [ -n "$BASE" ] && [ -n "$(git rev-list -n1 "$BASE"..origin/main)" ]; then
+          SPEC_SHAS="$(git log --format=%h "$BASE"..origin/main -- CHANGE.md)"
+          {
+            echo "Commits on \`main\` since this branch diverged:"
+            echo
+            git log --format='%h %s' "$BASE"..origin/main | while read -r sha rest; do
+              case " $SPEC_SHAS " in
+                *" $sha "*) echo "- \`$sha\` $rest — carries a spec" ;;
+                *)          echo "- \`$sha\` $rest — **no spec: the author's own, made outside the pipeline**" ;;
+              esac
+            done
+            if [ -n "$SPEC_SHAS" ]; then
+              echo
+              echo "Those specs, oldest first:"
+              echo
+              echo '```'
+              # Bounded. A long-lived branch can accumulate more of these
+              # than a prompt can carry, and the branch still holds all of
+              # it for a pass that needs more.
+              git log --reverse -p --format='commit %h %s' "$BASE"..origin/main -- CHANGE.md | head -c 12000
+              echo
+              echo '```'
+            fi
+          } > "$RUNNER_TEMP/pipeline/change-briefing.txt"
+        fi
+
         # Bring the base in, and stop here if it does not come cleanly.
         #
         # Two reasons this is not optional. CI already tests the merge ref
@@ -228,7 +267,8 @@ runs:
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
           --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt" \
-          --conflict "${{ steps.checkout.outputs.conflict_report }}"
+          --conflict "${{ steps.checkout.outputs.conflict_report }}" \
+          --change-briefing "$RUNNER_TEMP/pipeline/change-briefing.txt"
 
     - name: run the dev agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main

@@ -92,6 +92,7 @@ func cmdAgentReprompt(args []string) error {
 	handbackPath := fs.String("handback-path", "", "path the model writes its hand-back to (dev)")
 	priorWork := fs.String("prior-work", "", "file holding `git log --oneline origin/main..HEAD` for the checked-out branch")
 	conflict := fs.String("conflict", "", "file holding the conflict triage report, when the base merge left conflicts this pass may attempt")
+	briefing := fs.String("change-briefing", "", "file holding what landed on the base since this branch diverged, annotated by whether each commit carried a spec")
 	verdictPath := fs.String("verdict-path", "", "path the model writes its verdict to (reconcile)")
 	changedPath := fs.String("changed-files", "", "file with one path per line: what the branch changed against its base (reconcile)")
 	baseTree := fs.String("base-tree", "", "directory holding systems/ and screens/ as they stood at the branch's merge-base (reconcile); the touched-reasons section is built from it")
@@ -189,6 +190,7 @@ func cmdAgentReprompt(args []string) error {
 		return err
 	}
 	prompt += conflictSec
+	prompt += changeBriefingSection(*briefing)
 	prompt += harnessFindingsSection(*findingsPath)
 	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return err
@@ -1878,4 +1880,39 @@ func conflictSection(path string) (string, error) {
 		"decides. A resolution you cannot explain is the design nobody agreed to (DESIGN §2.4).\n\n" +
 		"Say in your hand-back what you resolved and how, for every one. A conflict resolved " +
 		"silently is a decision the author never saw made.\n", nil
+}
+
+// changeBriefingSection is what landed on the base while this ticket was
+// out, and why.
+//
+// DESIGN §2.4 says the resolution rule for a moved base "is semantic and
+// has no git equivalent". The spec file's history is that equivalent: one
+// file, overwritten per ticket, so its log is the argument each
+// intervening change was for, in merge order. A pass resolving a conflict
+// reads those rather than inferring intent from a diff.
+//
+// Absent is ordinary and says so rather than saying nothing. A branch cut
+// from today's main has an empty range, and an empty section would read
+// as "the harness did not tell me" — which is the reading that sends a
+// pass looking for context it has already been given all of.
+//
+// Unreadable is not an error here, unlike --conflict. The file is written
+// only when the range is non-empty, so absence is a fact about the branch
+// rather than a broken harness, and a pass that lost this section can
+// still do its work — it just does it with less.
+func changeBriefingSection(path string) string {
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.TrimSpace(string(raw)) == "" {
+		return "\n## What landed on `main` while this ticket was out\n\nNothing — this branch was cut from the current `main`, or nothing has merged since. The base has not moved under you.\n"
+	}
+	return "\n## What landed on `main` while this ticket was out\n\n" +
+		strings.TrimSpace(string(raw)) + "\n\n" +
+		"This is the argument for each change, not a diff to infer intent from — one spec file per ticket, in merge order. " +
+		"Read it before you resolve a conflict or judge whether the ground moved under this ticket's design.\n\n" +
+		"A commit with **no spec** is the author's own, made outside the pipeline (DESIGN §2.5). " +
+		"Nothing explains those but the commit itself, and they are the ones most likely to have moved something " +
+		"this ticket assumed — the absence is the signal, not a gap in the report.\n"
 }

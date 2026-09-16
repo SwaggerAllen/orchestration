@@ -260,7 +260,8 @@ CHANGE.md` briefing handed to dev and reconcile. Amends DESIGN §4, which is whe
 sketch is specified as having no file.
 *Exit: a rehearsal ticket whose squash commit carries its own spec, and `git log --follow`
 returning it. The `merge=ours` probe from §10 run, including the run without the driver
-configured.*
+configured.* Both done; what remains for the exit is a rehearsal, which needs the project
+drained.
 
 Three things building it settled, all of which the decisions doc had wrong or silent:
 

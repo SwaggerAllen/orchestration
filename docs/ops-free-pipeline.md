@@ -114,6 +114,17 @@ resolution rule for a moved base "is semantic and has no git equivalent"; this i
 git equivalent. An agent resolving a conflict stops inferring intent from a diff and
 reads the intent that was recorded at the time.
 
+**Built, and it lists every intervening commit rather than only the ones carrying a spec.**
+The dev job computes it before the base merge, while `HEAD` is still the branch tip, and the
+prompt carries it. A commit that changed code without touching the spec file is annotated as
+the author's own undesigned work (§2.5) — §1.4's inversion made visible, and the reason the
+report annotates rather than filters. Those are the commits nothing else explains and the
+ones most likely to have moved something the ticket assumed.
+
+An empty range says so rather than rendering nothing: a missing section reads as "the
+harness did not tell me", which sends a pass hunting for context it has already been given
+all of.
+
 ### 1.2 `CHANGE.md`'s own conflict is noise, and is resolved by git
 
 Two tickets whose lifetimes overlap conflict on `CHANGE.md` **every time and wholly** —
