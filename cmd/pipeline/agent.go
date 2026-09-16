@@ -21,6 +21,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/promptdoc"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
@@ -28,7 +29,7 @@ import (
 
 func cmdAgent(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("agent: want a subcommand: claim, reprompt, record-review, finish, abort, boundary-archive, boundary-file, live-suite-report")
+		return fmt.Errorf("agent: want a subcommand: claim, reprompt, record-review, conflict-triage, finish, abort, boundary-archive, boundary-file, live-suite-report")
 	}
 	switch args[0] {
 	case "claim":
@@ -39,6 +40,8 @@ func cmdAgent(args []string) error {
 		return cmdAgentRecordReview(args[1:])
 	case "finish":
 		return cmdAgentFinish(args[1:])
+	case "conflict-triage":
+		return cmdAgentConflictTriage(args[1:])
 	case "abort":
 		return cmdAgentAbort(args[1:])
 	case "claim-failed":
@@ -88,6 +91,8 @@ func cmdAgentReprompt(args []string) error {
 	outcomePath := fs.String("outcome-path", "", "path the model writes its outcome to (design, dev)")
 	handbackPath := fs.String("handback-path", "", "path the model writes its hand-back to (dev)")
 	priorWork := fs.String("prior-work", "", "file holding `git log --oneline origin/main..HEAD` for the checked-out branch")
+	conflict := fs.String("conflict", "", "file holding the conflict triage report, when the base merge left conflicts this pass may attempt")
+	briefing := fs.String("change-briefing", "", "file holding what landed on the base since this branch diverged, annotated by whether each commit carried a spec")
 	verdictPath := fs.String("verdict-path", "", "path the model writes its verdict to (reconcile)")
 	changedPath := fs.String("changed-files", "", "file with one path per line: what the branch changed against its base (reconcile)")
 	baseTree := fs.String("base-tree", "", "directory holding systems/ and screens/ as they stood at the branch's merge-base (reconcile); the touched-reasons section is built from it")
@@ -180,6 +185,12 @@ func cmdAgentReprompt(args []string) error {
 		return err
 	}
 	prompt += prior
+	conflictSec, err := conflictSection(*conflict)
+	if err != nil {
+		return err
+	}
+	prompt += conflictSec
+	prompt += changeBriefingSection(*briefing)
 	prompt += harnessFindingsSection(*findingsPath)
 	if err := os.WriteFile(filepath.Join(*outDir, "prompt.md"), []byte(prompt), 0o644); err != nil {
 		return err
@@ -1318,8 +1329,17 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "one of protocol.AbortReasons: pushback, failed, needs-setup, author-only, scope-satisfied or prerequisite")
+	// Built from the vocabulary rather than spelled out: this line had
+	// already gone stale once, listing six reasons when the code took
+	// seven.
+	reason := fs.String("reason", "failed", "one of "+strings.Join(protocol.AbortReasons, ", "))
 	message := fs.String("message", "", "the argument (required for every reason but failed)")
+	// Read from a file rather than an argument because the messages that
+	// most need to be exact are the ones a shell mangles: a conflict park
+	// carries paths, fenced diff hunks and backticks, and interpolating
+	// that through --message is how a diagnosis arrives truncated at the
+	// first quote. Mirrors --error-file, which exists for the same shape.
+	messagePath := fs.String("message-file", "", "file holding the argument; used instead of --message when set")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
@@ -1339,6 +1359,17 @@ func cmdAgentAbort(args []string) error {
 	// Absent is the ordinary case, not a failure: the file exists only
 	// when the model run is what died, so an abort reporting anything
 	// else appends nothing rather than a cause it made up.
+	if *messagePath != "" {
+		raw, err := os.ReadFile(*messagePath)
+		if err != nil {
+			// Loud rather than silent: unlike --error-file, an unreadable
+			// message file is the whole argument missing, and every reason
+			// but "failed" refuses an empty one — so a quiet fallback turns
+			// a precise park into a refusal carrying no diagnosis at all.
+			return fmt.Errorf("agent abort: --message-file %s: %w", *messagePath, err)
+		}
+		*message = strings.TrimSpace(string(raw))
+	}
 	if *errPath != "" {
 		if raw, err := os.ReadFile(*errPath); err == nil {
 			*message = agent.WithRunOutput(*message, string(raw))
@@ -1763,4 +1794,125 @@ func cmdAgentClaimFailed(args []string) error {
 	}
 	fmt.Printf("claim-failed %s: recorded on the ticket\n", *ticket)
 	return nil
+}
+
+// cmdAgentConflictTriage decides whether a base merge's conflicts are the
+// pass's to resolve (DESIGN §2.4, §12).
+//
+// A command rather than shell, for PLAN §1's reason: the predicate is
+// protocol, and protocol in workflow YAML can only be tested by running
+// Actions. It prints one word — `park` or `attempt` — which is what the
+// job branches on, and writes the report the park would carry.
+func cmdAgentConflictTriage(args []string) error {
+	fs := flag.NewFlagSet("agent conflict-triage", flag.ContinueOnError)
+	root := fs.String("root", ".", "the project checkout, holding the conflicted tree")
+	pathsPath := fs.String("paths-file", "", "file listing the conflicted paths, one per line (git diff --name-only --diff-filter=U)")
+	out := fs.String("out", "", "where to write the report a park carries")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *pathsPath == "" || *out == "" {
+		return fmt.Errorf("agent conflict-triage: --paths-file and --out are both required")
+	}
+	raw, err := os.ReadFile(*pathsPath)
+	if err != nil {
+		return fmt.Errorf("agent conflict-triage: --paths-file %s: %w", *pathsPath, err)
+	}
+	var cs []agent.Conflict
+	for _, line := range strings.Split(string(raw), "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(*root, path))
+		if err != nil {
+			// Loud: a conflicted path the triage cannot read is one it
+			// cannot classify, and classifying it as resolvable by
+			// default is the direction that costs a decision nobody
+			// agreed to.
+			return fmt.Errorf("agent conflict-triage: reading conflicted %s: %w", path, err)
+		}
+		cs = append(cs, agent.Conflict{Path: path, Body: string(body)})
+	}
+	if len(cs) == 0 {
+		return fmt.Errorf("agent conflict-triage: --paths-file named no paths, but this runs only when the merge conflicted")
+	}
+	park, attempt := agent.Triage(cs)
+	if err := os.WriteFile(*out, []byte(agent.ConflictReport(park, attempt)), 0o644); err != nil {
+		return err
+	}
+	if len(park) > 0 {
+		fmt.Println("park")
+		return nil
+	}
+	fmt.Println("attempt")
+	return nil
+}
+
+// conflictSection tells a pass that its tree carries conflict markers,
+// and what it may do about them.
+//
+// It appears only when the triage said `attempt`: the conflicts that
+// park never reach a model at all (DESIGN §2.4). So this section does
+// not restate the mechanical floor — the pass could not act against it
+// from here anyway — it states the judgement left above that floor.
+func conflictSection(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		// Loud, for priorWorkSection's reason: the job wrote this file
+		// moments ago, so unreadable means the harness is broken, and a
+		// pass that silently lost this section would resolve conflicts
+		// with no instruction about how.
+		return "", fmt.Errorf("agent reprompt: --conflict %s: %w", path, err)
+	}
+	return "\n## Your tree has merge conflicts, and they are yours to resolve\n\n" +
+		"`origin/main` was merged into this branch before you started. It did not come cleanly, " +
+		"and the harness has already checked that none of the conflicts touches a recorded rule " +
+		"or a reasons entry — those park for the author and never reach you.\n\n" +
+		"```\n" + strings.TrimSpace(string(raw)) + "\n```\n\n" +
+		"**Resolve one only if you can restate both sides in one sentence in your hand-back.** " +
+		"That is the test, and it is not about difficulty: it is whether you can say what each " +
+		"side was for. If you cannot, report `{\"outcome\": \"conflict\", \"summary\": \"...\"}` " +
+		"naming the file and what you could not tell apart — the ticket parks and the author " +
+		"decides. A resolution you cannot explain is the design nobody agreed to (DESIGN §2.4).\n\n" +
+		"Say in your hand-back what you resolved and how, for every one. A conflict resolved " +
+		"silently is a decision the author never saw made.\n", nil
+}
+
+// changeBriefingSection is what landed on the base while this ticket was
+// out, and why.
+//
+// DESIGN §2.4 says the resolution rule for a moved base "is semantic and
+// has no git equivalent". The spec file's history is that equivalent: one
+// file, overwritten per ticket, so its log is the argument each
+// intervening change was for, in merge order. A pass resolving a conflict
+// reads those rather than inferring intent from a diff.
+//
+// Absent is ordinary and says so rather than saying nothing. A branch cut
+// from today's main has an empty range, and an empty section would read
+// as "the harness did not tell me" — which is the reading that sends a
+// pass looking for context it has already been given all of.
+//
+// Unreadable is not an error here, unlike --conflict. The file is written
+// only when the range is non-empty, so absence is a fact about the branch
+// rather than a broken harness, and a pass that lost this section can
+// still do its work — it just does it with less.
+func changeBriefingSection(path string) string {
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || strings.TrimSpace(string(raw)) == "" {
+		return "\n## What landed on `main` while this ticket was out\n\nNothing — this branch was cut from the current `main`, or nothing has merged since. The base has not moved under you.\n"
+	}
+	return "\n## What landed on `main` while this ticket was out\n\n" +
+		strings.TrimSpace(string(raw)) + "\n\n" +
+		"This is the argument for each change, not a diff to infer intent from — one spec file per ticket, in merge order. " +
+		"Read it before you resolve a conflict or judge whether the ground moved under this ticket's design.\n\n" +
+		"A commit with **no spec** is the author's own, made outside the pipeline (DESIGN §2.5). " +
+		"Nothing explains those but the commit itself, and they are the ones most likely to have moved something " +
+		"this ticket assumed — the absence is the signal, not a gap in the report.\n"
 }

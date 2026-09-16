@@ -1332,3 +1332,86 @@ func TestTheDecisionIndexSaysAnIdIsCitableAndHasAReason(t *testing.T) {
 		}
 	}
 }
+
+// The briefing's absence is a fact about the branch, not a gap in the
+// report, and the section says so rather than saying nothing. An empty
+// section reads as "the harness did not tell me", which sends a pass
+// looking for context it has already been given all of.
+func TestChangeBriefingSectionSaysWhenNothingLanded(t *testing.T) {
+	if got := changeBriefingSection(""); got != "" {
+		t.Errorf("no flag should render nothing, got %q", got)
+	}
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty.txt")
+	if err := os.WriteFile(empty, []byte("   \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{empty, filepath.Join(dir, "absent.txt")} {
+		got := changeBriefingSection(path)
+		if !strings.Contains(got, "Nothing") || !strings.Contains(got, "has not moved") {
+			t.Errorf("%s: an empty range must say the base has not moved, got %q", path, got)
+		}
+	}
+}
+
+func TestChangeBriefingSectionCarriesTheLogAndNamesTheOutOfBandRule(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "b.txt")
+	body := "- `71f6a4a` ORC-2 move the retry budget — carries a spec\n" +
+		"- `6e3eac7` hotfix: bump the timeout — **no spec: the author's own, made outside the pipeline**"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := changeBriefingSection(p)
+	for _, want := range []string{
+		"ORC-2 move the retry budget",
+		"hotfix: bump the timeout",
+		// The rule the annotation is for: a commit with no spec is the
+		// author's, and that absence is the signal rather than a gap.
+		"§2.5",
+		"the absence is the signal",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the section does not carry %q:\n%s", want, got)
+		}
+	}
+}
+
+// The wiring, not the renderer. changeBriefingSection had tests and the
+// line that puts its output in the prompt had none — the adapter-proved,
+// core-proved, crossing-unasserted shape CLAUDE.md records. A probe that
+// deleted that line left every briefing test green.
+func TestRepromptPutsTheChangeBriefingInThePrompt(t *testing.T) {
+	cfgPath := nonAsksProject(t, "# Confirmed non-asks\n")
+	out := t.TempDir()
+	tpl := filepath.Join(out, "template.md")
+	if err := os.WriteFile(tpl, []byte("role"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claimed := agent.ClaimResult{TicketID: "iss_1", TicketKey: "PIPE-1", Title: "A ticket", Mode: "dev", Scope: "do the thing"}
+	raw, err := json.MarshalIndent(&claimed, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "claim.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	briefing := filepath.Join(out, "change-briefing.txt")
+	if err := os.WriteFile(briefing, []byte("- `71f6a4a` ORC-2 move the retry budget — carries a spec\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmdAgentReprompt([]string{
+		"--kind", "dev", "--config", cfgPath, "--out", out, "--prompt-template", tpl,
+		"--change-briefing", briefing,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := os.ReadFile(filepath.Join(out, "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prompt), "ORC-2 move the retry budget") {
+		t.Errorf("prompt.md does not carry the change briefing:\n%s", prompt)
+	}
+}

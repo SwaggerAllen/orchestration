@@ -195,7 +195,14 @@ newest comment is what the pass rewrites against.
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
 advances straight to `Ready for dev` (§6), recording its reasoning and touch list in the
-marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
+marker comment.
+
+**It still writes the sketch** (§4). A decisionless pass read the scope and knows what it
+will touch; what it lacks is a *decision* to approve, not a plan to implement. Exempting it
+would put holes in the spec file's history at exactly the tickets that look ordinary — and
+the rule that a commit changing code without changing the sketch is the author's own
+undesigned work (§2.5) would then misread every decisionless ticket's dev commit as
+theirs. Sign-off exists to approve decisions; with none to approve it is a rubber
 stamp, and rubber stamps train the author to skim the reviews that matter.
 
 **The prerequisite park:** a design pass whose scope depends on something that is not on `main`
@@ -322,6 +329,34 @@ publishes HTML plus assets per branch. This works only because design artifacts 
 — no socket required. The interactive playground is lost; the visual review is not.
 
 ### Architecture in the repo, and the sketch
+
+**The sketch has a file: `CHANGE.md` at the repository root.** One file, overwritten
+wholly by every design pass with that ticket's spec — what will be built and where, under a
+first line naming the ticket (`# <TICKET-KEY> — <title>`). It is not the description: the
+description is the immutable argument for *why* (§2.3), and this is the plan for *what*.
+
+**Why one file rather than one per ticket.** A per-ticket directory accumulates entries
+that were true when they merged and are evidence about nothing afterwards, and would need
+its own rule to stop passes reading stale ones as authority. One overwritten file needs no
+such rule — there is only ever one and it is the current one — and its *history* is the
+thing worth having: `git log <base>..main -p -- CHANGE.md` is the argument for every change
+that landed while a ticket was out, which is the semantic resolution §2.4 says has no git
+equivalent.
+
+Three consequences, each of which has already been got wrong once:
+
+- **It is design-owned** (`designOwnedPaths`), or §5's ownership audit refuses the very
+  write this section requires. That is also what keeps dev out of it: dev implements
+  against the sketch rather than rewriting it.
+- **Every pass that commits writes it, including `decisionless`** (§3). A ticket whose spec
+  is missing is a hole in the history, and §2.5's rule — a commit changing code without
+  changing the sketch is the author's own undesigned work — would misread that ticket's dev
+  commit as theirs.
+- **The harness asserts it at finish, not at claim.** An agent job claims before it checks
+  out the ticket branch, so at claim the tree still carries the previous ticket's spec. The
+  finish checks both that the file names this ticket and that this pass wrote it; the file
+  is at the root of every branch and always names somebody, so the first check alone would
+  pass a stale spec.
 
 Architecture lives in `systems/<name>.md` — one doc per system, the structural mirror of
 `screens/<name>.md`: standing decisions (which system owns a concept, why a boundary sits
@@ -1161,6 +1196,7 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
 | `prerequisite` | The scope depends on something not on `main` and not this ticket's to write. Written by `abort --reason prerequisite` (§3, §12, §13), and the outcome a design pass reports it with. Land the other change, then return the ticket to its queue. |
+| `conflict` | Merging the base into this ticket's branch left conflicts the run would have to guess at. Written by `abort --reason conflict` (§2.4, §12, §13). It is §2.4's rule at merge time rather than a second rule: the repo moved, both changes touch the same behaviour, the repo wins and the ticket stops. Route it to `Ready for redesign` — the design has to be re-decided either way. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `resync` | The pipeline's idea of where this ticket is has come apart from the tracker's, and the author is repairing it by hand. Routes around it exactly as `author-only` does — with one addition that is the whole point, below. Temporary: removed when the repair is done. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
@@ -2760,6 +2796,7 @@ without passing through `Design review`.
 | abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
 | abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
 | abort | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
+| abort | `conflict` | `Blocked` | `conflict` | blocked, `conflict=1` |
 | design | `artifacts` | `Design review` | the pass's mutex labels | — |
 | design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
 | design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |

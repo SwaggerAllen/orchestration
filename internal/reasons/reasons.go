@@ -205,6 +205,36 @@ func StripID(text string) string {
 	return strings.TrimSpace(idToken.ReplaceAllString(strings.TrimSpace(text), ""))
 }
 
+// anyID finds a rule id anywhere in a line — a heading's (`## #17`), a
+// standing decision's bullet (`- **#17 ...`), or a citation of one
+// (`engine#17`). Built from the same `idPat` the parsers use, because a
+// second spelling of a rule's own grammar is the "amended in one place"
+// defect aimed at the thing that defines it.
+//
+// The prefix excludes only another `#`, so `###17` reads as heading
+// markup rather than an id while every real form above matches. It is
+// otherwise unconstrained on purpose: the first attempt required
+// whitespace or a bracket before the `#` and missed both the bullet and
+// the citation, which are the two commonest places a rule is named.
+//
+// Over-matching is the safe direction and it does happen — a hex colour
+// like `#123456` satisfies `idPat`. A false park costs a human glance at
+// a conflict a pass could have taken; a false attempt costs a decision
+// nobody agreed to.
+var anyID = regexp.MustCompile(`(^|[^#])#` + idPat + `\b`)
+
+// MentionsRuleID reports whether text carries a rule id.
+//
+// Used to decide whether a merge conflict may be attempted at all
+// (DESIGN §2.4, §12): a hunk that touches a rule or a standing decision
+// is one where resolving means choosing between two recorded decisions,
+// which is the author's call and not a pass's. Deliberately generous —
+// it matches a citation as well as a definition, because a conflict in
+// prose that cites `engine#17` is still a conflict about `engine#17`.
+func MentionsRuleID(text string) bool {
+	return anyID.MatchString(text)
+}
+
 // IsReasonsFile reports whether a file name is a reasons sibling.
 func IsReasonsFile(name string) bool {
 	return strings.HasSuffix(name, ".reasons.md")

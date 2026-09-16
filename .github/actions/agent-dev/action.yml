@@ -136,12 +136,97 @@ runs:
       shell: bash
       run: |
         git config user.name "pipeline-dev-agent"
+        # CHANGE.md is replaced wholly by every ticket, so two tickets whose
+        # lifetimes overlap conflict on it every time and wholly, and the
+        # resolution is always ours — the other ticket's spec is already in
+        # history. Left to the agent it is a conflict it learns to resolve
+        # without reading, in the same merge where a real collision in a
+        # systems doc needs reading carefully. Git does not ship this
+        # driver; `true` is the whole definition: keep our version, exit 0.
+        git config merge.ours.driver true
         git config user.email "pipeline@invalid"
         BRANCH="${{ steps.claim.outputs.branch }}"
         git fetch origin
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+        # The conflict briefing, computed before the merge while HEAD is
+        # still the branch tip. DESIGN §2.4 says the resolution rule for a
+        # moved base "is semantic and has no git equivalent"; the spec
+        # file's history is that equivalent, so a pass resolving a
+        # conflict reads the argument each change was for rather than
+        # inferring it from a diff.
+        #
+        # Every intervening commit is listed, not only the ones carrying a
+        # spec: a commit that changed code without touching CHANGE.md is
+        # the author's own undesigned work (DESIGN §2.5), and the absence
+        # is the signal. Annotating rather than filtering is what makes
+        # that readable.
+        BASE="$(git merge-base HEAD origin/main || true)"
+        if [ -n "$BASE" ] && [ -n "$(git rev-list -n1 "$BASE"..origin/main)" ]; then
+          SPEC_SHAS="$(git log --format=%h "$BASE"..origin/main -- CHANGE.md)"
+          {
+            echo "Commits on \`main\` since this branch diverged:"
+            echo
+            git log --format='%h %s' "$BASE"..origin/main | while read -r sha rest; do
+              case " $SPEC_SHAS " in
+                *" $sha "*) echo "- \`$sha\` $rest — carries a spec" ;;
+                *)          echo "- \`$sha\` $rest — **no spec: the author's own, made outside the pipeline**" ;;
+              esac
+            done
+            if [ -n "$SPEC_SHAS" ]; then
+              echo
+              echo "Those specs, oldest first:"
+              echo
+              echo '```'
+              # Bounded. A long-lived branch can accumulate more of these
+              # than a prompt can carry, and the branch still holds all of
+              # it for a pass that needs more.
+              git log --reverse -p --format='commit %h %s' "$BASE"..origin/main -- CHANGE.md | head -c 12000
+              echo
+              echo '```'
+            fi
+          } > "$RUNNER_TEMP/pipeline/change-briefing.txt"
+        fi
+
+        # Bring the base in, and stop here if it does not come cleanly.
+        #
+        # Two reasons this is not optional. CI already tests the merge ref
+        # (`refs/pull/N/merge`), so a branch that has not merged main is
+        # not the tree CI green was about — and reconcile merges through
+        # the host API, a server-side squash that cannot honour the
+        # `merge=ours` driver configured above. Without this step a base
+        # that moved reaches reconcile as ErrNotMergeable, which bounces
+        # the ticket to rework and Blocks it on the second bounce: a
+        # conflict reported as a rework, to an agent with nothing to fix.
+        #
+        # A conflict parks instead, under `conflict` (DESIGN §2.4 at merge
+        # time, §8, §12). The pass does not resolve it: §2.4's rule is
+        # that when the repo moved and both changes touch the same
+        # behaviour the repo wins and the ticket stops, and a pass that
+        # guessed here would produce the design nobody agreed to.
+        if ! git merge --no-edit -q origin/main; then
+          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/pipeline/conflicted.txt"
+          # The predicate is protocol, so it is a command rather than
+          # shell here (PLAN §1): what a pass may never resolve is DESIGN
+          # §2.4's rule, and a rule in workflow YAML can only be tested by
+          # running Actions.
+          VERDICT="$(pipeline agent conflict-triage \
+            --root "$GITHUB_WORKSPACE" \
+            --paths-file "$RUNNER_TEMP/pipeline/conflicted.txt" \
+            --out "$RUNNER_TEMP/pipeline/conflict.md")"
+          cat "$RUNNER_TEMP/pipeline/conflict.md"
+          if [ "$VERDICT" = "park" ]; then
+            # Left clean so nothing downstream reads a half-merged tree.
+            git merge --abort
+            echo "conflicted=1" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          # Left in the tree on purpose: the pass resolves these, and the
+          # prompt below carries the report and the rule it resolves under.
+          echo "conflict_report=$RUNNER_TEMP/pipeline/conflict.md" >> "$GITHUB_OUTPUT"
+        fi
+
         # Where this pass started. The push step compares against it to
         # tell "the model changed nothing" from "the branch is empty" —
         # two different facts that the commit count against main cannot
@@ -181,7 +266,9 @@ runs:
           --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
-          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt"
+          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt" \
+          --conflict "${{ steps.checkout.outputs.conflict_report }}" \
+          --change-briefing "$RUNNER_TEMP/pipeline/change-briefing.txt"
 
     - name: run the dev agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
@@ -417,8 +504,25 @@ runs:
           --error-file "$RUNNER_TEMP/pipeline/claim-error.txt" \
           --exit-code-file "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
 
+    # Ahead of the generic abort, and the generic one now excludes this
+    # case: two parks on one ticket would leave the second one's label
+    # and marker describing a failure that did not happen.
+    - name: park on a base conflict
+      if: failure() && steps.checkout.outputs.conflicted == '1'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        pipeline agent abort \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json" \
+          --reason conflict \
+          --message-file "$RUNNER_TEMP/pipeline/conflict.md"
+
     - name: abort on failure
-      if: failure() && steps.claim.outcome == 'success'
+      if: failure() && steps.claim.outcome == 'success' && steps.checkout.outputs.conflicted != '1'
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}

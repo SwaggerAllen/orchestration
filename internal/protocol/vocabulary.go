@@ -43,7 +43,7 @@ var (
 	// AbortReasons are the ways a run may end without finishing its
 	// scope (DESIGN §12). `failed` is the only one that takes no label:
 	// it means the harness broke, which is not a fact about the ticket.
-	AbortReasons = []string{"pushback", "failed", "needs-setup", "author-only", "scope-satisfied", "prerequisite"}
+	AbortReasons = []string{"pushback", "failed", "needs-setup", "author-only", "scope-satisfied", "prerequisite", "conflict"}
 
 	// DesignOutcomes are what a design pass reports (DESIGN §2.7, §7).
 	DesignOutcomes = []string{"artifacts", "decisionless", "prerequisite", "clear", "demote"}

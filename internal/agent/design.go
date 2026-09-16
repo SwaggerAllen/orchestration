@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/changespec"
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/host"
@@ -418,6 +419,9 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 			// board (DESIGN §3).
 			return p.TransitionTicket(ctx, res.TicketID, protocol.ReadyForRedesign, core.RoleDesign)
 		}
+		if err := assertChangeSpec(p.Config.Root, res.TicketKey, changed); err != nil {
+			return err
+		}
 		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}
@@ -463,6 +467,13 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview, core.RoleDesign)
 
 	case "decisionless":
+		// Held to the sketch exactly as an artifacts pass is (DESIGN §3):
+		// no decision to approve is not no plan to implement, and a pass
+		// exempted here would leave the hole §2.5's out-of-band rule then
+		// misreads as the author's own work.
+		if err := assertChangeSpec(p.Config.Root, res.TicketKey, changed); err != nil {
+			return err
+		}
 		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}
@@ -717,4 +728,31 @@ func nearestDoc(name string, docs []filemap.Doc) string {
 		}
 	}
 	return ""
+}
+
+// assertChangeSpec holds the design pass to the spec file it owes.
+//
+// Two checks rather than one, and they catch different mistakes. That the
+// file *names this ticket* catches a merge resolved the wrong way — the
+// `merge=ours` driver keeps the branch's copy silently, so a spec naming
+// another ticket is the only observable there is. That the pass *wrote it
+// this time* catches the other direction: a design pass that changed
+// screens and systems and left the previous ticket's spec sitting at the
+// root would otherwise pass the first check for the worst possible reason,
+// since the file is at the root of every branch and always names somebody.
+//
+// It runs only where the sketch exists to be written. A record-review
+// decline has already returned above with nothing committed, and the
+// outcomes that commit nothing are handled in their own branches.
+func assertChangeSpec(root, key string, changed []string) error {
+	if err := changespec.VerifyFile(root, key); err != nil {
+		return fmt.Errorf("design finish %s: %w", key, err)
+	}
+	for _, f := range changed {
+		if filepath.ToSlash(f) == changespec.Name {
+			return nil
+		}
+	}
+	return fmt.Errorf("design finish %s: %s is present and names this ticket but this pass did not write it; "+
+		"the sketch is overwritten every ticket (DESIGN §4)", key, changespec.Name)
 }
