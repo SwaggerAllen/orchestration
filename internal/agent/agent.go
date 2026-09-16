@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -608,6 +609,11 @@ var devOutcomes = map[string]string{
 	"needs-setup":     "needs-setup",
 	"pushback":        "pushback",
 	"author-only":     "author-only",
+	// A pass that met a conflict the triage let it attempt and found it
+	// could not restate both sides — so it stopped rather than choosing.
+	// The triage's mechanical floor (DESIGN §2.4) is what a pass may
+	// never resolve; this is the pass's own judgement above that floor.
+	"conflict": "conflict",
 }
 
 // LoadDevOutcome reads the dev model's outcome. A missing file is not an
@@ -631,7 +637,7 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 		o.Outcome = "done"
 	}
 	if _, ok := devOutcomes[o.Outcome]; !ok && o.Outcome != "done" {
-		return nil, fmt.Errorf("dev outcome: %q is not one of done, scope-satisfied, needs-setup, pushback, author-only", o.Outcome)
+		return nil, fmt.Errorf("dev outcome: %q is not one of done, %s", o.Outcome, strings.Join(sortedKeys(devOutcomes), ", "))
 	}
 	if o.Outcome != "done" && strings.TrimSpace(o.Summary) == "" {
 		return nil, fmt.Errorf("dev outcome: %q without its argument is a ticket nobody can act on — say what you found", o.Outcome)
@@ -1274,4 +1280,16 @@ func tail(s string, n int) string {
 		return strings.Join(lines, "\n")
 	}
 	return "(earlier output trimmed)\n" + strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// sortedKeys renders a vocabulary map for a message. Built rather than
+// spelled out: the abort command's own --reason help had already gone
+// stale listing six reasons against seven.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

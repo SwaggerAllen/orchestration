@@ -151,6 +151,17 @@ CI went green on. A merge that conflicts parks under §3's `conflict`, which is 
 landed together: a flavour with nothing to fire on is the `Reserve`/`Release` shape CLAUDE.md
 records, and so is a driver with no merge.
 
+**The pass gets the simple ones.** The triage in `internal/agent` splits a merge's
+conflicts mechanically: a `.reasons.md` sibling, or a conflicted *region* naming a rule id,
+parks for the author; everything else is left in the tree with the report in the prompt, and
+the pass resolves it **only if it can restate both sides in one sentence** in its hand-back.
+Failing that it reports the `conflict` outcome and the ticket parks anyway.
+
+Regions rather than whole files, and that is the load-bearing part: a systems doc carries
+rule ids throughout, so parking on the file would park every conflict in every such doc —
+the label mutex's blast radius arriving by another route, in the mechanism built to retire
+it.
+
 **Probed, including the control run without the driver:**
 
 ```

@@ -167,26 +167,25 @@ runs:
         # behaviour the repo wins and the ticket stops, and a pass that
         # guessed here would produce the design nobody agreed to.
         if ! git merge --no-edit -q origin/main; then
-          {
-            echo "Merging \`origin/main\` into this branch left conflicts, so the pass stopped without changing anything (DESIGN §2.4)."
-            echo
-            echo "Conflicted paths:"
-            git diff --name-only --diff-filter=U | sed 's/^/- /'
-            echo
-            echo "The conflicting hunks, both sides:"
-            echo '```diff'
-            # Bounded: the park is a summons for a human, and a comment
-            # carrying a whole merge is one nobody reads. The branch is
-            # where the full conflict lives and it is still there.
-            git diff --diff-filter=U | head -c 4000
-            echo
-            echo '```'
-          } > "$RUNNER_TEMP/pipeline/conflict.md"
+          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/pipeline/conflicted.txt"
+          # The predicate is protocol, so it is a command rather than
+          # shell here (PLAN §1): what a pass may never resolve is DESIGN
+          # §2.4's rule, and a rule in workflow YAML can only be tested by
+          # running Actions.
+          VERDICT="$(pipeline agent conflict-triage \
+            --root "$GITHUB_WORKSPACE" \
+            --paths-file "$RUNNER_TEMP/pipeline/conflicted.txt" \
+            --out "$RUNNER_TEMP/pipeline/conflict.md")"
           cat "$RUNNER_TEMP/pipeline/conflict.md"
-          # Left clean so nothing downstream reads a half-merged tree.
-          git merge --abort
-          echo "conflicted=1" >> "$GITHUB_OUTPUT"
-          exit 1
+          if [ "$VERDICT" = "park" ]; then
+            # Left clean so nothing downstream reads a half-merged tree.
+            git merge --abort
+            echo "conflicted=1" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          # Left in the tree on purpose: the pass resolves these, and the
+          # prompt below carries the report and the rule it resolves under.
+          echo "conflict_report=$RUNNER_TEMP/pipeline/conflict.md" >> "$GITHUB_OUTPUT"
         fi
 
         # Where this pass started. The push step compares against it to
@@ -228,7 +227,8 @@ runs:
           --handback-path "$RUNNER_TEMP/pipeline/handback.md" \
           --outcome-path "$RUNNER_TEMP/pipeline/outcome.json" \
           --findings-path "$RUNNER_TEMP/pipeline/findings.json" \
-          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt"
+          --prior-work "$RUNNER_TEMP/pipeline/prior-work.txt" \
+          --conflict "${{ steps.checkout.outputs.conflict_report }}"
 
     - name: run the dev agent
       uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
