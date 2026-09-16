@@ -242,7 +242,7 @@ marker flavour is a skew that has to be remembered; do not add a second.
 
 ---
 
-## 4. The runner is ours, and Linear is a board
+## 4. The runner is ours
 
 **Decision.** Everything that invokes the model runs in an environment we control —
 GitHub Actions today. No third-party agent runner, including Linear's.
@@ -254,7 +254,10 @@ we control, so any service that would drive an agent for us would have to hand t
 back to Actions regardless — and two dispatchers quietly defeats every single-agent
 guarantee downstream (§13).
 
-**So Linear keeps intake, priority, attention and webhooks, and nothing else.**
+**This says nothing about what Linear holds.** The credential argument settles who runs
+the model and stops there; it is easy to read one step further and conclude the tracker
+is therefore only a board, which does not follow. Linear keeps intake, priority,
+attention, webhooks **and the state machine** — §11.1 has that decision and its reason.
 
 **The concurrency ceiling is the subscription, not the infrastructure.** This is the
 load-bearing consequence and it decides §6 and §8.2: building isolation to run agents the
@@ -544,6 +547,36 @@ Each of these is a guess until somebody takes it. Recorded as guesses on purpose
   script's bindings, which would mean a preview Worker writing into production's
   `ProjectState`. **Probe:** deploy a preview, write a row, read it from production's
   `/state`.
+
+### 10.1 One thing to watch rather than measure
+
+**If Linear ever ships a transactional pre-transition hook, §9's revert machinery becomes
+deletable.** Not reduced — deletable. The move record, the writer matrix, `resync` and
+`ActAdopt` all exist because a move cannot be refused, only detected and undone (§11.1).
+A hook that can reject the write removes the thing they compensate for.
+
+It is a watch item and not a plan, because nobody can schedule another company's
+roadmap and because the compensating design works today. Two things make it worth
+re-checking rather than forgetting:
+
+- **The capability exists in the category and is monetised, not absent.** Plane ships
+  exactly this — sandboxed pre-validation scripts that block a transition when they throw
+  — behind its Enterprise tier. Jira's workflow engine has had conditions, validators and
+  post-functions for twenty years. The gap is in the *fast* trackers, not in tracking.
+- **The reason for the gap is architectural, which is why it may not close.** Linear-class
+  trackers are local-first: the client applies a mutation to its own store and syncs
+  afterwards, which is what makes them feel instant. A synchronous server-side refusal
+  means the UI showed the move and must now roll it back — the one experience that
+  architecture exists to avoid. So webhooks, which are after the fact, are the shape the
+  sync engine wants to offer. Agent-driven workflows are the pressure that could change
+  it, and nothing else obviously is.
+
+**Re-check at a milestone boundary, not on a timer**, and only act if the hook can refuse
+a transition *server-side* — a client-side guard in the Linear UI would change nothing,
+since the harness and a human both write through the API.
+
+---
+
 ## 11. The disposition of what exists
 
 §0's measurement is a complaint until there is somewhere for the 25,092 lines to go.
@@ -591,9 +624,27 @@ because the tracker cannot say who made a write and the harness authenticates as
 author (§13). Nothing about that changed — it would only have gone away if state had
 moved to git, and state is not moving.
 
-This also corrects §4's closing line, which said Linear keeps intake, priority, attention
-and webhooks *and nothing else*. That reached further than the credential argument
-supporting it. Linear keeps those and the state machine.
+§4 carries the same fact, because that is where a reader meets the credential argument and
+could otherwise read it as deciding this too. It does not: who runs the model and what the
+tracker holds are separate questions.
+
+**State the decision in three clauses, not one.** "Linear is the state machine" is right
+against the alternative it rejects and misleading on its own:
+
+> **Linear holds the state; the plane holds the authority; §9 is the reconciliation
+> between them.**
+
+The flat version reads as *Linear decides*, and a pass that believes that will find the
+§9 revert rules redundant and delete them. They are the opposite of redundant — they are
+what lets a single authority survive a UI that anyone can drag a card in. Linear's API
+offers no way to refuse a transition, so the pipeline cannot prevent a move it disagrees
+with; it can only detect one and undo it, which is what the move record and the writer
+matrix are for.
+
+**That is the standard compensation for a tracker with no transactional hook, and it is
+worth naming as such.** Written down, §9 looks like a pile of special cases; recognised
+as detect-and-compensate, it is one mechanism, and the next pass to meet it has a name
+for what it is doing. §10 carries the condition under which it could go away.
 
 ### 11.2 The Worker row contradicts §6
 
