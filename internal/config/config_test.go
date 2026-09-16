@@ -90,6 +90,17 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 		{"designOwnedPaths", func(m map[string]any) { delete(m, "designOwnedPaths") }, "designOwnedPaths: missing"},
 		{"qualityGates", func(m map[string]any) { delete(m, "qualityGates") }, "qualityGates: missing"},
 		{"deploy.provider", func(m map[string]any) { delete(m["deploy"].(map[string]any), "provider") }, "deploy.provider: missing"},
+		// A provider nothing implements has to be refused here, because
+		// nothing downstream refuses it: deployPort's switch has no
+		// default, so an unknown value yields a nil port, which is how
+		// "this project has no deploy detection" is spelled. The project
+		// would validate, sweep, and leave every Merged ticket riding to
+		// the deploy timeout.
+		{"deploy.provider unknown", func(m map[string]any) { m["deploy"].(map[string]any)["provider"] = "heroku" }, `deploy.provider: "heroku" is not a provider`},
+		// Both messages are built from config.DeployProviders, so a value
+		// added to the var alone would validate while the error text went
+		// on denying it existed. Assert the text names the real set.
+		{"deploy.provider names the set", func(m map[string]any) { m["deploy"].(map[string]any)["provider"] = "heroku" }, "one of render, digitalocean, github"},
 		{"deploy.endpoint", func(m map[string]any) { m["deploy"].(map[string]any)["endpoint"] = "" }, "deploy.endpoint: missing"},
 		{"deploy.timeout", func(m map[string]any) { delete(m["deploy"].(map[string]any), "timeout") }, "deploy.timeout: missing"},
 		{"staleClaimGrace", func(m map[string]any) { delete(m, "staleClaimGrace") }, "staleClaimGrace: missing"},

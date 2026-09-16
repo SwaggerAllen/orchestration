@@ -23,8 +23,13 @@ two pieces of in-flight work avoid overwriting each other.
 
 **Assumed stack.** Phoenix / LiveView with daisyUI; `phoenix_storybook` for component
 variations; Linear as the tracker; GitHub for code and automation; Cloudflare for the
-scheduler and branch previews (§13, §4); DigitalOcean App Platform with auto-deploy on push
-to main. One environment — main is production.
+scheduler and branch previews (§13, §4); a deploy platform with a deployments API and
+auto-deploy on push to main. One environment — main is production.
+
+The deploy platform is named by `deploy.provider` rather than assumed, because the only
+thing §13's detection needs of it is a list of deployments carrying a commit and a status.
+Render, DigitalOcean App Platform and GitHub Deployments each supply that; the last is how
+the dummy project exercises the ancestry logic without a real app behind it.
 
 **Assumed scale.** One human author, one project at a time per pipeline instance, one dev
 agent. Several assumptions here are load-bearing and are called out where they appear.

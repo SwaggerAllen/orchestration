@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,12 +202,20 @@ type Tracker struct {
 
 // Deploy configures post-merge deploy detection (DESIGN §13).
 type Deploy struct {
-	// Provider selects the adapter: "digitalocean" (App Platform) or
-	// "github" (GitHub Deployments — the dummy project's stand-in, which
-	// exercises the same ancestry logic; PLAN M4).
+	// Provider selects the adapter: "render" (Render's deploys API),
+	// "digitalocean" (App Platform) or "github" (GitHub Deployments — the
+	// dummy project's stand-in, which exercises the same ancestry logic;
+	// PLAN M4).
 	Provider string `json:"provider"`
-	// Endpoint is provider-specific: the full deployments API URL for
-	// digitalocean; the environment name (e.g. "production") for github.
+	// Endpoint is provider-specific: the full deploys API URL for render,
+	// the full deployments API URL for digitalocean, the environment name
+	// (e.g. "production") for github.
+	//
+	// Render pages its deploy list and defaults to 20 per page, which is
+	// only enough while the live deploy is within the last 20 attempts.
+	// Put `?limit=` on the URL for a project that redeploys faster than
+	// it merges; the adapter passes the endpoint through verbatim and
+	// does not paginate.
 	Endpoint string `json:"endpoint"`
 	// Timeout is how long a ticket may sit in Merged before the sweep
 	// moves it to Blocked (DESIGN §12).
@@ -214,7 +223,7 @@ type Deploy struct {
 }
 
 // DeployProviders are the legal Deploy.Provider values.
-var DeployProviders = []string{"digitalocean", "github"}
+var DeployProviders = []string{"render", "digitalocean", "github"}
 
 // Preview configures the static storybook export (DESIGN §4): what builds
 // it and where Cloudflare Pages serves it.
@@ -343,12 +352,15 @@ func (c *Config) Validate() error {
 	if len(c.QualityGates) == 0 {
 		add("qualityGates: missing")
 	}
-	switch c.Deploy.Provider {
-	case "":
-		add("deploy.provider: missing (one of digitalocean, github)")
-	case "digitalocean", "github":
-	default:
-		add("deploy.provider: %q is not a provider (one of digitalocean, github)", c.Deploy.Provider)
+	// Both messages name DeployProviders rather than spelling the set out,
+	// because the two used to be three copies of one list and a value
+	// added to the var alone would have validated while the error text
+	// went on denying it existed.
+	switch {
+	case c.Deploy.Provider == "":
+		add("deploy.provider: missing (one of %s)", strings.Join(DeployProviders, ", "))
+	case !slices.Contains(DeployProviders, c.Deploy.Provider):
+		add("deploy.provider: %q is not a provider (one of %s)", c.Deploy.Provider, strings.Join(DeployProviders, ", "))
 	}
 	if c.Deploy.Endpoint == "" {
 		add("deploy.endpoint: missing")

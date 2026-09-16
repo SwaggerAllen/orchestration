@@ -18,6 +18,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/deploy"
 	"github.com/SwaggerAllen/orchestration/internal/deploy/digitalocean"
 	"github.com/SwaggerAllen/orchestration/internal/deploy/ghdeploy"
+	renderdeploy "github.com/SwaggerAllen/orchestration/internal/deploy/render"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
@@ -204,9 +205,14 @@ func cmdSetup(args []string) error {
 }
 
 // deployPort builds the deploy port the config names, or returns nil plus
-// the reason there is none. Sweep and setup share it deliberately: a check
-// that constructs its own client can pass while the sweep's client fails,
-// and then the check is worse than nothing.
+// the reason there is none. Sweep, setup and preflight share it
+// deliberately: a check that constructs its own client can pass while the
+// sweep's client fails, and then the check is worse than nothing.
+//
+// Preflight had its own copy of this switch for a milestone, which is that
+// warning happening. Adding the render case to this one left preflight
+// silently unable to probe a Render project — not a failing check, no
+// check at all, printed as a project with no deploy configured.
 func deployPort(cfg *config.Config, repo, token string) (deploy.Deploy, string, error) {
 	switch cfg.Deploy.Provider {
 	case "github":
@@ -224,7 +230,20 @@ func deployPort(cfg *config.Config, repo, token string) (deploy.Deploy, string, 
 			return nil, "DIGITALOCEAN_TOKEN not set", nil
 		}
 		return digitalocean.New(cfg.Deploy.Endpoint, doToken), "", nil
+	case "render":
+		rToken := os.Getenv("RENDER_API_KEY")
+		if rToken == "" {
+			return nil, "RENDER_API_KEY not set", nil
+		}
+		return renderdeploy.New(cfg.Deploy.Endpoint, rToken), "", nil
 	}
+	// Unreachable for a validated config, and silent if it is ever
+	// reached: a nil port is how "this project has no deploy detection"
+	// is spelled, so a provider added to config.DeployProviders and not
+	// here would validate, sweep, and leave every Merged ticket riding to
+	// the deploy timeout — the symptom SETUP.md §5 records as naming
+	// neither the endpoint nor the token. TestEveryDeployProviderHasAPort
+	// is what keeps the two lists in step.
 	return nil, "", nil
 }
 

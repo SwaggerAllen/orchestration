@@ -297,7 +297,36 @@ alongside `digitalocean` and `github`, its fake, and the enum value — this rep
 the table. Then Catapult's production moves, and deploy detection is verified against a
 real merge before anything depends on previews.
 *Exit: a merge to Catapult's main detected through the Render adapter, `/health` answering
-with the merge SHA.*
+with the merge SHA.* The adapter, the enum value, `RENDER_API_KEY` in the sweep stub and
+the setup probe are done; the exit is the Render side, which is provisioning and a merge.
+
+**The status vocabulary is documentation, not a measurement, and it says so where it is
+declared.** Render's reference gives eleven values and the adapter maps two groups of them;
+the enumeration is the kind of claim about a real system that `tracker.Memory` got wrong by
+copying the constants beside it, so it carries its source and its date and is re-checked
+against a live service when one exists. Three facts it rests on that the adapter would read
+backwards if they were wrong: a failed deploy leaves the previous one `live` (so `Failed`
+and `ActiveSHA` are both set and name different commits); `deactivated` is a superseded
+deploy rather than a failed one; and `canceled` is where Render's own health-check rollback
+lands, which is why it is failed rather than in-flight.
+
+**Two shape differences from the DigitalOcean adapter, both of which fail quietly.** The
+response is a bare array of `{deploy, cursor}` wrappers rather than an object with a list
+inside it — decoded into the wrong Go type that is an empty list and a *successful* call,
+indistinguishable from a service that has never deployed. And Render's reference states no
+ordering, so the adapter sorts by `createdAt` rather than trusting one: ordering decides
+which deploy sets `Failed`, and assuming it would be a number nobody measured.
+
+**What building it found, which was not in the Render half at all.** Preflight kept its own
+copy of `deployPort`'s provider switch — the duplication `deployPort`'s own comment warns
+about, in the same file as the warning. Adding the render case to one of them left preflight
+unable to probe a Render project, printed as a project with no deploy configured rather than
+as a gap. It now calls `deployPort`. Three further holes fell out of probing that: nothing
+asserted an unknown `deploy.provider` was rejected; the two enum-walking tests would have
+passed if `render` were deleted from the enum, because a loop over an enumeration shrinks
+with it (the `tracker.Memory` shape again, from the test side); and the preflight check list
+was asserted by grepping one file for a scope string, which stopped seeing a check that was
+still being built. `hostChecks` exists so the deploy branch is asserted rather than grepped.
 
 **C4 — Previews on, static storybook off.** Preview environments enabled with
 `expireAfterDays` set, then the Cloudflare Pages path retired.

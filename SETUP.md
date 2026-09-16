@@ -746,7 +746,8 @@ step 5 already covered them.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
    `teamId`), its own `designOwnedPaths`, `componentPaths`, gates,
-   deploy provider (`digitalocean` for a real DO app) and preview
+   deploy provider (`render` for a Render service, `digitalocean` for a
+   real DO app) and preview
    project.
 
    `componentPaths` is where that project keeps its component modules,
@@ -841,13 +842,15 @@ step 5 already covered them.
    `PIPELINE_REPO_TOKEN` (the same token value as the dummy — it only
    grants read on the pipeline repo), `AGENT_GITHUB_TOKEN` (add this
    repo to its access list), Cloudflare pair,
-   `DIGITALOCEAN_TOKEN` if DO-deployed. Same two settings toggles.
+   `DIGITALOCEAN_TOKEN` if DO-deployed or `RENDER_API_KEY` if
+   Render-deployed. Same two settings toggles.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
 
    Then run `pipeline setup` once against the project's config **with
    the provider token in the environment** (`DIGITALOCEAN_TOKEN=… \
-   LINEAR_API_KEY=… pipeline setup`). Beyond provisioning states and
+   LINEAR_API_KEY=… pipeline setup`, or `RENDER_API_KEY=…` for a Render
+   project). Beyond provisioning states and
    labels, it probes `deploy.endpoint` and fails loudly if that app is
    not one the token can read. Do not skip the token: without it the
    command prints `deploy check SKIPPED` and provisions anyway, which

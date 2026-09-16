@@ -472,16 +472,41 @@ func TestTheModelRunnerNeverShadowsTheSubscriptionCredential(t *testing.T) {
 	}
 }
 
+// packageSource is every non-test source file of this package, joined.
+// The checks these tests read are assembled in preflight.go but their
+// labels need not be declared there — deployCredential moved to main.go
+// when preflight stopped keeping its own copy of the provider switch, and
+// a grep of one file reported that preflight had stopped probing the
+// deployments scope when nothing about the probing had changed. A guard
+// that names a file asserts where a string lives; what these want to know
+// is whether the package says it at all.
+func packageSource(t *testing.T) string {
+	t.Helper()
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("found no package sources: %v", err)
+	}
+	var b strings.Builder
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(raw)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 // Preflight has to probe every scope the snapshot needs, or it is a
 // green light that means nothing. Read off the check list's own scope
 // strings, so adding a call to the read-set without adding a probe for
 // it fails here rather than at the next 403.
 func TestPreflightProbesEveryScopeTheSnapshotNeeds(t *testing.T) {
-	body, err := os.ReadFile("preflight.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(body)
+	src := packageSource(t)
 	for scope := range snapshotReads {
 		// The scope as a workflow spells it, which is how the check list
 		// prints it too — the string a reader has to go edit.

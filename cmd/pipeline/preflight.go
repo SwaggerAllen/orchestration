@@ -11,8 +11,6 @@ import (
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/deploy"
-	"github.com/SwaggerAllen/orchestration/internal/deploy/digitalocean"
-	"github.com/SwaggerAllen/orchestration/internal/deploy/ghdeploy"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
@@ -53,6 +51,113 @@ type check struct {
 	name  string // what the pipeline calls it for
 	scope string // the permission it needs, as the workflow spells it
 	run   func(context.Context) error
+}
+
+// deployCredential names, per provider, what preflight calls the deploy
+// check and the credential or permission it exercises. Labels only: a
+// provider missing an entry is a blank column in one report, never deploy
+// detection silently off, which is why this is a map rather than a second
+// copy of deployPort's switch. It lives here, beside its only reader,
+// because TestPreflightProbesEveryScopeTheSnapshotNeeds reads the scope
+// strings out of this package's source and a scope spelled in a file that
+// builds no checks would satisfy it while probing nothing.
+var deployCredential = map[string][2]string{
+	"github":       {"the deployment list", "deployments: read"},
+	"digitalocean": {"the app's deployments", "DIGITALOCEAN_TOKEN"},
+	"render":       {"the service's deploys", "RENDER_API_KEY"},
+}
+
+// hostChecks is every probe that needs the code host, the deploy port
+// behind the last of them, and — when there is no port — the reason.
+//
+// Extracted from cmdPreflight so the deploy branch is testable. It is the
+// only conditional in the list: the five host checks are appended
+// unconditionally, while the deploy one depends on the provider and on a
+// credential, and a probe built and then not appended is a check the
+// report never mentions. Reverting the append printed `ok` while
+// deployCheck itself was covered — the shape CLAUDE.md records for
+// awaitingDispatchOf, where a test asserted the end state and not that
+// anything ran.
+func hostChecks(gh host.Host, cfg *config.Config, repo, token string) ([]check, deploy.Deploy, string, error) {
+	checks := []check{
+		// Reads one listing per wired agent workflow, so it now
+		// checks the `agents` map as well as the scope: a renamed
+		// or mistyped filename 404s here, named, instead of
+		// surfacing later as an agent kind that looks permanently
+		// idle. Preflight is the one workflow the author can run
+		// from a phone, which is where a config typo is worth
+		// costing a line rather than a run.
+		check{"the agent run list, per wired workflow", "actions: read", func(ctx context.Context) error {
+			_, err := gh.ListAgentRuns(ctx)
+			return err
+		}},
+		check{"the open PR list", "pull-requests: read", func(ctx context.Context) error {
+			_, err := gh.ListOpenPRs(ctx)
+			return err
+		}},
+		check{"CI verdicts per PR head", "actions: read", func(ctx context.Context) error {
+			sha, err := headSHA(ctx, gh)
+			if err != nil {
+				return err
+			}
+			_, err = gh.ChecksFor(ctx, sha)
+			return err
+		}},
+		// A different endpoint from the PR list, and that is the
+		// point: the list response does not carry `mergeable` at
+		// all, so this is the single-PR GET and it can fail on its
+		// own. With no open PR there is nothing to ask about, which
+		// is a skip rather than a pass.
+		check{"a PR's merge state", "pull-requests: read", func(ctx context.Context) error {
+			prs, err := gh.ListOpenPRs(ctx)
+			if err != nil {
+				return err
+			}
+			if len(prs) == 0 {
+				return nil
+			}
+			_, err = gh.MergeStateFor(ctx, prs[0].Number)
+			return err
+		}},
+		check{"commit ancestry", "contents: read", func(ctx context.Context) error {
+			sha, err := headSHA(ctx, gh)
+			if err != nil {
+				return err
+			}
+			_, err = gh.IsAncestor(ctx, sha, sha)
+			return err
+		}},
+	}
+	dc, d, why, err := deployCheck(cfg, repo, token)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if d == nil {
+		return checks, nil, why, nil
+	}
+	return append(checks, dc), d, "", nil
+}
+
+// deployCheck builds the preflight probe for the configured deploy
+// provider: the check, the port to attach to the plane, and — when there
+// is no port — the reason.
+//
+// The port comes from deployPort rather than from a switch here, so
+// preflight probes the client the sweep will actually use. A switch did
+// sit here for a milestone, which is the hazard deployPort's own comment
+// names: adding the render case to one of them left preflight unable to
+// probe a Render project at all, printed as a project with no deploy
+// configured rather than as a gap.
+func deployCheck(cfg *config.Config, repo, token string) (check, deploy.Deploy, string, error) {
+	d, why, err := deployPort(cfg, repo, token)
+	if err != nil || d == nil {
+		return check{}, nil, why, err
+	}
+	label := deployCredential[cfg.Deploy.Provider]
+	return check{label[0], label[1], func(ctx context.Context) error {
+		_, err := d.State(ctx)
+		return err
+	}}, d, "", nil
 }
 
 func cmdPreflight(args []string) error {
@@ -153,81 +258,20 @@ func cmdPreflight(args []string) error {
 			return err
 		}
 		p.WithHost(gh)
-		checks = append(checks,
-			// Reads one listing per wired agent workflow, so it now
-			// checks the `agents` map as well as the scope: a renamed
-			// or mistyped filename 404s here, named, instead of
-			// surfacing later as an agent kind that looks permanently
-			// idle. Preflight is the one workflow the author can run
-			// from a phone, which is where a config typo is worth
-			// costing a line rather than a run.
-			check{"the agent run list, per wired workflow", "actions: read", func(ctx context.Context) error {
-				_, err := gh.ListAgentRuns(ctx)
-				return err
-			}},
-			check{"the open PR list", "pull-requests: read", func(ctx context.Context) error {
-				_, err := gh.ListOpenPRs(ctx)
-				return err
-			}},
-			check{"CI verdicts per PR head", "actions: read", func(ctx context.Context) error {
-				sha, err := headSHA(ctx, gh)
-				if err != nil {
-					return err
-				}
-				_, err = gh.ChecksFor(ctx, sha)
-				return err
-			}},
-			// A different endpoint from the PR list, and that is the
-			// point: the list response does not carry `mergeable` at
-			// all, so this is the single-PR GET and it can fail on its
-			// own. With no open PR there is nothing to ask about, which
-			// is a skip rather than a pass.
-			check{"a PR's merge state", "pull-requests: read", func(ctx context.Context) error {
-				prs, err := gh.ListOpenPRs(ctx)
-				if err != nil {
-					return err
-				}
-				if len(prs) == 0 {
-					return nil
-				}
-				_, err = gh.MergeStateFor(ctx, prs[0].Number)
-				return err
-			}},
-			check{"commit ancestry", "contents: read", func(ctx context.Context) error {
-				sha, err := headSHA(ctx, gh)
-				if err != nil {
-					return err
-				}
-				_, err = gh.IsAncestor(ctx, sha, sha)
-				return err
-			}},
-		)
-
-		var d deploy.Deploy
-		switch cfg.Deploy.Provider {
-		case "github":
-			gd, err := ghdeploy.New(repo, token, cfg.Deploy.Endpoint)
-			if err != nil {
-				return err
-			}
-			d = gd
-			checks = append(checks, check{"the deployment list", "deployments: read", func(ctx context.Context) error {
-				_, err := gd.State(ctx)
-				return err
-			}})
-		case "digitalocean":
-			if doToken := os.Getenv("DIGITALOCEAN_TOKEN"); doToken != "" {
-				dd := digitalocean.New(cfg.Deploy.Endpoint, doToken)
-				d = dd
-				checks = append(checks, check{"the app's deployments", "DIGITALOCEAN_TOKEN", func(ctx context.Context) error {
-					_, err := dd.State(ctx)
-					return err
-				}})
-			} else {
-				fmt.Println("DIGITALOCEAN_TOKEN not set — deploy detection off; Merged tickets will reach the deploy timeout.")
-			}
+		hcs, d, why, err := hostChecks(gh, cfg, repo, token)
+		if err != nil {
+			return err
 		}
-		if d != nil {
+		// Unasserted, and knowingly: cmdPreflight builds its host client
+		// from the environment, so nothing test-side can run this body.
+		// Reverting this line still prints `ok`. It is one unconditional
+		// append covering every host check rather than a per-provider
+		// branch — which is why the branch moved into hostChecks and this
+		// did not. Closing it means injecting the host into the command.
+		checks = append(checks, hcs...)
+		if d == nil {
+			fmt.Printf("%s — deploy detection off; Merged tickets will reach the deploy timeout.\n", why)
+		} else {
 			p.WithDeploy(d)
 		}
 	}
