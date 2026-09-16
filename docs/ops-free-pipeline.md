@@ -41,8 +41,10 @@ failing Catapult's whole audit with `json: unknown field` (CLAUDE.md).
 
 **The number is a motivation, not a target.** Nobody has measured how much of the
 25,092 a composed pipeline would actually delete, and an estimate here would be exactly
-the invented threshold this repo's CLAUDE.md warns about. What §10 gives instead is a
-falsifiable check to apply once something is built.
+the invented threshold this repo's CLAUDE.md warns about. What §9 gives instead is a
+falsifiable check to apply once something is built, and §11 gives the package-by-package
+accounting of where the lines would go — with each row's status, since several are
+proposals this conversation never ruled on.
 
 ---
 
@@ -444,3 +446,105 @@ Each of these is a guess until somebody takes it. Recorded as guesses on purpose
   driver survives the merge reconcile performs, is unverified. **Probe:** two branches
   each rewriting `CHANGE.md`, merged in a job, asserting which version survives — and
   asserting the assertion by running it once without the driver configured.
+
+---
+
+## 11. The disposition of what exists
+
+§0's measurement is a complaint until there is somewhere for the 25,092 lines to go.
+This is that accounting, and the rows below cover **every line of `internal/`** — the
+six groups sum to 18,454, which is the measured total, so nothing is quietly unaccounted
+for.
+
+**Status is stated per row on purpose.** Some of these were settled in the conversation
+this file records, some were proposed and never ruled on, and two are in tension with
+sections above. **A row marked *proposed* is not a decision and must not be implemented
+on this document's authority** — recording a proposal as settled is how a record ends up
+describing a system nobody agreed to.
+
+| what | lines | disposition | status |
+| --- | --- | --- | --- |
+| `core`, `plane`, `state` | 4,813 | state machine → PR state and labels; the move record dies with it | **open** |
+| `agent` | 3,552 | → a Claude Code skill plus hooks | proposed |
+| `host`, `tracker` | 3,499 | → the GitHub and Linear MCP servers, called in-session | proposed |
+| `worker` (TS) | 2,114 | → native events plus one scheduled workflow | **in tension with §6** |
+| `stats`, `statsstore` | 1,005 | delete | proposed, contested |
+| `citations`, `filemap`, `reasons`, `nonasks`, `decisions`, `promptdoc` | 2,419 | **keep**, as `mix catapult.audit` checks in Catapult | proposed |
+| `sim`, `scenario` | 1,424 | **keep**, conditionally — see below | decided by §9 |
+| `config`, `marker`, `protocol`, `setup`, `deploy`, `retro` | 1,742 | shrink with whatever above them survives | no independent disposition |
+
+### 11.1 The state machine's home is open, and §4 does not close it
+
+The row above is marked open rather than proposed because **this conversation never
+settled where ticket state lives.** §4 settles that the *runner* is ours, for a credential
+reason; its closing line — Linear keeps intake, priority, attention and webhooks, and
+nothing else — was written as a consequence and is further than the credential argument
+reaches. Linear could keep the state machine and still never run an agent.
+
+What is genuinely decided is smaller: Linear does not run agents (§4), and scope moves
+into `CHANGE.md` (§1). Where *state* lives is the next decision, not a settled one, and
+`internal/state`'s fate rides on it — the move record exists only because the tracker
+cannot say who made a write (§13), and git can. Decide the state machine first; the
+record follows it.
+
+### 11.2 The Worker row contradicts §6
+
+§6 provisions a per-PR rehearsal tenant whose second component is a Worker deployed under
+its own name. This row deletes the Worker. Both cannot be built.
+
+Neither is wrong on its own: §6 describes a tenant for the pipeline **as it is**, and this
+row describes the pipeline **as proposed**. Named here because the failure mode is
+writing one against a world the other deleted, and discovering it when a tenant loses a
+component and gains nothing. Settle them together.
+
+### 11.3 The gates are the strongest row, and they are in the wrong repo
+
+`citations`, `filemap`, `reasons`, `nonasks` and `decisions` check a project's tree
+against a project's conventions. They already *run* in the project's CI — Catapult's
+`ci.yml` gates the pipeline audit on ticket branches — so moving them is a port, not a
+relocation of where they execute.
+
+What the port buys is the end of the cross-repo schema deadlock this repo's CLAUDE.md
+records twice: a config field must merge here first because `DisallowUnknownFields`
+rejects a key the binary has not declared, and `citationShorthands` landing on Catapult's
+side first took that project's **whole audit** down with `json: unknown field`. As mix
+tasks they run against the tree they check, in the repo that owns the rules, with no
+shared schema for the two sides to deadlock on.
+
+**Consequence to carry into §8.2:** the per-PR manual-test tier selects tests by
+inverting the file map. If the map becomes Catapult's, the selection reads Catapult's map
+— which is where it should have come from anyway. Say so where that rule lives, not only
+here.
+
+### 11.4 Two rows cost something the table does not show
+
+**The tracker adapter carries the heaviest test coverage in the repo, deliberately**
+(PLAN §1: Linear has no Go SDK, so the adapter is hand-written GraphQL and is tested
+accordingly). Replacing it with an MCP server moves that surface out of the three test
+rings entirely. That is a real loss and §9's check does not measure it, because §9 counts
+rules in `DESIGN.md` and this is coverage of an adapter.
+
+**Deleting stats discards work that just landed.** ORC-233 scheduled the pipeline stats
+collector. The row stays because a dashboard nobody reads is not worth its maintenance,
+but it is a decision to take deliberately rather than a package to sweep up with the
+Worker it happens to live in.
+
+### 11.5 What the accounting does not claim
+
+**No total for what a composed design would delete.** Summing the *proposed* rows would
+produce exactly the invented figure §0 declines to give and §9 exists to replace: the
+number is read off a real diff or it is not known.
+
+**And three costs have no row at all**, because they are not lines of code:
+
+- **`internal/sim`.** Proving protocol behaviour deterministically in milliseconds is
+  this repo's best testing asset, and a composed pipeline cannot be simulated. Its row
+  says *keep, conditionally* because §9 read from this side is the same question: if the
+  rules survive at their current count and merely relocate, the sim is gone **and** the
+  rules are unproven, which is the worst available outcome.
+- **§9's expressiveness.** Branch protection can enforce "this token cannot push here".
+  It cannot state "a design pass promoting past `Design review` is a violation". The
+  enforcement gets stronger and the vocabulary gets poorer, and the second half is easy
+  to miss while celebrating the first.
+- **Determinism and ownership.** Every replacement above is a service that can be down,
+  and none of them is ours.
