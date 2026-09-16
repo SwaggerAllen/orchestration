@@ -754,6 +754,13 @@ func Abort(ctx context.Context, p *plane.Plane, res *ClaimResult, reason, messag
 		to = protocol.Blocked
 		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"prerequisite": "1"}}
 		message = softLabel(ctx, p, res, message, core.LabelPrerequisite)
+	case "conflict":
+		if strings.TrimSpace(message) == "" {
+			return fmt.Errorf("abort: conflict without naming the files and what each side asserts is the fixed-text defect `staleClaimFor` is on record for — the reader cannot see the tree")
+		}
+		to = protocol.Blocked
+		m = &marker.Marker{Kind: marker.Blocked, Fields: map[string]string{"conflict": "1"}}
+		message = softLabel(ctx, p, res, message, core.LabelConflict)
 	default:
 		return fmt.Errorf("abort: reason must be one of %s, got %q", strings.Join(protocol.AbortReasons, ", "), reason)
 	}

@@ -363,7 +363,7 @@ func bookkeeping(m Marker) bool {
 	case Dispatch, Base, Preview, StaleClaim, ClaimFailed, Merged, Revert, BoundaryStep:
 		return true
 	case Blocked:
-		for _, flavor := range []string{"pushback", "setup", "author-only", "scope-satisfied", "prerequisite", "live-suite"} {
+		for _, flavor := range []string{"pushback", "setup", "author-only", "scope-satisfied", "prerequisite", "live-suite", "conflict"} {
 			if m.Fields[flavor] != "" {
 				return false
 			}

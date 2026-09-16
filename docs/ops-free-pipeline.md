@@ -131,27 +131,37 @@ git config merge.ours.driver true
 in the agent job. Git does not ship that driver; `driver = true` is the whole
 definition (keep our version, exit zero).
 
-**Measured 2026-09-16, and it changes what this section is for: nothing in the pipeline
-performs a three-way local merge today, so the driver currently has no site.** The two
-`git merge` calls that exist — the boundary's and the rehearsal's — are `--ff-only`, which
-never runs a merge driver because no merge happens. The real merge is `host.MergePR`, a
-**server-side squash** through GitHub's API, and a custom merge driver is a local-git
-feature GitHub's merge cannot honour.
+**A driver needs a local merge, and the pipeline had none.** Measured 2026-09-16: the only
+two `git merge` calls in the repo — the boundary's and the rehearsal's — are `--ff-only`,
+which never runs a driver because no merge happens, and the real merge is `host.MergePR`, a
+**server-side squash** through GitHub's API that cannot honour a local merge driver.
 
-So the consequence of one overwritten file, as things stand, is not a conflict an agent
-resolves. It is a **PR GitHub reports un-mergeable**: `MergePR` returns `ErrNotMergeable`,
-`reconcile.go` bounces the ticket to `Ready for rework`, and §12 escalates a second bounce
-to `Blocked`. Every pair of overlapping tickets would take the second one down that path —
-strictly worse than the label mutex §2 retires it for.
+Left there, the consequence of one overwritten file would not have been a conflict an agent
+resolves. It would be a **PR GitHub reports un-mergeable**: `MergePR` returns
+`ErrNotMergeable`, `reconcile.go` bounces the ticket to `Ready for rework`, and §12
+escalates a second bounce to `Blocked`. Every pair of overlapping tickets would take the
+second one down that path — a conflict reported as a rework, to an agent with nothing to
+fix, and strictly worse than the label mutex §2 retires it for.
 
-**The missing piece is a local merge-from-base with the driver configured, before the PR is
-merged**, and the driver and `.gitattributes` are inert until it exists. It belongs in the
-dev job rather than reconcile, for the reason stated above: a push during `Reconciling`
-restarts CI and re-enters the state machine at `Checks`. That step is also what gives §3's
-`conflict` flavour something to fire on, so the two land together or neither does.
+**So the dev job merges the base in, and that is what gives the driver a site.** It belongs
+there rather than in reconcile, for the reason stated above: a push during `Reconciling`
+restarts CI and re-enters the state machine at `Checks`. It is also overdue independently —
+CI already tests `refs/pull/N/merge`, so a branch that has not merged main is not the tree
+CI went green on. A merge that conflicts parks under §3's `conflict`, which is why the two
+landed together: a flavour with nothing to fire on is the `Reserve`/`Release` shape CLAUDE.md
+records, and so is a driver with no merge.
 
-Naming it here because a mechanism with no caller is the `Reserve`/`Release` shape CLAUDE.md
-records — landed, correct, and unreached for a milestone.
+**Probed, including the control run without the driver:**
+
+```
+without merge.ours.driver  -> CONFLICT (content): Merge conflict in CHANGE.md
+with it                    -> merged cleanly, ours kept
+both files diverged        -> systems.md conflicts, CHANGE.md resolved
+```
+
+The third run is the one worth keeping. It proves the driver is scoped to the one path
+rather than swallowing a real collision — which is the failure that would have made this
+mechanism dangerous rather than merely inert.
 
 ### 1.3 The file names its ticket, and the harness asserts it
 

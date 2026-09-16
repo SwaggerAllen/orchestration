@@ -580,6 +580,19 @@ const (
 	// record on every sweep, which is what leaves the pipeline agreeing
 	// with the tracker at the moment the label comes off.
 	LabelResync = "resync"
+	// LabelConflict: merging the base into this ticket's branch left
+	// conflicts the run would have to guess at, so it stopped.
+	//
+	// It is DESIGN §2.4's rule at merge time rather than a second rule.
+	// §2.4 already says that when the repo moved and both changes touch
+	// the same behaviour the repo wins and the ticket stops, parking in
+	// Blocked for the author to route to redesign; that is checked at
+	// pickup against base-rev, and this is the same judgment when the
+	// conflict is textual and arrives at the merge. Same destination,
+	// same route out, so it is one rule with two check times rather than
+	// two rules that drift.
+	LabelConflict = "conflict"
+
 	// LabelPrerequisite: the ticket's scope depends on something that is
 	// not on main and is not this ticket's to write, so there is nothing
 	// the pass can decide yet.

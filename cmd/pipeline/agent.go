@@ -21,6 +21,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/nonasks"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/promptdoc"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/retro"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
@@ -1318,8 +1319,17 @@ func cmdAgentAbort(args []string) error {
 	fs := flag.NewFlagSet("agent abort", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	claimPath := fs.String("claim", "", "claim.json written by agent claim")
-	reason := fs.String("reason", "failed", "one of protocol.AbortReasons: pushback, failed, needs-setup, author-only, scope-satisfied or prerequisite")
+	// Built from the vocabulary rather than spelled out: this line had
+	// already gone stale once, listing six reasons when the code took
+	// seven.
+	reason := fs.String("reason", "failed", "one of "+strings.Join(protocol.AbortReasons, ", "))
 	message := fs.String("message", "", "the argument (required for every reason but failed)")
+	// Read from a file rather than an argument because the messages that
+	// most need to be exact are the ones a shell mangles: a conflict park
+	// carries paths, fenced diff hunks and backticks, and interpolating
+	// that through --message is how a diagnosis arrives truncated at the
+	// first quote. Mirrors --error-file, which exists for the same shape.
+	messagePath := fs.String("message-file", "", "file holding the argument; used instead of --message when set")
 	// A run that aborts is the likeliest one to have met a harness gap —
 	// that is often why it aborted — so the findings travel here too.
 	findings := fs.String("findings", "", "harness findings the model recorded")
@@ -1339,6 +1349,17 @@ func cmdAgentAbort(args []string) error {
 	// Absent is the ordinary case, not a failure: the file exists only
 	// when the model run is what died, so an abort reporting anything
 	// else appends nothing rather than a cause it made up.
+	if *messagePath != "" {
+		raw, err := os.ReadFile(*messagePath)
+		if err != nil {
+			// Loud rather than silent: unlike --error-file, an unreadable
+			// message file is the whole argument missing, and every reason
+			// but "failed" refuses an empty one — so a quiet fallback turns
+			// a precise park into a refusal carrying no diagnosis at all.
+			return fmt.Errorf("agent abort: --message-file %s: %w", *messagePath, err)
+		}
+		*message = strings.TrimSpace(string(raw))
+	}
 	if *errPath != "" {
 		if raw, err := os.ReadFile(*errPath); err == nil {
 			*message = agent.WithRunOutput(*message, string(raw))

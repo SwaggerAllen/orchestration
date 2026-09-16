@@ -150,6 +150,45 @@ runs:
         git checkout -B "$BRANCH" "origin/$BRANCH" 2>/dev/null || git checkout -b "$BRANCH" origin/main
         # The pipeline checkout must not ride along in the project branch.
         echo ".pipeline/" >> .git/info/exclude
+        # Bring the base in, and stop here if it does not come cleanly.
+        #
+        # Two reasons this is not optional. CI already tests the merge ref
+        # (`refs/pull/N/merge`), so a branch that has not merged main is
+        # not the tree CI green was about — and reconcile merges through
+        # the host API, a server-side squash that cannot honour the
+        # `merge=ours` driver configured above. Without this step a base
+        # that moved reaches reconcile as ErrNotMergeable, which bounces
+        # the ticket to rework and Blocks it on the second bounce: a
+        # conflict reported as a rework, to an agent with nothing to fix.
+        #
+        # A conflict parks instead, under `conflict` (DESIGN §2.4 at merge
+        # time, §8, §12). The pass does not resolve it: §2.4's rule is
+        # that when the repo moved and both changes touch the same
+        # behaviour the repo wins and the ticket stops, and a pass that
+        # guessed here would produce the design nobody agreed to.
+        if ! git merge --no-edit -q origin/main; then
+          {
+            echo "Merging \`origin/main\` into this branch left conflicts, so the pass stopped without changing anything (DESIGN §2.4)."
+            echo
+            echo "Conflicted paths:"
+            git diff --name-only --diff-filter=U | sed 's/^/- /'
+            echo
+            echo "The conflicting hunks, both sides:"
+            echo '```diff'
+            # Bounded: the park is a summons for a human, and a comment
+            # carrying a whole merge is one nobody reads. The branch is
+            # where the full conflict lives and it is still there.
+            git diff --diff-filter=U | head -c 4000
+            echo
+            echo '```'
+          } > "$RUNNER_TEMP/pipeline/conflict.md"
+          cat "$RUNNER_TEMP/pipeline/conflict.md"
+          # Left clean so nothing downstream reads a half-merged tree.
+          git merge --abort
+          echo "conflicted=1" >> "$GITHUB_OUTPUT"
+          exit 1
+        fi
+
         # Where this pass started. The push step compares against it to
         # tell "the model changed nothing" from "the branch is empty" —
         # two different facts that the commit count against main cannot
@@ -425,8 +464,25 @@ runs:
           --error-file "$RUNNER_TEMP/pipeline/claim-error.txt" \
           --exit-code-file "$RUNNER_TEMP/pipeline/claim-exit-code.txt"
 
+    # Ahead of the generic abort, and the generic one now excludes this
+    # case: two parks on one ticket would leave the second one's label
+    # and marker describing a failure that did not happen.
+    - name: park on a base conflict
+      if: failure() && steps.checkout.outputs.conflicted == '1'
+      shell: bash
+      env:
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        PIPELINE_STATE_TOKEN: ${{ inputs.pipeline_state_token }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        pipeline agent abort \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --claim "$RUNNER_TEMP/pipeline/claim.json" \
+          --reason conflict \
+          --message-file "$RUNNER_TEMP/pipeline/conflict.md"
+
     - name: abort on failure
-      if: failure() && steps.claim.outcome == 'success'
+      if: failure() && steps.claim.outcome == 'success' && steps.checkout.outputs.conflicted != '1'
       shell: bash
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}

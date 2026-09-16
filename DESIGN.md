@@ -1196,6 +1196,7 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `scope-satisfied` | The run found the whole scope already on `main` and changed nothing. Written by `abort --reason scope-satisfied` (§12, §13). Almost always a duplicate to cancel. |
 | `pushback` | The design can't be built as drawn. Written by `abort --reason pushback` (§2.7, §13). Parked for the author to redesign or rescope. |
 | `prerequisite` | The scope depends on something not on `main` and not this ticket's to write. Written by `abort --reason prerequisite` (§3, §12, §13), and the outcome a design pass reports it with. Land the other change, then return the ticket to its queue. |
+| `conflict` | Merging the base into this ticket's branch left conflicts the run would have to guess at. Written by `abort --reason conflict` (§2.4, §12, §13). It is §2.4's rule at merge time rather than a second rule: the repo moved, both changes touch the same behaviour, the repo wins and the ticket stops. Route it to `Ready for redesign` — the design has to be re-decided either way. |
 | `author-only` | This work is legal for nobody else. The pipeline routes around it entirely: no dispatch, no gates, no mutex, no revert — it moves only when the author moves it. |
 | `resync` | The pipeline's idea of where this ticket is has come apart from the tracker's, and the author is repairing it by hand. Routes around it exactly as `author-only` does — with one addition that is the whole point, below. Temporary: removed when the repair is done. |
 | `harness` | A problem with the pipeline itself rather than with the project, filed by the run that hit it (§10). |
@@ -2795,6 +2796,7 @@ without passing through `Design review`.
 | abort | `author-only` | `Blocked` | `author-only` | blocked, `author-only=1` |
 | abort | `scope-satisfied` | `Blocked` | `scope-satisfied` | blocked, `scope-satisfied=1` |
 | abort | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
+| abort | `conflict` | `Blocked` | `conflict` | blocked, `conflict=1` |
 | design | `artifacts` | `Design review` | the pass's mutex labels | — |
 | design | `decisionless` | **`Ready for dev`** | the pass's mutex labels | decisionless-pass |
 | design | `prerequisite` | `Blocked` | `prerequisite` | blocked, `prerequisite=1` |
