@@ -269,6 +269,13 @@ Three things building it settled, all of which the decisions doc had wrong or si
 - **`CHANGE.md` has to be in `designOwnedPaths`.** DESIGN §5's ownership audit refuses a
   design pass writing outside them, so the gate rejected the write §4 requires. A value in
   an existing array, so it merges project-side.
+- **The `merge=ours` driver has no site yet, and C1 does not finish without one.** Nothing
+  in the pipeline does a three-way local merge: the two `git merge` calls are `--ff-only`,
+  and the real merge is a server-side squash through GitHub's API, which cannot honour a
+  local merge driver. A CHANGE.md divergence therefore lands as `ErrNotMergeable` and
+  bounces the ticket to `Ready for rework`. C1 needs a merge-from-base step in the **dev**
+  job — not reconcile, where a push restarts CI — and that step is also what C2's
+  `conflict` flavour fires on.
 - **`decisionless` writes the sketch too**, which DESIGN §3 now states. That outcome used
   to commit nothing, so the ticket reached dev with no spec and §1.4's predicate — a commit
   changing code without changing `CHANGE.md` is the author's undesigned work — misread
