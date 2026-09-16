@@ -200,3 +200,124 @@ Needed by M0/M2, none blocking the start of M0's local work:
 | Cloudflare Pages token | project repo Actions secrets | storybook publish | M5 |
 | GitHub dispatch token (workflow_dispatch only) | pipeline repo secret, uploaded to the Worker by the deploy | metronome | M7 |
 | Linear webhook signing secret | pipeline repo secret, uploaded to the Worker by the deploy | webhook verification | M7 |
+
+---
+
+## 6. The cutover (C0–C6)
+
+Implements the decisions in `docs/ops-free-pipeline.md`. That document owns *what* and
+*why*; this section owns *in what order*, which is what §1's split has always meant.
+
+**Only decided rows are here.** The run-harness port, the gate relocation into Catapult
+and the Worker's disposition are still proposals (`ops-free-pipeline.md` §11) and have no
+milestone until somebody rules on them.
+
+### 6.1 Three constraints that shape the order
+
+**Catapult is drained for every orchestration change** (CLAUDE.md): nothing dispatched,
+nothing mid-flight. That is an argument for many small phases rather than few large ones —
+a phase's length is a length of time the project is parked.
+
+**The two-repo ordering rules decide several of these, and one case is not yet written
+down anywhere.** The table in CLAUDE.md covers adding; the cutover also removes:
+
+| the change | merges first | because |
+| --- | --- | --- |
+| a new protocol state | neither — both together, parked | the whole mapping is required *and* unknown keys are rejected |
+| a new config **field** | this repo | `DisallowUnknownFields` rejects a key we have not declared |
+| a new **value** for an existing enum (`deploy.provider: "render"`) | this repo | a project naming a value the binary refuses fails validation, which is the field case in miniature |
+| **removing a config field** | **the project** — but see C4, it is three steps | undeclaring first makes the project's remaining key unknown, and every command fails |
+
+**Take the baseline before anything lands.** It is the only step here that cannot be done
+afterwards (`ops-free-pipeline.md` §9).
+
+### 6.2 The milestones
+
+**C0 — The baseline.** Run the stats collector to completion against Catapult and record
+cycle time and Actions minutes as they stand. Nothing else in this list is reversible with
+respect to it: once a change lands, the before-measurement no longer exists.
+*Exit: a recorded figure, dated, in a form §9's later comparison can read.*
+
+**C1 — `CHANGE.md`.** The file convention, `.gitattributes` with `merge=ours`, the driver
+line in the agent job, the ticket-key header and its assertion in `pipeline agent
+claim`/`finish`, the design pass writing it, and the `git log <base>..main -p --
+CHANGE.md` briefing handed to dev and reconcile. Amends DESIGN §4, which is where the
+sketch is specified as having no file.
+*Exit: a rehearsal ticket whose squash commit carries its own spec, and `git log --follow`
+returning it. The `merge=ours` probe from §10 run, including the run without the driver
+configured.*
+
+**C2 — The `conflict` flavour.** The six sites `ops-free-pipeline.md` §3.4 enumerates,
+plus DESIGN §8's label table and §12's failure table, written as §2.4's merge-time half
+rather than a second rule. Needs `pipeline setup --apply` per project to create the label.
+*Exit: a rehearsal conflict parks the ticket with a comment naming the two claims, and the
+mechanical predicate refuses to resolve a hunk touching a rule id.*
+
+C1 before C2 is not arbitrary: the briefing is what makes a parked conflict answerable, so
+shipping the park first gives the author a blocker with no better diagnosis than today's.
+
+**C3 — Render, production first.** A `render` deploy provider in `internal/deploy`
+alongside `digitalocean` and `github`, its fake, and the enum value — this repo first, per
+the table. Then Catapult's production moves, and deploy detection is verified against a
+real merge before anything depends on previews.
+*Exit: a merge to Catapult's main detected through the Render adapter, `/health` answering
+with the merge SHA.*
+
+**C4 — Previews on, static storybook off.** Preview environments enabled with
+`expireAfterDays` set, then the Cloudflare Pages path retired.
+
+**The retirement is three merges, not two, and a naive two deadlocks.**
+`config.Validate` requires `preview.pagesProject`, `preview.buildCommand` and
+`preview.outputDir` unconditionally, so removing the block from Catapult's config fails
+validation while removing the field here makes Catapult's block an unknown key — each side
+alone is invalid, exactly the protocol-state shape that cost ninety minutes:
+
+1. **This repo:** drop the three required checks, keeping the field. Valid against a
+   config that has the block and one that does not.
+2. **Catapult:** remove the `preview` block and `bin/preview-build.sh`; the
+   `agent-design`/`agent-dev` actions stop publishing.
+3. **This repo:** remove the `Preview` field.
+
+*Blocked on a decision, not on code:* §7.3 leaves open that previews are per-PR while the
+design pass commits to a branch whose PR is the dev pass's. Either design opens the draft
+PR or design review reads something else. Settle it before step 2, because step 2 is what
+removes the alternative.
+*Exit: design review reads a storybook from a running preview; a failed preview build is
+reported on the ticket rather than silently absent.*
+
+**C5 — The manual test gate.** The largest item and the only new subsystem:
+`tests/manual/**` in Catapult's `designOwnedPaths`, the judge session and its isolation
+from the diff, evidence as run artifacts, verdicts as check runs, the seam-based per-PR
+selection, and the boundary batch. Any new configuration is a config field, so this repo
+first.
+*Exit: a seeded defect of the shape §8 names — a declared-and-unwired crossing — caught by
+the gate on a PR, with evidence; and a new test shown failing against the reverted commit
+before it counts.*
+
+Take §10's two measurements during C5 rather than after: what a judge pass costs against
+the subscription, which sets the per-PR tier's size, and preview provisioning time, which
+is the gate's latency on every PR.
+
+**C6 — Conflicts as the mutex.** Last, because its payoff is conditional on concurrency
+that does not exist yet: with one dev agent and one PR in checks, the label mutex rarely
+fires, so this is the change with the least to show for it today and the most protocol to
+move. Removes the screen and system label partition, amends DESIGN §6 and §7.
+
+**Measured rather than assumed, because §14's prose reads worse than the code is:** §14
+says system labels "extend the mutex and the re-evaluation machinery to declared
+structure", which suggests the re-evaluation rules are entangled. They are not.
+`MutexLabels` and `HoldsMutex` sit on the ticket in `snapshot.go`, `MutexBlocker` has two
+callers (`pickup.go`, `order.go`), `promote.go` carries the mid-milestone rules, and the
+collision verdicts live in `reconcile` with no core coupling to the prefixes at all — one
+reference in the whole package. The sim scenarios asserting mutex behaviour are the other
+half of the work.
+*Exit: the scenarios rewritten to assert conflict-parking where they asserted mutex
+refusal, and a rehearsal with two overlapping tickets landing without a label between
+them.*
+
+### 6.3 What this does not include
+
+No time estimates. Five of the seven are contained changes; C5 is a new subsystem and
+should not be sized against the others. The figure worth watching is C0's, measured again
+after C5 — which is `ops-free-pipeline.md` §9's check and the only claim any of this makes
+about whether it worked.
