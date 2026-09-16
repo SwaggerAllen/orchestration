@@ -468,7 +468,7 @@ describing a system nobody agreed to.
 | `agent` | 3,552 | → a Claude Code skill plus hooks | proposed |
 | `host`, `tracker` | 3,499 | → the GitHub and Linear MCP servers, called in-session | proposed |
 | `worker` (TS) | 2,114 | → native events plus one scheduled workflow | **in tension with §6** |
-| `stats`, `statsstore` | 1,005 | delete | proposed, contested |
+| `stats`, `statsstore` | 1,005 | **keep** — it is the instrument, not a dashboard (§11.5) | decided |
 | `citations`, `filemap`, `reasons`, `nonasks`, `decisions`, `promptdoc` | 2,419 | **keep**, as `mix catapult.audit` checks in Catapult | proposed |
 | `sim`, `scenario` | 1,424 | **keep**, conditionally — see below | decided by §9 |
 | `config`, `marker`, `protocol`, `setup`, `deploy`, `retro` | 1,742 | shrink with whatever above them survives | no independent disposition |
@@ -516,20 +516,51 @@ inverting the file map. If the map becomes Catapult's, the selection reads Catap
 — which is where it should have come from anyway. Say so where that rule lives, not only
 here.
 
-### 11.4 Two rows cost something the table does not show
+### 11.4 The tracker adapter costs something the table does not show
 
-**The tracker adapter carries the heaviest test coverage in the repo, deliberately**
-(PLAN §1: Linear has no Go SDK, so the adapter is hand-written GraphQL and is tested
-accordingly). Replacing it with an MCP server moves that surface out of the three test
-rings entirely. That is a real loss and §9's check does not measure it, because §9 counts
-rules in `DESIGN.md` and this is coverage of an adapter.
+**It carries the heaviest test coverage in the repo, deliberately** (PLAN §1: Linear has
+no Go SDK, so the adapter is hand-written GraphQL and is tested accordingly). Replacing
+it with an MCP server moves that surface out of the three test rings entirely. That is a
+real loss and §9's check does not measure it, because §9 counts rules in `DESIGN.md` and
+this is coverage of an adapter.
 
-**Deleting stats discards work that just landed.** ORC-233 scheduled the pipeline stats
-collector. The row stays because a dashboard nobody reads is not worth its maintenance,
-but it is a decision to take deliberately rather than a package to sweep up with the
-Worker it happens to live in.
+### 11.5 Stats is the baseline, and this is the worst possible moment to lose it
 
-### 11.5 What the accounting does not claim
+**Keep the collector and the store.** What they hold is not a dashboard's backing data:
+
+- **`interval`** — how long each ticket spent in each state, sliceable by milestone, by
+  label, and by whether the boundary was open.
+- **`run`** plus `BillableMillis` — Actions minutes under the host's own per-minute
+  rounding model, which is the rounding every cost argument in `DESIGN.md` already leans
+  on (the kill switch's 730 idle minutes a month, the seven sweeps in 107 seconds).
+- A watermarked backfill built to survive the hourly rate limit over Catapult's 5,634
+  runs, which is the part that would be expensive to rebuild and tedious to get right
+  twice.
+
+**That is cycle time and cost — the outcome §9 only proxies for.** §9 asks whether
+`DESIGN.md` shrank, which measures complexity and infers the rest. This measures the
+thing itself: whether a ticket reaches `Done` faster and for fewer minutes. Deleting the
+instrument immediately before the largest change this pipeline has had would destroy the
+before-measurement that the change is supposed to be judged against, and the comparison
+is not reconstructible afterwards — the history it reads is in a tracker whose role
+§11.1 may be about to change.
+
+It is also the half of §10 that can be measured without a new probe. "What a judge pass
+costs" is asked there against the subscription; the Actions half of that answer is a
+query this store already serves.
+
+**Two things follow, and neither is deletion:**
+
+1. **The dashboard is a separate question from the data.** The rendering at `/dashboard`
+   lives in the Worker and its fate is §11.2's to settle, not this row's. Keeping the
+   instrument does not commit us to keeping that surface, and a query against the store
+   is a fine answer for one reader.
+2. **The collector's adapter follows wherever state goes.** It reads transition history
+   from the tracker today. If §11.1 moves the state machine, the collector reads the new
+   source and its aggregate is unchanged — the intervals are the same intervals. Worth
+   saying because it makes stats a *consumer* of §11.1 rather than a blocker on it.
+
+### 11.6 What the accounting does not claim
 
 **No total for what a composed design would delete.** Summing the *proposed* rows would
 produce exactly the invented figure §0 declines to give and §9 exists to replace: the
