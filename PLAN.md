@@ -278,12 +278,13 @@ alone is invalid, exactly the protocol-state shape that cost ninety minutes:
    `agent-design`/`agent-dev` actions stop publishing.
 3. **This repo:** remove the `Preview` field.
 
-*Blocked on a decision, not on code:* §7.3 leaves open that previews are per-PR while the
-design pass commits to a branch whose PR is the dev pass's. Either design opens the draft
-PR or design review reads something else. Settle it before step 2, because step 2 is what
-removes the alternative.
-*Exit: design review reads a storybook from a running preview; a failed preview build is
-reported on the ticket rather than silently absent.*
+*Render previews are per-PR, and the PR is already there.* `agent/design.go` creates the
+draft PR at finish, on the `artifacts` outcome — which is the only outcome that reaches
+`Design review`, and so the only one that needs a preview. What changes is that the
+preview is published per branch today and per PR after.
+*Exit: design review reads a storybook from a running preview; a failed or still-building
+preview is reported on the ticket rather than silently absent — the one genuinely new
+rule, since the Pages build could not fail by construction.*
 
 **C5 — The manual test gate.** The largest item and the only new subsystem:
 `tests/manual/**` in Catapult's `designOwnedPaths`, the judge session and its isolation

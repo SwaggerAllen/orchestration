@@ -402,18 +402,27 @@ build is Render's, out-of-band from the agent job entirely, so a failed preview 
 fail a dispatch. The problem the never-fail rule solved is solved better by moving the
 build out of the job than by making it incapable of failing.
 
-**It opens a different one, which is new and needs a rule.** A failed Render build leaves
-design review waiting on a preview that will never appear, and nothing currently notices.
-Two things follow:
+**Render previews are per-PR, and the design pass already opens one.** `agent/design.go`
+creates the draft PR at finish when the ticket has none, and `prompts/design.md` states it
+in the `artifacts` outcome. So the PR exists before `Design review` is entered, which is
+when the preview is read.
 
-1. **A preview must exist by `Design review`, which means a PR must exist by then.**
-   Render previews are per-PR. Today the design pass commits to the ticket branch and the
-   PR is the dev pass's; if design review reads a preview, design opens the (draft) PR.
-   Settle this where the design pass's outputs are specified, not only here.
-2. **A failed preview build is reported on the ticket**, because the author is otherwise
-   waiting on something that is not coming. It is not a new `Blocked` flavour — the
-   ticket is already in `Design review`, which is a state that hands the author the ball
-   — it is a comment naming the failure, so the ball they hold is one they can act on.
+The match is exact rather than lucky, and worth stating so the next pass does not
+re-derive it: **the only outcome that needs a preview is the only outcome that opens a
+PR.** `artifacts` commits and hands the ticket to the author, so it opens one.
+`decisionless` commits nothing and advances straight to `Ready for dev`, a record-review
+decline explicitly opens no PR, and `prerequisite` parks — none of the three reaches
+`Design review`, and none needs a preview.
+
+What changes is narrower than it first looks: the preview is published per *branch* today
+(Cloudflare Pages), and becomes per *PR*. The PR was always there.
+
+**One thing does need a new rule.** A Render build that fails, or that has not finished
+provisioning, leaves design review waiting on a preview that is not coming, and nothing
+notices today — the Pages build could not fail by construction, so there was nothing to
+report. **A failed or pending preview is reported on the ticket.** Not a new `Blocked`
+flavour: `Design review` already hands the author the ball, so this is a comment that
+makes the ball they hold one they can act on.
 
 ---
 
