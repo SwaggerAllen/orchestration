@@ -10,8 +10,28 @@ Per screen touched:
 
 <!-- pipeline:include design-artifacts (DESIGN §4) -->
 
-Per ticket, when structure changes — **the sketch** (DESIGN §4): a diff
-against `systems/<name>.md`. A new system is a new doc (with a
+**Per ticket, always: `CHANGE.md` at the repository root.** One file, and
+you overwrite it **wholly** with this ticket's spec — it carries the
+previous ticket's and is not yours to append to. Line one is
+`# <TICKET-KEY> — <title>`, naming the ticket you were claimed onto;
+after that, what will be built and where, in as much detail as a dev pass
+needs and no more. It is not a copy of the ticket description: the
+description is the argument for *why*, and this is the plan for *what*.
+
+The harness refuses a pass that did not write it, and refuses one whose
+first line names another ticket. Both are real failures rather than
+paperwork. The file is at the root of every branch and always names
+somebody, so a pass that left the last ticket's spec in place looks
+correct to every check but this one — and a merge that resolved the wrong
+way leaves a spec whose header is the only evidence.
+
+The history of that one file is what a later pass reads to resolve a
+conflict: `git log <base>..main -p -- CHANGE.md` is the argument for
+everything that landed while a ticket was out. Writing it thinly is
+paid for by whoever hits that conflict.
+
+Per ticket, when structure changes — **the sketch's structural half**
+(DESIGN §4): a diff against `systems/<name>.md`. A new system is a new doc (with a
 front-matter `paths:` file map); a moved boundary is a changed doc; a new
 table or dependency is named in the owning doc's diff as a decision, in
 as many words. Standing decisions and their rationale only — no inventory

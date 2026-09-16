@@ -330,6 +330,34 @@ publishes HTML plus assets per branch. This works only because design artifacts 
 
 ### Architecture in the repo, and the sketch
 
+**The sketch has a file: `CHANGE.md` at the repository root.** One file, overwritten
+wholly by every design pass with that ticket's spec — what will be built and where, under a
+first line naming the ticket (`# <TICKET-KEY> — <title>`). It is not the description: the
+description is the immutable argument for *why* (§2.3), and this is the plan for *what*.
+
+**Why one file rather than one per ticket.** A per-ticket directory accumulates entries
+that were true when they merged and are evidence about nothing afterwards, and would need
+its own rule to stop passes reading stale ones as authority. One overwritten file needs no
+such rule — there is only ever one and it is the current one — and its *history* is the
+thing worth having: `git log <base>..main -p -- CHANGE.md` is the argument for every change
+that landed while a ticket was out, which is the semantic resolution §2.4 says has no git
+equivalent.
+
+Three consequences, each of which has already been got wrong once:
+
+- **It is design-owned** (`designOwnedPaths`), or §5's ownership audit refuses the very
+  write this section requires. That is also what keeps dev out of it: dev implements
+  against the sketch rather than rewriting it.
+- **Every pass that commits writes it, including `decisionless`** (§3). A ticket whose spec
+  is missing is a hole in the history, and §2.5's rule — a commit changing code without
+  changing the sketch is the author's own undesigned work — would misread that ticket's dev
+  commit as theirs.
+- **The harness asserts it at finish, not at claim.** An agent job claims before it checks
+  out the ticket branch, so at claim the tree still carries the previous ticket's spec. The
+  finish checks both that the file names this ticket and that this pass wrote it; the file
+  is at the root of every branch and always names somebody, so the first check alone would
+  pass a stale spec.
+
 Architecture lives in `systems/<name>.md` — one doc per system, the structural mirror of
 `screens/<name>.md`: standing decisions (which system owns a concept, why a boundary sits
 where it does), their rationale, and a front-matter **file map** declaring the paths the
