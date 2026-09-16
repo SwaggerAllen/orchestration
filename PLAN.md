@@ -233,10 +233,25 @@ afterwards (`ops-free-pipeline.md` §9).
 
 ### 6.2 The milestones
 
-**C0 — The baseline.** Run the stats collector to completion against Catapult and record
-cycle time and Actions minutes as they stand. Nothing else in this list is reversible with
-respect to it: once a change lands, the before-measurement no longer exists.
-*Exit: a recorded figure, dated, in a form §9's later comparison can read.*
+**C0 — The baseline.** Run `pipeline stats collect` against Catapult to a finished
+backfill, then capture the queries `docs/baselines/README.md` defines into a dated file.
+Nothing else in this list is reversible with respect to it: once a change lands, the
+before-measurement no longer exists.
+
+Two things that document settles, both of which have to be right *before* the number is
+taken rather than after:
+
+- **The artifact is the requests and their responses, not a summary.** §9's comparison
+  happens months later with no memory of which filters were used, and a figure nobody can
+  re-derive is a claim. The store's read side echoes its own exclusions, so committing the
+  response verbatim carries the derivation with it.
+- **The headline is the per-state rows, never `agentTotal`.** That rollup sums three
+  actors this cutover moves independently — agents (C1, C2, C6), CI (C3 and C5 both add
+  time to `checks`), and the author in `design_review`, which nothing here touches. As one
+  number, slower CI and a faster author cancel out and report no change.
+
+*Exit: `docs/baselines/<date>.json`, its watermark showing a complete collection, and the
+per-state and minutes responses stored as returned.*
 
 **C1 — `CHANGE.md`.** The file convention, `.gitattributes` with `merge=ours`, the driver
 line in the agent job, the ticket-key header and its assertion in `pipeline agent
