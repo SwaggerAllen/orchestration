@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 )
 
@@ -57,8 +58,8 @@ func cmdReasons(args []string) error {
 		*root = cfg.Root
 	}
 	var docs []reasons.Index
-	for _, dir := range []string{"systems", "screens"} {
-		ixs, err := reasons.LoadDir(*root, dir)
+	for _, k := range protocol.RecordKinds {
+		ixs, err := reasons.LoadDir(*root, k.Dir)
 		if err != nil {
 			return err
 		}

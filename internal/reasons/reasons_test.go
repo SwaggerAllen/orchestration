@@ -566,3 +566,68 @@ func TestTheCitationGrammarReadsATicketMintedId(t *testing.T) {
 		t.Error("a ticket reference with no counter parsed as a citation")
 	}
 }
+
+// A record directory may be nested, and the split that finds it has to
+// be by the kind table rather than by path shape. Under a split on the
+// first "/", docs/dsl/chain.md reads as directory "docs" — no kind — so
+// every grammar rule a pass touched is dropped and the record review is
+// handed nothing to check the diff against. Silent, and indistinguishable
+// from a pass that touched no rule.
+func TestTouchedIdsFindANestedRecordDirectory(t *testing.T) {
+	base, head := t.TempDir(), t.TempDir()
+	write(t, base, "docs/dsl/chain.md", "## #1 The file\n\n- **#22 Context is the only readiness signal.** Old rule.\n")
+	write(t, base, "docs/dsl/chain.reasons.md", "## #22\n\nOld reason.\n")
+	write(t, head, "docs/dsl/chain.md", "## #1 The file\n\n- **#22 Context is the only readiness signal.** New rule.\n")
+	write(t, head, "docs/dsl/chain.reasons.md", "## #22\n\nNew reason.\n")
+	// A file deeper than the directory's own docs is not a record doc:
+	// docs/dsl/example/chain.yaml is the worked example, not a rule.
+	write(t, head, "docs/dsl/example/README.md", "# not a record doc\n")
+
+	got, err := TouchedIDs(base, head, []string{"docs/dsl/chain.md", "docs/dsl/chain.reasons.md", "docs/dsl/example/README.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, x := range got {
+		ids = append(ids, x.Cite())
+	}
+	if strings.Join(ids, ",") != "chain#22" {
+		t.Fatalf("touched = %v, want chain#22 alone", ids)
+	}
+	if got[0].Dir != "docs/dsl" {
+		t.Errorf("Dir = %q, want docs/dsl", got[0].Dir)
+	}
+}
+
+// A prefixed citation resolves through the kind table. Spelled as the
+// directory minus a trailing "s" — which held while every record
+// directory was its citation prefix pluralised — dsl:chain looks for a
+// directory called "dsls", finds nothing, and reports a correct citation
+// as dangling.
+func TestAPrefixedCitationResolvesAgainstANestedDirectory(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docs/dsl/chain.md", "## #1 The file\n\n- **#22 Context.** Rule.\n")
+	write(t, root, "systems/chain.md", "## #1 Heading\n\n- **#4 Something else.** Rule.\n")
+	docs, err := LoadDir(root, "docs/dsl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sys, err := LoadDir(root, "systems")
+	if err != nil {
+		t.Fatal(err)
+	}
+	docs = append(docs, sys...)
+
+	ix, ok, why := Resolve("dsl", "chain", docs)
+	if !ok || ix.Dir != "docs/dsl" {
+		t.Fatalf("Resolve(dsl, chain) = %+v ok=%v why=%q", ix.Path, ok, why)
+	}
+	// And the bare name is ambiguous across the two, named by real paths.
+	if _, ok, why := Resolve("", "chain", docs); ok || !strings.Contains(why, "docs/dsl/chain.md") || !strings.Contains(why, "write dsl:chain or system:chain") {
+		t.Errorf("bare resolve: ok=%v why=%q", ok, why)
+	}
+	// An unknown prefix says so rather than looking for a directory.
+	if _, ok, why := Resolve("widget", "chain", docs); ok || !strings.Contains(why, "not a record directory's citation prefix") {
+		t.Errorf("unknown prefix: ok=%v why=%q", ok, why)
+	}
+}

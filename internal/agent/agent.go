@@ -135,11 +135,8 @@ type Decisions struct {
 // shown less for no run at all.
 func ClaimDecisions(cfg *config.Config) *Decisions {
 	d := &Decisions{}
-	for _, dir := range []struct{ dir, prefix string }{
-		{"systems", protocol.SystemLabelPrefix},
-		{"screens", protocol.ScreenLabelPrefix},
-	} {
-		docs, bad := decisions.LoadDir(cfg.Root, dir.dir, dir.prefix)
+	for _, k := range protocol.RecordKinds {
+		docs, bad := decisions.LoadDir(cfg.Root, k.Dir, k.LabelPrefix)
 		d.Docs = append(d.Docs, docs...)
 		d.Unreadable = append(d.Unreadable, bad...)
 	}
@@ -650,8 +647,9 @@ func LoadDevOutcome(path string) (*DevOutcome, error) {
 		// Bare names. The prefix is the harness's to add, and a model
 		// that writes "system:foundation" here is describing the same
 		// thing — accepted rather than refused over punctuation.
-		l = strings.TrimPrefix(l, protocol.SystemLabelPrefix)
-		l = strings.TrimPrefix(l, protocol.ScreenLabelPrefix)
+		for _, k := range protocol.RecordKinds {
+			l = strings.TrimPrefix(l, k.LabelPrefix)
+		}
 		o.Labels[i] = l
 	}
 	return &o, nil
@@ -984,13 +982,10 @@ func rerunStaleVerdict(ctx context.Context, h host.Host, res *ClaimResult) strin
 // label, or explains why it will not. The prose is what lands on the
 // ticket, so it is written for the person who reads it there.
 func resolveDiscoveredLabel(root, name string, changed []string) (label, why string) {
-	for _, d := range []struct{ dir, prefix string }{
-		{"systems", protocol.SystemLabelPrefix},
-		{"screens", protocol.ScreenLabelPrefix},
-	} {
-		docs, err := filemap.LoadDir(filepath.Join(root, d.dir))
+	for _, d := range protocol.RecordKinds {
+		docs, err := filemap.LoadDir(filepath.Join(root, filepath.FromSlash(d.Dir)))
 		if err != nil {
-			return "", fmt.Sprintf("`%s` could not be checked: reading %s/ failed (%v).", name, d.dir, err)
+			return "", fmt.Sprintf("`%s` could not be checked: reading %s/ failed (%v).", name, d.Dir, err)
 		}
 		for _, doc := range docs {
 			if doc.Name != name {
@@ -1001,22 +996,22 @@ func resolveDiscoveredLabel(root, name string, changed []string) (label, why str
 				// passes the diff; a run reaching here without one is a
 				// wiring gap, and silently trusting the request would
 				// turn this check into one that checks nothing.
-				return "", fmt.Sprintf("`%s%s` was requested but no changed-file list reached the finish step, so nothing could confirm the diff needs it. Not attached.", d.prefix, name)
+				return "", fmt.Sprintf("`%s%s` was requested but no changed-file list reached the finish step, so nothing could confirm the diff needs it. Not attached.", d.LabelPrefix, name)
 			}
 			for _, path := range changed {
 				for _, g := range doc.Globs {
 					if filemap.Match(g, path) {
-						return d.prefix + name, ""
+						return d.LabelPrefix + name, ""
 					}
 				}
 			}
-			return "", fmt.Sprintf("`%s%s` was requested, but nothing in this diff is mapped by %s/%s.md — a mutex label locks a system for everyone else, so it is not taken on a run that does not touch it.", d.prefix, name, d.dir, name)
+			return "", fmt.Sprintf("`%s%s` was requested, but nothing in this diff is mapped by %s/%s.md — a mutex label locks a system for everyone else, so it is not taken on a run that does not touch it.", d.LabelPrefix, name, d.Dir, name)
 		}
 		if near := nearestDoc(name, docs); near != "" {
-			return "", fmt.Sprintf("`%s` names %s/%s.md, which does not exist — did you mean `%s` (%s/%s.md)?", name, d.dir, name, near, d.dir, near)
+			return "", fmt.Sprintf("`%s` names %s/%s.md, which does not exist — did you mean `%s` (%s/%s.md)?", name, d.Dir, name, near, d.Dir, near)
 		}
 	}
-	return "", fmt.Sprintf("`%s` matches no doc under systems/ or screens/, so there is no file map behind it and no label to take.", name)
+	return "", fmt.Sprintf("`%s` matches no doc under %s, so there is no file map behind it and no label to take.", name, recordDirList())
 }
 
 // flagCollisions is §7's second half: a ticket acquiring a label another
@@ -1267,4 +1262,20 @@ func tail(s string, n int) string {
 		return strings.Join(lines, "\n")
 	}
 	return "(earlier output trimmed)\n" + strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// recordDirList names the record directories for a message a human
+// reads: "systems/, screens/ or docs/dsl/".
+func recordDirList() string {
+	var dirs []string
+	for _, k := range protocol.RecordKinds {
+		dirs = append(dirs, k.Dir+"/")
+	}
+	switch len(dirs) {
+	case 0:
+		return "any record directory"
+	case 1:
+		return dirs[0]
+	}
+	return strings.Join(dirs[:len(dirs)-1], ", ") + " or " + dirs[len(dirs)-1]
 }

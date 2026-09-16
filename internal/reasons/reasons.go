@@ -61,6 +61,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 // Kind is which shape an id-bearing line has.
@@ -437,8 +439,9 @@ func dups(seen map[string][]int) []Dup {
 
 // Index is one doc and its sibling, if any.
 type Index struct {
-	// Dir is "systems" or "screens"; Name the basename — the mutex
-	// label's name half, and the name a citation writes.
+	// Dir is a record directory (protocol.RecordKinds) and may contain a
+	// slash; Name the basename — the mutex label's name half, and the
+	// name a citation writes.
 	Dir, Name string
 	// Path is repo-relative: systems/foundation.md.
 	Path string
@@ -644,10 +647,16 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 	seen := map[key]bool{}
 	for _, p := range changed {
 		p = filepath.ToSlash(strings.TrimSpace(p))
-		dir, file, ok := strings.Cut(p, "/")
-		if !ok || (dir != "systems" && dir != "screens") || strings.Contains(file, "/") || !strings.HasSuffix(file, ".md") {
+		// Split by the record-kind table, not on the first "/": a kind's
+		// directory may be nested (protocol.RecordKindForPath), and a
+		// first-slash split reads docs/dsl/chain.md as directory "docs",
+		// which is no kind, so every grammar rule this pass touched is
+		// dropped and the record review is handed nothing.
+		kind, file, ok := protocol.RecordKindForPath(p)
+		if !ok || strings.Contains(file, "/") || !strings.HasSuffix(file, ".md") {
 			continue
 		}
+		dir := kind.Dir
 		name := strings.TrimSuffix(strings.TrimSuffix(file, ".reasons.md"), ".md")
 		k := key{dir, name}
 		if !seen[k] {

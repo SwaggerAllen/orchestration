@@ -5,7 +5,28 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
+
+// records builds a Records over the real kind table, so a test corpus
+// carries the same Exclusive flags the audit runs against.
+func records(systems, screens, dsl []Doc) Records {
+	var r Records
+	for _, k := range protocol.RecordKinds {
+		var docs []Doc
+		switch k.Dir {
+		case "systems":
+			docs = systems
+		case "screens":
+			docs = screens
+		case "docs/dsl":
+			docs = dsl
+		}
+		r.Kinds = append(r.Kinds, KindDocs{Kind: k, Docs: docs})
+	}
+	return r
+}
 
 func TestParseFrontMatter(t *testing.T) {
 	globs, err := ParseFrontMatter(`---
@@ -81,7 +102,7 @@ func TestAudit(t *testing.T) {
 	}
 
 	// Clean: labels cover the touches.
-	v := Audit(systems, screens,
+	v := Audit(records(systems, screens, nil),
 		[]string{"lib/app/billing/cap.ex", "storybook/cap.story.exs", "lib/unowned/router.ex"},
 		[]string{"system:billing", "screen:cap"})
 	if len(v) != 0 {
@@ -89,7 +110,7 @@ func TestAudit(t *testing.T) {
 	}
 
 	// Missing labels are named specifically.
-	v = Audit(systems, screens,
+	v = Audit(records(systems, screens, nil),
 		[]string{"lib/app/search/index.ex", "lib/app_web/components/cap.ex"},
 		[]string{"system:billing"})
 	if len(v) != 2 {
@@ -101,10 +122,10 @@ func TestAudit(t *testing.T) {
 
 	// Overlapping ownership on a live path.
 	overlap := append(systems, Doc{Name: "billing2", Globs: []string{"lib/app/billing/**"}})
-	v = Audit(overlap, nil, []string{"lib/app/billing/cap.ex"}, []string{"system:billing", "system:billing2"})
+	v = Audit(records(overlap, nil, nil), []string{"lib/app/billing/cap.ex"}, []string{"system:billing", "system:billing2"})
 	found := false
 	for _, s := range v {
-		if strings.Contains(s, "two system docs") {
+		if strings.Contains(s, "two docs under systems/") {
 			found = true
 		}
 	}
@@ -132,6 +153,10 @@ func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
 		{Name: "home", Globs: []string{"lib/web/home/**"}},
 		{Name: "cap", Globs: []string{"storybook/screens/cap/*"}},
 	}
+	dsl := []Doc{
+		{Name: "bundle", Globs: []string{"bundles/**"}},
+		{Name: "chain", Globs: []string{"bundles/*/chain.yaml"}},
+	}
 	corpus := [][]string{
 		nil,
 		{"README.md"},
@@ -139,9 +164,10 @@ func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
 		{"lib/delivery/queue.ex", "config/delivery.exs"},
 		{"lib/web/home/index.ex", "storybook/screens/cap/component.ex", "lib/dsl/parse.ex"},
 		{"lib/engine/a.ex", "lib/engine/b.ex", "mix.exs", "lib/web/home/x.ex"},
+		{"bundles/default/chain.yaml"},
 	}
 	for _, changed := range corpus {
-		want := OwnerLabels(systems, screens, changed)
+		want := OwnerLabels(records(systems, screens, dsl), changed)
 		// What Audit demands, read off an empty label set: every mapped
 		// path with no label is one violation naming that label.
 		var got []string
@@ -155,7 +181,7 @@ func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
 				}
 			}
 			missing := 0
-			for _, v := range Audit(systems, screens, changed, others) {
+			for _, v := range Audit(records(systems, screens, dsl), changed, others) {
 				if strings.Contains(v, l) {
 					missing++
 				}
@@ -170,7 +196,7 @@ func TestOwnerLabelsAgreesWithAudit(t *testing.T) {
 		// Audit must have nothing left to say. Overlap is its only other
 		// finding and no label answers it, so anything else is a label
 		// the audit demands and the release would have taken off.
-		for _, v := range Audit(systems, screens, changed, want) {
+		for _, v := range Audit(records(systems, screens, dsl), changed, want) {
 			if strings.Contains(v, "overlapping ownership") {
 				continue
 			}
@@ -201,5 +227,35 @@ func TestLoadDirSkipsReasonsFiles(t *testing.T) {
 	}
 	if len(docs) != 1 || docs[0].Name != "foundation" {
 		t.Errorf("docs = %+v, want foundation alone", docs)
+	}
+}
+
+// A non-exclusive kind's docs may map one path twice. The grammar
+// contract is the case: bundle.md maps bundles/** and chain.md maps
+// bundles/*/chain.yaml, so every chain file has two owners on purpose.
+// Under the rule as it was written — "no path may be mapped by two
+// system docs", applied to whatever list was passed first — adopting a
+// third directory would have reported that overlap on every PR touching
+// a bundle.
+func TestANonExclusiveKindMayOverlap(t *testing.T) {
+	dsl := []Doc{
+		{Name: "bundle", Globs: []string{"bundles/**"}},
+		{Name: "chain", Globs: []string{"bundles/*/chain.yaml"}},
+	}
+	v := Audit(records(nil, nil, dsl),
+		[]string{"bundles/default/chain.yaml"},
+		[]string{"dsl:bundle", "dsl:chain"})
+	for _, s := range v {
+		if strings.Contains(s, "overlapping ownership") {
+			t.Errorf("overlap flagged on a non-exclusive kind: %v", v)
+		}
+	}
+	// The labels are still each required.
+	v = Audit(records(nil, nil, dsl), []string{"bundles/default/chain.yaml"}, []string{"dsl:bundle"})
+	if len(v) != 1 || !strings.Contains(v[0], "dsl:chain") {
+		t.Errorf("violations = %v, want the missing dsl:chain label", v)
+	}
+	if !strings.Contains(v[0], "docs/dsl/chain.md") {
+		t.Errorf("violation must name the doc by its real path: %s", v[0])
 	}
 }
