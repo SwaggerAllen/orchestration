@@ -195,7 +195,14 @@ newest comment is what the pass rewrites against.
 **The decisionless exception:** a design pass that ends with no screen labels, no artifacts,
 and no diff to any `systems/*.md` — no new system, table, dependency, component or token —
 advances straight to `Ready for dev` (§6), recording its reasoning and touch list in the
-marker comment. Sign-off exists to approve decisions; with none to approve it is a rubber
+marker comment.
+
+**It still writes the sketch** (§4). A decisionless pass read the scope and knows what it
+will touch; what it lacks is a *decision* to approve, not a plan to implement. Exempting it
+would put holes in the spec file's history at exactly the tickets that look ordinary — and
+the rule that a commit changing code without changing the sketch is the author's own
+undesigned work (§2.5) would then misread every decisionless ticket's dev commit as
+theirs. Sign-off exists to approve decisions; with none to approve it is a rubber
 stamp, and rubber stamps train the author to skim the reviews that matter.
 
 **The prerequisite park:** a design pass whose scope depends on something that is not on `main`

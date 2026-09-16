@@ -467,6 +467,13 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 		return p.TransitionTicket(ctx, res.TicketID, protocol.DesignReview, core.RoleDesign)
 
 	case "decisionless":
+		// Held to the sketch exactly as an artifacts pass is (DESIGN §3):
+		// no decision to approve is not no plan to implement, and a pass
+		// exempted here would leave the hole §2.5's out-of-band rule then
+		// misreads as the author's own work.
+		if err := assertChangeSpec(p.Config.Root, res.TicketKey, changed); err != nil {
+			return err
+		}
 		if err := reconcileMutexLabels(ctx, p, res, o, branchFiles); err != nil {
 			return err
 		}

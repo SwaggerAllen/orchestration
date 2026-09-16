@@ -1172,3 +1172,55 @@ func designedSpec(t *testing.T, cfg *config.Config, key string) []string {
 	}
 	return []string{changespec.Name}
 }
+
+// Both outcomes that commit are held to the sketch, and neither was
+// asserted until a probe removed the check and the suite stayed green —
+// the fixtures hand every pass a spec, so nothing exercised the refusal.
+func TestADesignPassThatCommitsNoSpecIsRefused(t *testing.T) {
+	for _, outcome := range []string{"artifacts", "decisionless"} {
+		t.Run(outcome, func(t *testing.T) {
+			ctx := context.Background()
+			tr, h, cfg, p := world(t)
+			i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+			res, err := ClaimDesign(ctx, p, i.Key, "run_1", "u", time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &DesignOutcome{Outcome: outcome, Systems: []string{"caps"}, Summary: "s"}
+			if outcome == "artifacts" {
+				o.Screens = []string{"cap"}
+			}
+			// The pass changed something and it was not the sketch.
+			err = FinishDesign(ctx, p, h, res, o, "", "", []string{"systems/caps.md"}, nil, nil, "")
+			if err == nil {
+				t.Fatalf("%s: a pass with no %s was accepted", outcome, changespec.Name)
+			}
+			if !strings.Contains(err.Error(), changespec.Name) {
+				t.Errorf("%s: the refusal does not name the file: %v", outcome, err)
+			}
+		})
+	}
+}
+
+// The other half: the file is there and names this ticket, but this pass
+// left the previous one's copy in place. It is the failure the first check
+// cannot see, because the file is at the root of every branch and always
+// names somebody.
+func TestADesignPassThatDidNotRewriteTheSpecIsRefused(t *testing.T) {
+	ctx := context.Background()
+	tr, h, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Cap screen", "The argument.", protocol.ReadyForDesign)
+	res, err := ClaimDesign(ctx, p, i.Key, "run_1", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	designedSpec(t, cfg, res.TicketKey) // present, and correctly named
+	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Systems: []string{"caps"}, Summary: "s"}
+	err = FinishDesign(ctx, p, h, res, o, "", "", []string{"screens/cap.md"}, nil, nil, "")
+	if err == nil {
+		t.Fatal("a pass that did not rewrite the spec was accepted")
+	}
+	if !strings.Contains(err.Error(), "did not write it") {
+		t.Errorf("the refusal does not say the pass failed to write it: %v", err)
+	}
+}

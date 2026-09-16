@@ -66,6 +66,12 @@ than a failure signal.
 overwrites it **wholly** with that ticket's spec. It is never deleted and never
 accumulates: one file, one revision per merged change.
 
+**Every design pass that commits, including `decisionless`.** That outcome has no decision
+for the author to approve, which is why it skips sign-off — but it read the scope and it
+has a plan, and DESIGN §3 now says it writes the sketch like any other. Exempting it would
+put holes in the history at exactly the tickets that look ordinary, and §1.4's out-of-band
+predicate would then misread every decisionless ticket's dev commit as the author's.
+
 **What it holds: the sketch.** DESIGN §4's sketch — the structural output of a design
 pass — has no file today. It is a diff against `systems/*.md` plus a touch list carried
 in a marker comment on the ticket. Giving it a file is what makes everything below

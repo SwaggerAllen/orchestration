@@ -296,9 +296,12 @@ last pass got wrong — into `Designing` before you started:
 - `{"outcome": "decisionless", "screens": [], "systems": ["search"], "summary": "..."}`
   — no screens, no artifacts, and no diff to any `systems/*.md`: nothing
   for the author to approve. Still declare the systems you will touch —
-  touching is not deciding, and the labels feed the mutex. Commit
-  nothing. Only say this when it is true — the pass exists to catch
-  screens and unreviewed decisions nobody predicted.
+  touching is not deciding, and the labels feed the mutex. Commit the
+  sketch and nothing else: this pass has no decision to approve, but it
+  has a plan, and a ticket whose spec file is missing is a hole in the
+  record every later pass reads. Only say this when it is true — the
+  pass exists to catch screens and unreviewed decisions nobody
+  predicted.
 - `{"outcome": "prerequisite", "summary": "..."}` — the scope depends on
   something that is not on `main` and is not yours to write, so there is
   nothing to decide yet. The harness parks the ticket in `Blocked` under

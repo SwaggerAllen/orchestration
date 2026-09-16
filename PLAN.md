@@ -269,13 +269,11 @@ Three things building it settled, all of which the decisions doc had wrong or si
 - **`CHANGE.md` has to be in `designOwnedPaths`.** DESIGN §5's ownership audit refuses a
   design pass writing outside them, so the gate rejected the write §4 requires. A value in
   an existing array, so it merges project-side.
-- **`decisionless` is an open question, and it blocks the ledger's completeness.** That
-  outcome commits nothing and goes straight to `Ready for dev`, so such a ticket reaches
-  dev with no spec — and §1.4's predicate, that a commit changing code without changing
-  `CHANGE.md` is the author's out-of-band work, then misfires on every decisionless
-  ticket's dev commit. Either decisionless writes a spec too (and stops being "commit
-  nothing", which DESIGN §3 states with a reason), or the ledger has holes and §1.4 needs
-  rewording. **Not decided here.**
+- **`decisionless` writes the sketch too**, which DESIGN §3 now states. That outcome used
+  to commit nothing, so the ticket reached dev with no spec and §1.4's predicate — a commit
+  changing code without changing `CHANGE.md` is the author's undesigned work — misread
+  every decisionless dev commit as theirs. No decision to approve is not no plan to
+  implement, and the holes would fall on exactly the tickets that look ordinary.
 
 **C2 — The `conflict` flavour.** The six sites `ops-free-pipeline.md` §3.4 enumerates,
 plus DESIGN §8's label table and §12's failure table, written as §2.4's merge-time half
