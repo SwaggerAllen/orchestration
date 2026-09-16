@@ -25,12 +25,13 @@ itself.
 | --- | --- |
 | `screens/*.md` | Per-screen behaviour: rules, standing decisions, the argument. No state lists — those live in the stories. |
 | `systems/*.md` | Per-system architecture. Standing decisions and structure, not an inventory of the code. |
+| `docs/dsl/*.md` | The grammar contract a project's own declaration files are written against, where a project has one. Same shape as the two above: rule ids, a `.reasons.md` sibling, a file map. |
 | `pipeline.config.json` | This repo's binding to the pipeline: tracker ids, gates, deploy and preview targets. |
 | `.github/workflows/pipeline-*.yml` | Pipeline stubs. Thin shells that call the pipeline repo. |
 | `.pipeline/` | The pipeline repo, checked out for this run only. |
 
-Both `screens/*.md` and `systems/*.md` carry a **file map** in front
-matter — the path globs that doc owns:
+Each of those record directories carries a **file map** in front matter
+— the path globs that doc owns:
 
 ```markdown
 ---
@@ -42,8 +43,11 @@ paths:
 
 That map is load-bearing, not documentation. It decides which tickets
 may touch which files at the same time: CI fails a diff that touches a
-**mapped** path whose doc's label the ticket doesn't carry. Paths no map
-claims are **unowned** — deliberate, listed in `systems/README.md`, and
+**mapped** path whose doc's label the ticket doesn't carry — `screen:`,
+`system:` or `dsl:`, one rule for all three. Two docs of *different*
+kinds may map one path and both labels are then required; two `systems/`
+docs mapping one path is an ambiguous mutex and a violation on its own.
+Paths no map claims are **unowned** — deliberate, listed in `systems/README.md`, and
 the audit passes them through, because git's textual conflict detection
 is the mutex there. Unowned is not unaudited-by-accident: name the touch
 in your hand-back. Moving code between systems means moving the path in

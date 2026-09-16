@@ -122,16 +122,38 @@ type DesignOutcome struct {
 	//   design:        "artifacts" | "decisionless" | "prerequisite"
 	//   design-reread: "clear" | "demote"
 	Outcome string `json:"outcome"`
-	// Screens and Systems are the touch lists; the harness turns them
-	// into screen:<name> and system:<name> labels — the mutex is fed
-	// here, and touching is not deciding: a decisionless pass still
-	// declares systems (DESIGN §4, §6).
+	// Screens, Systems and Dsl are the touch lists, one per record
+	// directory; the harness turns them into screen:<name>,
+	// system:<name> and dsl:<name> labels — the mutex is fed here, and
+	// touching is not deciding: a decisionless pass still declares
+	// systems (DESIGN §4, §6).
+	//
+	// Written out rather than a map keyed by directory, because this is
+	// a wire format a model fills in: a field a prompt can name is a
+	// field a pass either wrote or did not, and an absent key in a map
+	// is indistinguishable from a kind the model has never heard of.
 	Screens []string `json:"screens"`
 	Systems []string `json:"systems"`
+	Dsl     []string `json:"dsl"`
 	// Summary is the argument for what was done or decided. Required for
 	// everything but a plain artifacts pass, where it is still posted
 	// when present.
 	Summary string `json:"summary"`
+}
+
+// Touched is the touch list for one record kind. A kind with no field
+// here declares nothing, which is what a project that has not adopted
+// the directory should see: no label, no refusal.
+func (o *DesignOutcome) Touched(k protocol.RecordKind) []string {
+	switch k.Dir {
+	case "screens":
+		return o.Screens
+	case "systems":
+		return o.Systems
+	case "docs/dsl":
+		return o.Dsl
+	}
+	return nil
 }
 
 // LoadDesignOutcome reads and validates the outcome for the given mode.
@@ -531,24 +553,20 @@ func FinishDesign(ctx context.Context, p *plane.Plane, h host.Host, res *ClaimRe
 // and for the same reason. Nothing is released without it: a wiring gap
 // must not read as permission.
 //
-// Only screen: and system: labels are considered. Every other label on
-// the ticket belongs to somebody else — the author, the sweep, the
-// boundary — and a design pass has no business with them.
+// Only mutex labels are considered. Every other label on the ticket
+// belongs to somebody else — the author, the sweep, the boundary — and a
+// design pass has no business with them.
 func reconcileMutexLabels(ctx context.Context, p *plane.Plane, res *ClaimResult, o *DesignOutcome, branchFiles []string) error {
 	if err := verifyDeclaredDocs(p.Config.Root, o); err != nil {
 		return err
 	}
 	declared := map[string]bool{}
-	for _, s := range o.Screens {
-		declared[protocol.ScreenLabelPrefix+s] = true
-		if err := p.EnsureMutexLabel(ctx, res.TicketID, protocol.ScreenLabelPrefix+s); err != nil {
-			return err
-		}
-	}
-	for _, s := range o.Systems {
-		declared[protocol.SystemLabelPrefix+s] = true
-		if err := p.EnsureMutexLabel(ctx, res.TicketID, protocol.SystemLabelPrefix+s); err != nil {
-			return err
+	for _, k := range protocol.RecordKinds {
+		for _, s := range o.Touched(k) {
+			declared[k.LabelPrefix+s] = true
+			if err := p.EnsureMutexLabel(ctx, res.TicketID, k.LabelPrefix+s); err != nil {
+				return err
+			}
 		}
 	}
 	stale := staleMutexLabels(res.Labels, declared)
@@ -597,7 +615,7 @@ func reconcileMutexLabels(ctx context.Context, p *plane.Plane, res *ClaimResult,
 func staleMutexLabels(held []string, declared map[string]bool) []string {
 	var out []string
 	for _, l := range held {
-		if !strings.HasPrefix(l, protocol.ScreenLabelPrefix) && !strings.HasPrefix(l, protocol.SystemLabelPrefix) {
+		if !protocol.IsMutexLabel(l) {
 			continue
 		}
 		if declared[l] {
@@ -610,16 +628,12 @@ func staleMutexLabels(held []string, declared map[string]bool) []string {
 
 // requiredMutexLabels is what CI would demand of this branch's diff.
 func requiredMutexLabels(root string, branchFiles []string) (map[string]bool, error) {
-	systems, err := filemap.LoadDir(filepath.Join(root, "systems"))
+	records, err := filemap.LoadRecords(root)
 	if err != nil {
-		return nil, fmt.Errorf("design finish: reading systems/: %w", err)
-	}
-	screens, err := filemap.LoadDir(filepath.Join(root, "screens"))
-	if err != nil {
-		return nil, fmt.Errorf("design finish: reading screens/: %w", err)
+		return nil, fmt.Errorf("design finish: %w", err)
 	}
 	out := map[string]bool{}
-	for _, l := range filemap.OwnerLabels(systems, screens, branchFiles) {
+	for _, l := range filemap.OwnerLabels(records, branchFiles) {
 		out[l] = true
 	}
 	return out, nil
@@ -662,7 +676,7 @@ func verifyDeclaredDocs(root string, o *DesignOutcome) error {
 		if len(declared) == 0 {
 			return nil
 		}
-		docs, err := filemap.LoadDir(filepath.Join(root, dir))
+		docs, err := filemap.LoadDir(filepath.Join(root, filepath.FromSlash(dir)))
 		if err != nil {
 			return fmt.Errorf("design finish: reading %s/: %w", dir, err)
 		}
@@ -688,11 +702,10 @@ func verifyDeclaredDocs(root string, o *DesignOutcome) error {
 		}
 		return nil
 	}
-	if err := check("screens", protocol.ScreenLabelPrefix, o.Screens); err != nil {
-		return err
-	}
-	if err := check("systems", protocol.SystemLabelPrefix, o.Systems); err != nil {
-		return err
+	for _, k := range protocol.RecordKinds {
+		if err := check(k.Dir, k.LabelPrefix, o.Touched(k)); err != nil {
+			return err
+		}
 	}
 	if len(problems) == 0 {
 		return nil

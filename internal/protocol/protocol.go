@@ -5,6 +5,8 @@
 // renaming a state is a config edit rather than a code change.
 package protocol
 
+import "strings"
+
 // State is a canonical pipeline state.
 type State string
 
@@ -168,13 +170,101 @@ var Labels = []string{
 	"milestone-boundary",
 }
 
-// ScreenLabelPrefix and SystemLabelPrefix mark the two kinds of mutex
-// label (DESIGN §6): screens cover design artifacts, systems cover the
-// structural units the sketch declares. One mutex rule spans both.
+// The mutex label prefixes, one per record directory (DESIGN §6):
+// screens cover design artifacts, systems the structural units the
+// sketch declares, dsl the grammar contract a project's bundles are
+// written against. One mutex rule spans all of them.
 const (
 	ScreenLabelPrefix = "screen:"
 	SystemLabelPrefix = "system:"
+	DslLabelPrefix    = "dsl:"
 )
+
+// RecordKind is one directory of record documents (DESIGN §4): docs a
+// design pass writes, each carrying rule ids, a reasons sibling and a
+// file map in its front matter, each claimed by a mutex label.
+//
+// Three fields that used to be derived from the directory name, and
+// each derivation broke on the first kind whose name did not fit the
+// pun:
+//
+//   - Cite was Dir minus a trailing "s" (systems -> system). "docs/dsl"
+//     has no such form.
+//   - Dir was assumed to be a single path segment, so a changed path
+//     was split on its first "/" to find it. Under that split every doc
+//     in a nested directory is silently not a record doc — the check
+//     passes by looking where the answer cannot be.
+//   - Exclusive says a path may have at most one owner in this kind, so
+//     that the mutex it feeds is unambiguous. It is true of systems and
+//     was written as "no two *system* docs", with screens exempt because
+//     a screen and a system describe the same path from two sides. dsl
+//     is exempt for a nearer reason: its docs are the grammar of one
+//     file set, and bundle.md, chain.md and workflow.md map overlapping
+//     parts of bundles/** by construction.
+type RecordKind struct {
+	Dir         string
+	Cite        string
+	LabelPrefix string
+	Exclusive   bool
+}
+
+// RecordKinds is the canonical list. A project missing one of these
+// directories simply has no docs of that kind: every loader treats a
+// missing directory as no docs, so a project that has not written a
+// grammar contract is not failed over one.
+var RecordKinds = []RecordKind{
+	{Dir: "systems", Cite: "system", LabelPrefix: SystemLabelPrefix, Exclusive: true},
+	{Dir: "screens", Cite: "screen", LabelPrefix: ScreenLabelPrefix},
+	{Dir: "docs/dsl", Cite: "dsl", LabelPrefix: DslLabelPrefix},
+}
+
+// RecordKindByCite finds the kind a citation prefix names ("system").
+func RecordKindByCite(cite string) (RecordKind, bool) {
+	for _, k := range RecordKinds {
+		if k.Cite == cite {
+			return k, true
+		}
+	}
+	return RecordKind{}, false
+}
+
+// RecordKindByDir finds the kind a directory names ("docs/dsl").
+func RecordKindByDir(dir string) (RecordKind, bool) {
+	for _, k := range RecordKinds {
+		if k.Dir == dir {
+			return k, true
+		}
+	}
+	return RecordKind{}, false
+}
+
+// RecordKindForPath splits a repo-relative path into the record kind
+// holding it and the rest of the path. The longest matching Dir wins, so
+// a kind nested inside another's directory resolves to the nested one
+// rather than to whichever is listed first.
+func RecordKindForPath(p string) (kind RecordKind, rest string, ok bool) {
+	for _, k := range RecordKinds {
+		if !strings.HasPrefix(p, k.Dir+"/") {
+			continue
+		}
+		if ok && len(k.Dir) <= len(kind.Dir) {
+			continue
+		}
+		kind, rest, ok = k, p[len(k.Dir)+1:], true
+	}
+	return kind, rest, ok
+}
+
+// IsMutexLabel reports whether a label is one of the mutex labels — any
+// kind's, since one mutex rule spans them all (DESIGN §6).
+func IsMutexLabel(l string) bool {
+	for _, k := range RecordKinds {
+		if len(l) > len(k.LabelPrefix) && strings.HasPrefix(l, k.LabelPrefix) {
+			return true
+		}
+	}
+	return false
+}
 
 // AuthorOnlyPaths are the paths no agent can land a change to, whatever
 // the ticket says. A ticket whose work is in one of them carries the

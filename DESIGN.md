@@ -492,6 +492,27 @@ sibling is a sibling by convention, and `systems/*.md` already matches
 so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
 author-owned moves ahead of this.
 
+**Three record directories, not two, and the list is protocol.** `systems/`, `screens/` and
+`docs/dsl/` hold record docs — the same shape throughout: rule ids, a `.reasons.md` sibling, a
+file map, a mutex label prefix (`system:`, `screen:`, `dsl:`). `docs/dsl/` is the grammar
+contract a project's own declaration files are written against, where the project has one; a
+project without it simply has no docs of that kind, and every loader reads a missing directory
+as no docs rather than as an error. The set is `protocol.RecordKinds` and not a config field,
+for the reason the other protocol vocabulary is not one: a directory the pipeline mints labels
+for and resolves citations against is not a project's to invent.
+
+Three things about a kind were derived from its directory name until a nested directory made
+each derivation wrong, and each failed by passing rather than by erroring. The citation prefix
+was the directory minus a trailing `s`, so `dsl:chain` looked for `dsls/chain.md` and reported
+a correct citation as dangling. The directory was assumed to be one path segment, so a changed
+path was split on its first `/` — under which `docs/dsl/chain.md` has directory `docs`, which is
+no kind, and every rule the pass touched is dropped before the record review sees it. And
+exclusive ownership — no two docs of one kind mapping one path — was written as a rule about
+*systems* and applied to whichever list was passed first; it is a property of the kind, true of
+`systems/` and false of the other two, since a screen and a system describe one path from two
+sides and a grammar contract's docs map overlapping parts of one file set by construction. Two
+docs of *different* kinds mapping one path is not overlap at all: both labels are required.
+
 **Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
 keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
 it names (the file, the function, the shape), the predicate for when it applies, and the one
@@ -550,8 +571,8 @@ selected by the diff and not by the ticket: a touched rule's entry is the record
 about that rule, the removed side of the diff one file over, and it carries nothing the pass wrote
 about its ticket. Without it a rule rewritten against its own reason is invisible from the diff —
 the reason is in a file the diff did not touch, which is the whole point of the split. Which ids
-were touched is read off two trees rather than off the diff: the action exports `systems/` and
-`screens/` as they stood at the commit the pass started from, and the harness compares each id's
+were touched is read off two trees rather than off the diff: the action exports every record
+directory as it stood at the commit the pass started from, and the harness compares each id's
 block — the rule line and every line up to the next id — between that tree and the checkout. The
 pass's start commit rather than the merge-base, because the diff under review is `start..HEAD`,
 and on a second pass after a decline the first pass may already have amended an entry; diffing
@@ -651,8 +672,8 @@ document stops at `§7.12`.
 
 **A rule is cited by its id, never by its wording.** `foundation#17` names rule #17 of
 `systems/foundation.md` from anywhere in the tree — a test name, a code comment, another doc —
-`generation#ORC-247-2` names a ticket-minted one the same way, and `system:foundation#17` or
-`screen:board#2` when a name is both a system and a screen doc. `generation#ORC-247` is a
+`generation#ORC-247-2` names a ticket-minted one the same way, and `system:foundation#17`,
+`screen:board#2` or `dsl:chain#22` when one name is carried by more than one record directory. `generation#ORC-247` is a
 ticket reference, not a citation: the grammar needs the counter.
 The name is the doc's basename, the mutex label's name half, so nothing has to be declared for a
 citation to resolve. It resolves when the id is a rule line in the doc or an entry in its
@@ -785,6 +806,7 @@ non-asks don't mention it" is a conclusion the pass had no grounds for.
 | Presentational component modules | Design |
 | `screens/*.md` | Design |
 | `systems/*.md` | Design (the sketch writes them; dev amends with a note, §4) |
+| `docs/dsl/**` | Design (§4's third record directory, where a project has one) |
 | Theme tokens | Design (by proposal; see §9) |
 | LiveViews, contexts, schemas, tests, everything else | Dev |
 | `.github/workflows/**` | **Author only** — no agent can land a change there |
@@ -883,10 +905,11 @@ Consequences:
 
 Three mechanisms, each covering what the others can't.
 
-**Mutex labels are a file-level mutex.** Two kinds, one rule: *no two in-flight tickets may
-share a `screen:<name>` or `system:<name>` label.* Screen labels cover design artifacts, which
-are per-screen files; system labels cover the structural units the sketch declares — for a
-Phoenix app, contexts — each mapped to its paths by its own doc's file map (§4). Enforced at
+**Mutex labels are a file-level mutex.** One per record directory (§4), one rule: *no two
+in-flight tickets may share a `screen:<name>`, `system:<name>` or `dsl:<name>` label.* Screen
+labels cover design artifacts, which are per-screen files; system labels cover the structural
+units the sketch declares — for a Phoenix app, contexts; dsl labels cover the grammar contract's
+own docs. Each is mapped to its paths by its own doc's file map (§4). Enforced at
 promotion into `Ready for dev`: a ticket whose mutex label is already in flight does not
 promote. This prevents most collisions rather than detecting them. The declaration is
 trustworthy for the same reason in both cases: design *creates* the screen files, and the
@@ -1154,7 +1177,8 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `bug` | Defect: something that does not do what it says, as against `tech-debt`'s shape of the code. Runs the normal pipeline; `Urgent` is what makes it preempt. Filed by the author, or proposed by the boundary (§10). |
 | `design-inbox` | Provenance: this came from the design agent, or from a boundary proposal of kind `design` (§13). The question you'll want answered later when something looks odd. |
 | `screen:<name>` | The design half of the mutex (§6). |
-| `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
+| `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths by the doc's own file map. |
+| `dsl:<name>` | The grammar-contract half of the mutex (§6), for a project carrying `docs/dsl/` (§4). |
 | `re-evaluate` | Unresolved collision (§7). |
 | `needs-review` | Reconciliation couldn't tell — the `cannot-tell` verdict (§11, §13). Deployed, clean, awaiting the author's eye. |
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
@@ -1410,9 +1434,11 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   whose those paths were. `git log --author` splits them: the two agents commit under
   `pipeline-design-agent` and `pipeline-dev-agent`. Given no such list, the audit says it
   skipped the check rather than reporting a clean run it did not make.
-- no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
-  and an ambiguous mutex is two tickets in the same files with a green build
-- `screens/*.md` and `systems/*.md` contain no state sections and no code inventory — the doc
+- no path may appear in two file maps *of one exclusively-owning kind* — overlapping ownership
+  is an ambiguous mutex, and an ambiguous mutex is two tickets in the same files with a green
+  build. `systems/` owns exclusively; `screens/` and `docs/dsl/` do not (§4), and a path mapped
+  by two kinds requires both labels rather than being a violation
+- every record doc (§4) contains no state sections and no code inventory — the doc
   lint, enforced on the docs as they stand rather than on the diff, since a doc that has held a
   banned section since before this ticket is still holding it. It catches both rules in their
   **sectioned** form: a `## States`-style heading, a `## Modules`-style one. Prose is not

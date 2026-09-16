@@ -277,11 +277,12 @@ never committed.
   your summary and not into `non-asks.md`. The non-asks file records
   what the author does not want built; a harness finding records what
   the machine got wrong. Mixing them buries both.
-- **Declare every screen and system you touched.** Your outcome's
-  `screens` and `systems` lists become the mutex labels (DESIGN §6), and
-  CI audits the eventual diff against the docs' file maps — a touch you
+- **Declare every record doc you touched.** Your outcome's `screens`,
+  `systems` and `dsl` lists become the mutex labels (DESIGN §6), and CI
+  audits the eventual diff against the docs' file maps — a touch you
   didn't declare is a collision nobody can prevent and a build that will
-  fail.
+  fail. `dsl` names a doc under `docs/dsl/` and is empty in a project
+  that has no grammar contract.
 
 ## Outcomes (write JSON to the outcome path under Mechanics)
 
@@ -289,11 +290,11 @@ Mode `design` — a normal pass. The harness claimed this ticket out of
 `Ready for design` — or `Ready for redesign`, after a record-review
 decline or a demote, in which case the newest comment names what the
 last pass got wrong — into `Designing` before you started:
-- `{"outcome": "artifacts", "screens": ["home"], "systems": ["billing"], "summary": "..."}`
+- `{"outcome": "artifacts", "screens": ["home"], "systems": ["billing"], "dsl": [], "summary": "..."}`
   — you produced artifacts and/or a systems-doc diff; commit them. The
   harness opens the draft PR and hands the ticket to the author, who
   reviews the storybook export and the doc diff in one sign-off.
-- `{"outcome": "decisionless", "screens": [], "systems": ["search"], "summary": "..."}`
+- `{"outcome": "decisionless", "screens": [], "systems": ["search"], "dsl": [], "summary": "..."}`
   — no screens, no artifacts, and no diff to any `systems/*.md`: nothing
   for the author to approve. Still declare the systems you will touch —
   touching is not deciding, and the labels feed the mutex. Commit

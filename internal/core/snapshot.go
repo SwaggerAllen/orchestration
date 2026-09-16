@@ -278,12 +278,12 @@ func (t *Ticket) Unmanaged() bool {
 	return t.HasLabel(LabelAuthorOnly) || t.HasLabel(LabelResync)
 }
 
-// MutexLabels returns the ticket's mutex labels — screen: and system:
-// alike, one rule for both kinds (DESIGN §6).
+// MutexLabels returns the ticket's mutex labels — every record kind's
+// alike, one rule spanning all of them (DESIGN §6).
 func (t *Ticket) MutexLabels() []string {
 	var out []string
 	for _, l := range t.Labels {
-		if hasPrefix(l, protocol.ScreenLabelPrefix) || hasPrefix(l, protocol.SystemLabelPrefix) {
+		if protocol.IsMutexLabel(l) {
 			out = append(out, l)
 		}
 	}

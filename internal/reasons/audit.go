@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 // Audit holds one ported doc to the index's invariants (DESIGN §9): every
@@ -109,11 +111,26 @@ func (p CiteProblem) String() string {
 // prefix when given. It answers in one of four ways: the doc (ok), an
 // unknown name (not a citation — nil, ok false, why empty), or a reason
 // it cannot be resolved (why set): the prefixed dir has no such doc, or
-// the bare name is both a system and a screen.
+// the bare name is carried by more than one record directory.
+//
+// The prefix is looked up in protocol.RecordKinds rather than spelled as
+// the directory minus a trailing "s". That derivation held for exactly
+// as long as every record directory was a plural of its own citation
+// prefix, and "docs/dsl" is not: under it, dsl:chain resolved against a
+// directory named "dsls" that no project has, so every prefixed
+// citation of a grammar rule read as dangling.
 func Resolve(prefix, name string, docs []Index) (ix Index, ok bool, why string) {
+	wantDir := ""
+	if prefix != "" {
+		kind, known := protocol.RecordKindByCite(prefix)
+		if !known {
+			return Index{}, false, fmt.Sprintf("names %s:%s, and %q is not a record directory's citation prefix", prefix, name, prefix)
+		}
+		wantDir = kind.Dir
+	}
 	var found []Index
 	for _, d := range docs {
-		if d.Name == name && d.Ported() && (prefix == "" || d.Dir == prefix+"s") {
+		if d.Name == name && d.Ported() && (wantDir == "" || d.Dir == wantDir) {
 			found = append(found, d)
 		}
 	}
@@ -121,9 +138,20 @@ func Resolve(prefix, name string, docs []Index) (ix Index, ok bool, why string) 
 	case len(found) == 1:
 		return found[0], true, ""
 	case len(found) > 1:
-		return Index{}, false, fmt.Sprintf("is ambiguous: %s is both systems/%s.md and screens/%s.md — write system:%s or screen:%s", name, name, name, name, name)
+		var where, write []string
+		for _, d := range found {
+			where = append(where, d.Path)
+			if k, known := protocol.RecordKindByDir(d.Dir); known {
+				write = append(write, k.Cite+":"+name)
+			}
+		}
+		lead := "is "
+		if len(where) == 2 {
+			lead = "is both "
+		}
+		return Index{}, false, fmt.Sprintf("is ambiguous: %s %s%s — write %s", name, lead, joinWords(where, "and"), joinWords(write, "or"))
 	case prefix != "":
-		return Index{}, false, fmt.Sprintf("names %s:%s, and there is no ported %ss/%s.md", prefix, name, prefix, name)
+		return Index{}, false, fmt.Sprintf("names %s:%s, and there is no ported %s/%s.md", prefix, name, wantDir, name)
 	}
 	return Index{}, false, ""
 }
@@ -172,4 +200,16 @@ func SweepCitations(root string, paths []string, docs []Index) ([]CiteProblem, e
 		return out[i].Line < out[j].Line
 	})
 	return out, nil
+}
+
+// joinWords renders a list the way a sentence reads: "a and b", or
+// "a, b and c".
+func joinWords(in []string, conj string) string {
+	switch len(in) {
+	case 0:
+		return ""
+	case 1:
+		return in[0]
+	}
+	return strings.Join(in[:len(in)-1], ", ") + " " + conj + " " + in[len(in)-1]
 }
