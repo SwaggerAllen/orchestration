@@ -27,27 +27,33 @@ type Parked struct {
 // The predicate is mechanical rather than a judgement, and that is the
 // point. §2.4's rule — the repo moved, both changes touch the same
 // behaviour, the repo wins and the ticket stops — needs a floor that does
-// not depend on the model having a careful day, and "does this hunk name
-// a recorded decision" is answerable by grep where "is this conflict
-// important" is not.
+// not depend on the model having a careful day, and "are these two sides
+// arguing about the same recorded rule" is answerable by grep where "is
+// this conflict important" is not.
 //
-// Two ways to park, and they are different mistakes:
+// **Same rule, not any rule**, and the distinction is the whole of it. A
+// rule id carries the ticket that minted it (`ORC-247-2`), precisely so
+// two design passes working one doc from the same main cannot collide —
+// `internal/reasons` records ORC-246 and ORC-247 both minting
+// `generation#52` as the incident that produced the scheme. So two sides
+// naming *different* ids are two additions that landed in the same place,
+// and keeping both is the resolution. Parking those would park the case
+// ticket-scoped ids exist to make safe.
 //
-//   - a `.reasons.md` sibling, where every line is a recorded rationale;
-//   - a conflicted *region* naming a rule id, anywhere in either side.
+// Three cases, and each names a different situation:
 //
-// Regions rather than whole files, because a systems doc carries rule ids
-// throughout and parking on the file would park every conflict in every
-// such doc — which is the label mutex's blast radius arriving by another
-// route.
+//  1. the sides name a rule in common — they are editing one recorded
+//     decision, and choosing between them is the author's;
+//  2. neither side names a rule, but the conflict sits inside a section
+//     that has one — both are rewriting that rule's prose, which is the
+//     same dispute arriving without the id in the hunk. This is the case
+//     a `.reasons.md` entry almost always is;
+//  3. otherwise — each side introduced its own id, or no rule is in
+//     play. The pass may attempt it.
 func Triage(cs []Conflict) (park []Parked, attempt []string) {
 	for _, c := range cs {
-		if reasons.IsReasonsFile(c.Path) {
-			park = append(park, Parked{c.Path, "a reasons sibling: every line in it is a recorded rationale, and choosing a side is choosing between two of them"})
-			continue
-		}
-		if ids := conflictedIDs(c.Body); len(ids) > 0 {
-			park = append(park, Parked{c.Path, fmt.Sprintf("the conflicting hunks name %s — resolving means choosing between two recorded decisions, which is the author's (DESIGN §2.4)", strings.Join(ids, ", "))})
+		if why, parked := disputed(c.Body); parked {
+			park = append(park, Parked{c.Path, why})
 			continue
 		}
 		attempt = append(attempt, c.Path)
@@ -57,37 +63,109 @@ func Triage(cs []Conflict) (park []Parked, attempt []string) {
 	return park, attempt
 }
 
-// conflictedIDs returns the rule ids named inside conflicted regions,
-// deduplicated and ordered.
+// region is one conflicted span: the ids each side names, and the id of
+// the section it falls inside.
+type region struct {
+	ours, theirs []string
+	enclosing    string
+}
+
+// disputed reports whether any conflicted region is an argument about one
+// recorded rule, and says which.
+func disputed(body string) (string, bool) {
+	for _, r := range regionsOf(body) {
+		if both := intersect(r.ours, r.theirs); len(both) > 0 {
+			return fmt.Sprintf("both sides change %s — resolving means choosing between two recorded decisions, which is the author's (DESIGN §2.4)", strings.Join(quoteAll(both), ", ")), true
+		}
+		if len(r.ours) == 0 && len(r.theirs) == 0 && r.enclosing != "" {
+			return fmt.Sprintf("the conflict is inside `%s` and neither side adds a rule of its own, so both are rewriting that one's prose (DESIGN §2.4)", r.enclosing), true
+		}
+	}
+	return "", false
+}
+
+// regionsOf parses the conflict markers git wrote.
 //
-// Only between the markers: text outside them merged cleanly and is not
-// what the pass would be deciding.
-func conflictedIDs(body string) []string {
-	seen := map[string]bool{}
-	var out []string
-	inside := false
+// The enclosing id is the nearest heading with an id *above* the region
+// and outside every region — the section both sides are editing within.
+func regionsOf(body string) []region {
+	var out []region
+	var cur *region
+	side := 0 // 1 = ours, 2 = theirs
+	enclosing := ""
 	for _, line := range strings.Split(body, "\n") {
 		switch {
 		case strings.HasPrefix(line, "<<<<<<<"):
-			inside = true
+			cur = &region{enclosing: enclosing}
+			side = 1
+			continue
+		case strings.HasPrefix(line, "|||||||"):
+			// The base section of a diff3 merge. Not a side: it is what
+			// both diverged from, so a rule named only there is not one
+			// either side is asserting.
+			side = 0
+			continue
+		case strings.HasPrefix(line, "======="):
+			side = 2
 			continue
 		case strings.HasPrefix(line, ">>>>>>>"):
-			inside = false
-			continue
-		case strings.HasPrefix(line, "======="), strings.HasPrefix(line, "|||||||"):
-			// The separator and the base section's header. The base side
-			// counts: a hunk is about a rule if any side names it.
-			continue
-		}
-		if !inside || !reasons.MentionsRuleID(line) {
+			if cur != nil {
+				out = append(out, *cur)
+			}
+			cur, side = nil, 0
 			continue
 		}
-		if t := strings.TrimSpace(line); !seen[t] {
-			seen[t] = true
-			out = append(out, "`"+firstRuleID(t)+"`")
+		if cur == nil {
+			if isHeading(line) && reasons.MentionsRuleID(line) {
+				enclosing = firstRuleID(strings.TrimSpace(line))
+			}
+			continue
+		}
+		if !reasons.MentionsRuleID(line) {
+			continue
+		}
+		id := firstRuleID(strings.TrimSpace(line))
+		switch side {
+		case 1:
+			cur.ours = appendUnique(cur.ours, id)
+		case 2:
+			cur.theirs = appendUnique(cur.theirs, id)
+		}
+	}
+	return out
+}
+
+func isHeading(line string) bool { return strings.HasPrefix(strings.TrimSpace(line), "#") }
+
+func appendUnique(xs []string, x string) []string {
+	for _, e := range xs {
+		if e == x {
+			return xs
+		}
+	}
+	return append(xs, x)
+}
+
+func intersect(a, b []string) []string {
+	in := map[string]bool{}
+	for _, x := range a {
+		in[x] = true
+	}
+	var out []string
+	for _, y := range b {
+		if in[y] {
+			out = appendUnique(out, y)
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+func quoteAll(xs []string) []string {
+	out := make([]string, len(xs))
+	for i, x := range xs {
+		out[i] = "`" + x + "`"
+	}
 	return out
 }
 

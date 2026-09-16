@@ -151,16 +151,25 @@ CI went green on. A merge that conflicts parks under §3's `conflict`, which is 
 landed together: a flavour with nothing to fire on is the `Reserve`/`Release` shape CLAUDE.md
 records, and so is a driver with no merge.
 
-**The pass gets the simple ones.** The triage in `internal/agent` splits a merge's
-conflicts mechanically: a `.reasons.md` sibling, or a conflicted *region* naming a rule id,
-parks for the author; everything else is left in the tree with the report in the prompt, and
-the pass resolves it **only if it can restate both sides in one sentence** in its hand-back.
-Failing that it reports the `conflict` outcome and the ticket parks anyway.
+**The pass gets the simple ones, and the predicate is "the same rule", not "any rule".** A
+rule id carries the ticket that minted it (`ORC-247-2`) precisely so two design passes
+working one doc from the same main cannot collide — `internal/reasons` records ORC-246 and
+ORC-247 both minting `generation#52` as the incident that produced the scheme. So two sides
+naming **different** ids are two additions that landed in the same place, and keeping both
+is the resolution. Parking those would park the case ticket-scoped ids exist to make safe.
 
-Regions rather than whole files, and that is the load-bearing part: a systems doc carries
-rule ids throughout, so parking on the file would park every conflict in every such doc —
-the label mutex's blast radius arriving by another route, in the mechanism built to retire
-it.
+`internal/agent.Triage` parks on three readings of a conflicted region:
+
+1. the sides name a rule **in common** — one recorded decision, two answers;
+2. neither side names a rule but the region sits **inside a section that has one** — both
+   rewriting that rule's prose, the same dispute arriving without the id in the hunk;
+3. otherwise the pass may attempt it, and resolves **only if it can restate both sides in
+   one sentence** in its hand-back. Failing that it reports the `conflict` outcome and the
+   ticket parks anyway.
+
+A `.reasons.md` sibling needs no special case: two tickets appending their own entries is
+(3), and both amending one entry's body is (2), because the entry's `## #id` heading is the
+enclosing section.
 
 **Probed, including the control run without the driver:**
 
