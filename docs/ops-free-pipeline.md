@@ -12,9 +12,10 @@ violates reasonably.
 
 **Scope.** Catapult is out of scope as a *feature* target — nothing here builds Catapult
 functionality. Two things about delivering it are in scope and land with these changes:
-per-PR preview environments for pull requests into Catapult (§7), and the AI-driven
-manual test gate they exist to carry (§8). What stays out is per-PR environments for the
-projects Catapult *produces*, which belong to the hosted tier (§7).
+Catapult's deployment moves wholly to Render, which is what makes per-PR previews
+possible (§7), and the AI-driven manual test gate those previews carry (§8). What stays
+out is per-PR environments for the projects Catapult *produces*, which belong to the
+hosted tier (§7).
 
 ---
 
@@ -39,12 +40,23 @@ ticket marked `Duplicate` taking every sweep down for two hours (DESIGN §3), th
 ninety-minute window adding `ready_for_design` (CLAUDE.md), `citationShorthands`
 failing Catapult's whole audit with `json: unknown field` (CLAUDE.md).
 
-**The number is a motivation, not a target.** Nobody has measured how much of the
-25,092 a composed pipeline would actually delete, and an estimate here would be exactly
-the invented threshold this repo's CLAUDE.md warns about. What §9 gives instead is a
-falsifiable check to apply once something is built, and §11 gives the package-by-package
-accounting of where the lines would go — with each row's status, since several are
-proposals this conversation never ruled on.
+**The number is a motivation, not a target**, and it turned out to motivate something
+smaller than it first appeared to.
+
+The ratio suggested most of the machinery could be composed away. Working the accounting
+package by package (§11) did not support that. Linear stays the state machine because a
+tracker that does not hold state gives the pipeline two answers to *where is this ticket*
+(§11.1). The adapters stay because the control plane is a program whose decisions must be
+reproducible, and MCP is for the questions an agent asks rather than the decisions the
+plane makes (§11.4). Stats stays because it is the only instrument that measures whether
+any of this worked (§11.5). What is left as a genuine replacement is the run harness, and
+what is left as a genuine relocation is the gate set — everything else is kept, moved, or
+still undecided.
+
+**So the honest framing is not "compose the pipeline away" but "a set of targeted
+changes to it."** The blank-slate reading is dead, and §9's check was rewritten once it
+became clear that a `DESIGN.md` which did not shrink is now the *expected* outcome rather
+than a failure signal.
 
 ---
 
@@ -305,14 +317,15 @@ holds. Deploy it trigger-less and drive it by webhook.
 
 ---
 
-## 7. Per-PR environments for Catapult's own PRs
+## 7. Catapult moves to Render, entirely
 
-**Decision.** Render preview environments for PRs into the Catapult repository, landing
-as part of these changes. A running Catapult per PR is what the §8 gate drives; without
-it there is nothing for a manual test to act on.
+**Decision.** Catapult's production deployment moves off DigitalOcean App Platform to
+Render, and Render's preview environments carry per-PR instances for the §8 gate. One
+deployment setup, not two — a preview that differs from production is a gate measuring
+something other than what ships, and two platforms is two build paths to keep true.
 
 **The scope boundary, stated because it is the one most easily widened:** this covers
-**PRs into Catapult**. It does **not** cover per-PR environments for the projects
+**Catapult's own repository**. It does **not** cover per-PR environments for the projects
 Catapult *produces*. Those are the hosted tier — many tenants, customer content, cost
 control — and they are a product decision about Catapult's runtime rather than a CI
 decision about our own pull requests.
@@ -320,27 +333,84 @@ decision about our own pull requests.
 **Kubernetes belongs to that second question and to no part of this one.** The expensive
 part of a CI preview is the data — Postgres, EventStore and Oban provisioned, migrated
 and seeded — and a cluster supplies pods cheaply while doing nothing about that.
-Conflating the hosted tier with our own CI is how the cluster arrives two years early.
 
-- **Fly.io is out**, on the author's own experience of its downtime. Not a
-  price-or-fit judgment and not open to re-argument on those grounds.
-- **A branching Postgres (Neon and similar) drops out** if Render's blueprint supplies a
-  per-preview database. Unmeasured — §10.
+**Fly.io is out**, on the author's own experience of its downtime. Not a price-or-fit
+judgment and not open to re-argument on those grounds.
 
-### 7.1 Two consequences to settle, not settled here
+### 7.1 What the cutover costs
 
-- **Production is DigitalOcean App Platform and previews would be Render.** Two
-  platforms is two build paths, and a preview that differs from production is a gate
-  measuring something other than what ships. Either production moves to Render too, or
-  the differences are enumerated and held deliberately. Naming it here because the cost
-  of discovering it later is a gate everyone trusts and shouldn't.
-- **The static storybook preview may be subsumed.** `bin/preview-build.sh` publishes a
-  static storybook to Cloudflare Pages for design review, and a running Catapult already
-  serves the storybook through `CatapultWeb.Router`. If the Render preview serves it,
-  the Pages path is redundant — but `bin/preview-build.sh` never exits non-zero on
-  purpose, so that a failing preview cannot fail the agent job and stop tickets
-  dispatching, and a Render preview has no such guarantee. Settle the failure semantics
-  before retiring anything.
+Prices read 2026-09-16 from each vendor's own pricing page; the preview figures are
+arithmetic over those, not a quote.
+
+| | App Platform today | Render after cutover |
+| --- | --- | --- |
+| Workspace fee | none | **$25/mo** (Pro — previews require it) |
+| Production web | $5–$25/mo by tier | $25/mo (Standard, 2 GB / 1 CPU) |
+| Production Postgres | $7/mo (dev database) | $6/mo at the smallest paid tier |
+| Per-PR previews | **not offered** | prorated by the second |
+| **Fixed floor** | **~$12–$32/mo** | **~$56/mo** |
+
+**Previews are billed as ordinary services, prorated by the second**, so a preview costs
+its *lifetime*, not its existence. One Standard web service plus one small Postgres is
+about **$0.043 per preview-hour**:
+
+| 40 PRs a month, mean preview life | added cost |
+| --- | --- |
+| 3 hours | $5 |
+| 12 hours | $20 |
+| 24 hours | $41 |
+| 48 hours | $82 |
+
+**So the cutover is roughly $30–$105/month more than today**, and the spread is almost
+entirely preview lifetime. Against the $200/month the model credential already costs
+(§4), the fixed part is proportionate; the variable part is worth controlling, and
+`previews.expireAfterDays` is the control.
+
+**The finding worth carrying out of this table: a preview's life is mostly the author's
+response latency.** A ticket sits in `Design review` waiting for sign-off and in
+`Blocked` waiting for a judgment, and the preview bills throughout. The three human
+touchpoints §0 of `DESIGN.md` budgets for are now a line item, which is a new fact about
+them and not an argument against them.
+
+### 7.2 What is not known, and why the floor is a range
+
+**Catapult's current App Platform instance size is not recorded anywhere in the repo, on
+purpose.** `SETUP.md` §2 states that the live app is the authority on its own
+configuration and that no app-spec file is committed, because one existed, was read by
+nothing, and drifted from reality five times in an afternoon. So the DO column is a tier
+range rather than a number, and closing it is a spec export from the dashboard — §10.
+
+**The Render Postgres tier is a guess.** The smallest paid tier is 256 MB of RAM, and
+Catapult runs an EventStore alongside Oban and application data. 256 MB is very likely
+undersized for that, which would move both the production line and every preview's
+hourly rate. Size it against the real workload before the table above is treated as the
+answer.
+
+### 7.3 The static storybook retires
+
+**Decision.** `bin/preview-build.sh` and the Cloudflare Pages storybook go; design review
+reads the storybook from the running Render preview, which `CatapultWeb.Router` already
+serves.
+
+**This removes the reason `bin/preview-build.sh` never exits non-zero.** That contract
+exists because the agent action wraps the build in `set -euo pipefail`, so a failing
+preview would fail the agent job and stop tickets dispatching. Under Render the preview
+build is Render's, out-of-band from the agent job entirely, so a failed preview *cannot*
+fail a dispatch. The problem the never-fail rule solved is solved better by moving the
+build out of the job than by making it incapable of failing.
+
+**It opens a different one, which is new and needs a rule.** A failed Render build leaves
+design review waiting on a preview that will never appear, and nothing currently notices.
+Two things follow:
+
+1. **A preview must exist by `Design review`, which means a PR must exist by then.**
+   Render previews are per-PR. Today the design pass commits to the ticket branch and the
+   PR is the dev pass's; if design review reads a preview, design opens the (draft) PR.
+   Settle this where the design pass's outputs are specified, not only here.
+2. **A failed preview build is reported on the ticket**, because the author is otherwise
+   waiting on something that is not coming. It is not a new `Blocked` flavour — the
+   ticket is already in `Design review`, which is a state that hands the author the ball
+   — it is a comment naming the failure, so the ball they hold is one they can act on.
 
 ---
 
@@ -374,16 +444,33 @@ something already deployed. Close or re-scope §14's staging item in the same ch
 failure comment, first on the branch → `Ready for rework`, second → `Blocked` (§12). No
 new state and no new flavour.
 
-### 8.2 The rules
+### 8.2 A manual test is its own file, and it is not `CHANGE.md`
+
+**`CHANGE.md` is overwritten every ticket (§1), so nothing durable can live in it.** The
+design pass writes the acceptance criteria into `CHANGE.md` *and* writes or amends the
+manual tests they imply, as separate files that persist. The criteria and the test say
+the same thing; only one of them survives the next ticket, and it is not the spec.
+
+**So `tests/manual/**` accumulates deliberately, and that is not §1's rejected pile.**
+The objection to `specs/<TICKET>.md` was that every entry is a claim about the tree that
+nothing checks, so staleness is silent. A manual test is *executed* — the full set runs
+at every milestone boundary (rule 6), so a test that has stopped describing the system
+goes red. **A pile nothing runs rots silently; a pile something runs cannot.** That
+difference is the whole of why one is refused and the other is kept.
+
+The directory is the log. No registry file is needed, and one would be a second thing to
+keep true.
+
+### 8.3 The rules
 
 1. **A manual test is a file** — `tests/manual/<id>.md`, added to Catapult's
    `designOwnedPaths`, carrying a rule id with its reason in the `.reasons.md` sibling
    (conventions §12). It states preconditions, steps, expected observations, and **what
    would make this test wrong**.
-2. **The spec and the test are one artifact.** Acceptance criteria precise enough for an
-   agent to implement against are precise enough for a different agent to verify
-   against, and writing them twice is the labour this exists to save. The design pass
-   writes them once.
+2. **The design pass writes the criteria once and lands them twice** — into `CHANGE.md`
+   as the ticket's own scope, and into the manual test files as the durable form (§8.2).
+   Writing the acceptance criteria and the test script as separate acts of authorship is
+   the labour this avoids; writing them into one file is impossible.
 3. **The evidence is the artifact, not the verdict.** Screenshots, the trace, the HTTP
    transcript, the generated document, kept as run artifacts. **A pass with no evidence
    is a failure** — the same rule as "a probe must assert that it edited something", for
@@ -397,9 +484,10 @@ new state and no new flavour.
    commit reverted and record the failure beside the test. A manual test that has never
    failed is unproven, and here that proof is cheap in a way a unit test's is not.
 6. **Two tiers.** Per-PR runs only the tests whose seams the diff touches, selected by
-   inverting the file map `internal/filemap` already computes; the full set runs at the
-   milestone boundary, beside the live suite. The selection is not an optimisation — a
-   judge pass spends the subscription, and §4 makes the subscription the ceiling.
+   inverting the file map; the **full set runs at the milestone boundary**, beside the
+   live suite, and that batch is what keeps §8.2's accumulation honest. The per-PR
+   selection is not an optimisation — a judge pass spends the subscription, and §4 makes
+   the subscription the ceiling.
 7. **Verdicts are GitHub check runs.** Per-commit by construction, history queryable,
    native red and green. That is the ops-free answer to where a verdict lives, and it is
    what makes rule 8 decidable without a store.
@@ -414,13 +502,18 @@ new state and no new flavour.
 
 ## 9. The check to apply when something is built
 
-**If a redesigned `DESIGN.md` does not come in materially shorter than today's 2,956
-lines, the composition failed.** Rules that survive at their current count — merely
-spread across workflow YAML, hooks and skill frontmatter — are the same protocol in a
-substrate that cannot be simulated, which trades away `internal/sim` and buys nothing.
+**This check was rewritten once §11's decisions landed, and the first version was
+wrong for an instructive reason.** It read: if a redesigned `DESIGN.md` does not come in
+materially shorter than 2,956 lines, the composition failed. That test assumed the
+protocol was mostly going away. §11.1 keeps the state machine in Linear and §11.4 keeps
+the adapters, so most of the protocol stays by decision, and a `DESIGN.md` that did not
+shrink would now be the *expected* outcome rather than a failure signal.
 
-No target line count is set here, because one would be invented. The test is
-directional and applied to a real diff, not asserted in advance.
+**The test that replaces it is the one stats already answers (§11.5):** does a ticket
+reach `Done` faster, and for fewer Actions minutes, than the baseline taken before any of
+this landed? That measures the thing these changes are for, rather than a proxy for it.
+
+Take the baseline before the first change lands. It is not reconstructible afterwards.
 
 ---
 
@@ -428,27 +521,29 @@ directional and applied to a real diff, not asserted in advance.
 
 Each of these is a guess until somebody takes it. Recorded as guesses on purpose.
 
-- **Render preview provisioning time** for Catapult's EventStore plus Oban seed and
-  migrate. **On the critical path**, not a curiosity: it is the §8 gate's latency on
-  every PR, and it decides §7's Neon question with it.
-- **What a judge pass costs against the subscription.** Unmeasured, and it sets how
-  large §8.2's per-PR tier can be. Measure it on one real ticket's selection before
-  arming the gate, because the failure mode is a ceiling hit mid-milestone with tickets
-  queued behind it.
-- **Cloudflare preview versions and bindings.** A `wrangler versions upload` preview URL
-  is believed to share the production script's bindings, which would mean a preview
-  Worker writing into production's `ProjectState` and `SweepDebounce` — silently, and
-  in the class of defect that took the §9 invariants off for a milestone. Deploying
-  under a distinct `--name` is believed to sidestep it because Durable Object namespaces
-  are per script and class. **Probe:** deploy a preview, write a row, read it from
-  production's `/state`.
+- **The cycle-time and cost baseline (§9).** Take it first and take it before anything
+  else changes; every other number here is optional and this one is not recoverable.
+- **Catapult's current App Platform instance size.** Deliberately not in the repo
+  (`SETUP.md` §2), which is why §7.1's floor is a range. **Probe:** export the app spec
+  from the DO dashboard and read the tier.
+- **The Render Postgres tier Catapult actually needs**, with EventStore, Oban and
+  application data on it. The smallest paid tier is 256 MB and that is very likely
+  undersized; it moves both the production line and every preview-hour in §7.1.
+- **Render preview provisioning time** for EventStore plus Oban seed and migrate. It is
+  the §8 gate's latency on every PR, and §7.1 shows it is also a cost lever.
+- **What a judge pass costs against the subscription.** It sets how large §8.3's per-PR
+  tier can be. The Actions half of the answer is a query the stats store already serves
+  (§11.5); the subscription half needs one real ticket's selection, measured before the
+  gate is armed.
 - **`merge=ours` in the agent job.** Behaviour under `actions/checkout`, and whether the
   driver survives the merge reconcile performs, is unverified. **Probe:** two branches
   each rewriting `CHANGE.md`, merged in a job, asserting which version survives — and
   asserting the assertion by running it once without the driver configured.
-
----
-
+- **Cloudflare preview versions and bindings.** Relevant only while the Worker survives
+  (§11.2). A `wrangler versions upload` preview URL is believed to share the production
+  script's bindings, which would mean a preview Worker writing into production's
+  `ProjectState`. **Probe:** deploy a preview, write a row, read it from production's
+  `/state`.
 ## 11. The disposition of what exists
 
 §0's measurement is a complaint until there is somewhere for the 25,092 lines to go.
@@ -456,36 +551,49 @@ This is that accounting, and the rows below cover **every line of `internal/`** 
 six groups sum to 18,454, which is the measured total, so nothing is quietly unaccounted
 for.
 
-**Status is stated per row on purpose.** Some of these were settled in the conversation
-this file records, some were proposed and never ruled on, and two are in tension with
-sections above. **A row marked *proposed* is not a decision and must not be implemented
-on this document's authority** — recording a proposal as settled is how a record ends up
-describing a system nobody agreed to.
+**Status is stated per row on purpose.** Most are now settled; two remain proposals that
+nobody has ruled on, and one is in tension with a section above. **A row marked
+*proposed* is not a decision and must not be implemented on this document's authority** —
+recording a proposal as settled is how a record ends up describing a system nobody agreed
+to.
+
+**Read the decided rows together before reading any one of them.** Four of them came back
+*keep*, and the pattern in why is the finding: each proposed replacement had confused two
+consumers of one thing — a tracker's state with a tracker's queue, a program's reads with
+an agent's reads, an instrument with its dashboard. The composition survives where a
+component has one consumer, and fails where it has two.
 
 | what | lines | disposition | status |
 | --- | --- | --- | --- |
-| `core`, `plane`, `state` | 4,813 | state machine → PR state and labels; the move record dies with it | **open** |
+| `core`, `plane`, `state` | 4,813 | **keep** — Linear stays the state machine (§11.1) | decided |
 | `agent` | 3,552 | → a Claude Code skill plus hooks | proposed |
-| `host`, `tracker` | 3,499 | → the GitHub and Linear MCP servers, called in-session | proposed |
+| `host`, `tracker` | 3,499 | **keep** — MCP is additive, not a replacement (§11.4) | decided |
 | `worker` (TS) | 2,114 | → native events plus one scheduled workflow | **in tension with §6** |
 | `stats`, `statsstore` | 1,005 | **keep** — it is the instrument, not a dashboard (§11.5) | decided |
 | `citations`, `filemap`, `reasons`, `nonasks`, `decisions`, `promptdoc` | 2,419 | **keep**, as `mix catapult.audit` checks in Catapult | proposed |
-| `sim`, `scenario` | 1,424 | **keep**, conditionally — see below | decided by §9 |
+| `sim`, `scenario` | 1,424 | **keep** — there is still a protocol to simulate (§11.6) | decided |
 | `config`, `marker`, `protocol`, `setup`, `deploy`, `retro` | 1,742 | shrink with whatever above them survives | no independent disposition |
 
-### 11.1 The state machine's home is open, and §4 does not close it
+### 11.1 Linear is the tracker, so Linear is the state machine
 
-The row above is marked open rather than proposed because **this conversation never
-settled where ticket state lives.** §4 settles that the *runner* is ours, for a credential
-reason; its closing line — Linear keeps intake, priority, attention and webhooks, and
-nothing else — was written as a consequence and is further than the credential argument
-reaches. Linear could keep the state machine and still never run an agent.
+**Decision.** Ticket state stays in Linear. Moving it to PR state and labels while Linear
+remains the tracker would give the pipeline two sources of truth for where a ticket is,
+and a board that disagrees with the branch is worse than either alone. This is DESIGN
+§2.1's rule applied to its own consequence: the worklist is a tracker, and a tracker that
+does not hold state is not one.
 
-What is genuinely decided is smaller: Linear does not run agents (§4), and scope moves
-into `CHANGE.md` (§1). Where *state* lives is the next decision, not a settled one, and
-`internal/state`'s fate rides on it — the move record exists only because the tracker
-cannot say who made a write (§13), and git can. Decide the state machine first; the
-record follows it.
+**Three records, no overlap, and it is worth stating so nobody re-derives it:** the Linear
+description is the immutable argument (§2.3), `CHANGE.md` is the sketch (§1), and the
+Linear state is where the ticket is. Each answers a different question.
+
+**So `internal/state` survives, and for its original reason.** The move record exists
+because the tracker cannot say who made a write and the harness authenticates as the
+author (§13). Nothing about that changed — it would only have gone away if state had
+moved to git, and state is not moving.
+
+This also corrects §4's closing line, which said Linear keeps intake, priority, attention
+and webhooks *and nothing else*. That reached further than the credential argument
+supporting it. Linear keeps those and the state machine.
 
 ### 11.2 The Worker row contradicts §6
 
@@ -516,13 +624,34 @@ inverting the file map. If the map becomes Catapult's, the selection reads Catap
 — which is where it should have come from anyway. Say so where that rule lives, not only
 here.
 
-### 11.4 The tracker adapter costs something the table does not show
+### 11.4 MCP and the adapters are for different consumers, so we keep both
 
-**It carries the heaviest test coverage in the repo, deliberately** (PLAN §1: Linear has
-no Go SDK, so the adapter is hand-written GraphQL and is tested accordingly). Replacing
-it with an MCP server moves that surface out of the three test rings entirely. That is a
-real loss and §9's check does not measure it, because §9 counts rules in `DESIGN.md` and
-this is coverage of an adapter.
+**Decision.** `host` and `tracker` stay. MCP servers are added alongside them, for the
+agent sessions, and replace nothing.
+
+**The row that proposed swapping them conflated two callers of one service.**
+
+- **The control plane is a program.** `Sweep` is a pure function from a snapshot to a
+  list of actions, and the adapters are how that snapshot is built and those actions are
+  applied. Its decisions have to be reproducible, which is what the three test rings, the
+  in-memory fakes and `internal/sim` exist to exploit. Reading the tracker through a
+  model would make every sweep nondeterministic, and it would take the fakes and the
+  simulator with it — the same input would stop producing the same output, which is the
+  one property the whole design rests on.
+- **An agent session is not a program.** A design or dev pass exploring a ticket's
+  history, a PR's comments or a run's logs is already nondeterministic, and an MCP server
+  is the right shape for it: dynamic, unplanned queries where no fixed adapter surface
+  would anticipate what gets asked.
+
+So the question is not which to have. **Deterministic adapters for the decisions the
+pipeline makes; MCP for the questions an agent asks.** Naming the two consumers is what
+stops a later pass reading "we have MCP now" as a reason to retire either one.
+
+**And the cost that would have been paid quietly:** the tracker adapter carries the
+heaviest test coverage in the repo, deliberately (PLAN §1 — Linear has no Go SDK, so it
+is hand-written GraphQL and is tested accordingly). Replacing it would have moved that
+surface out of all three rings at once, and §9's check would not have noticed, because
+§9 does not measure adapter coverage.
 
 ### 11.5 Stats is the baseline, and this is the worst possible moment to lose it
 
@@ -566,16 +695,22 @@ query this store already serves.
 produce exactly the invented figure §0 declines to give and §9 exists to replace: the
 number is read off a real diff or it is not known.
 
-**And three costs have no row at all**, because they are not lines of code:
+**Three costs had no row, and the decided rows removed them.** Recorded because the
+disappearance is evidence, not because the costs are live:
 
-- **`internal/sim`.** Proving protocol behaviour deterministically in milliseconds is
-  this repo's best testing asset, and a composed pipeline cannot be simulated. Its row
-  says *keep, conditionally* because §9 read from this side is the same question: if the
-  rules survive at their current count and merely relocate, the sim is gone **and** the
-  rules are unproven, which is the worst available outcome.
-- **§9's expressiveness.** Branch protection can enforce "this token cannot push here".
-  It cannot state "a design pass promoting past `Design review` is a violation". The
-  enforcement gets stronger and the vocabulary gets poorer, and the second half is easy
-  to miss while celebrating the first.
-- **Determinism and ownership.** Every replacement above is a service that can be down,
-  and none of them is ours.
+- **`internal/sim` was going to be the largest loss.** A composed pipeline cannot be
+  simulated, and proving protocol behaviour deterministically in milliseconds is this
+  repo's best testing asset. It survives intact: the state machine stays in Linear
+  (§11.1) and the adapters stay behind their fakes (§11.4), so there is still a snapshot
+  to simulate and still a protocol to prove.
+- **DESIGN §9's expressiveness was going to narrow.** Branch protection can enforce "this
+  token cannot push here"; it cannot state "a design pass promoting past `Design review`
+  is a violation". Since state stays in Linear, the revert rules and the move record stay
+  with it, and the vocabulary is unchanged.
+- **Determinism and ownership.** What remains outsourced is the run harness (still
+  proposed) and the platforms under §7 — services that can be down, none of them ours.
+  That is a real and bounded exposure rather than the systemic one a full composition
+  carried.
+
+**That all three evaporated together is the point.** They were three symptoms of one
+proposal — replacing the plane's own reads and writes — and they went when it did.
