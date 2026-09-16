@@ -58,9 +58,17 @@ remaining — "the normal shape of a backfill spanning nights". A baseline taken
 partial collection measures the part that had been collected, and a later capture over a
 complete one would show a difference that is entirely the collector catching up.
 
-So `/watermark` is the first query and its result is part of the artifact. If
-`oldestComplete` has not reached the project's first ticket, say so in the file and take it
-again when it has.
+So `/watermark` is the first query and its result is part of the artifact.
+
+**The two halves do not have the same completeness, and the first capture proved it.**
+Time in state is recomputed from the tracker every pass, so it is complete. Actions minutes
+come from an insert-only run table that is watermarked and backfills slowly, and on
+2026-09-16 it reached back only to 2026-08-26 against a project starting 2026-08-12 —
+GitHub's run data ages out, so the gap is not recoverable.
+
+**A later comparison therefore slices both captures to a shared `from=` rather than
+comparing all-time totals**, or it reports a rise that is only the collector having seen
+more. The monthly buckets are the safer reading for the same reason.
 
 ## The queries
 

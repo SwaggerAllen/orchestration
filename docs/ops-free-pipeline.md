@@ -514,16 +514,34 @@ keep true.
 
 ## 9. The check to apply when something is built
 
-**This check was rewritten once §11's decisions landed, and the first version was
-wrong for an instructive reason.** It read: if a redesigned `DESIGN.md` does not come in
-materially shorter than 2,956 lines, the composition failed. That test assumed the
-protocol was mostly going away. §11.1 keeps the state machine in Linear and §11.4 keeps
-the adapters, so most of the protocol stays by decision, and a `DESIGN.md` that did not
-shrink would now be the *expected* outcome rather than a failure signal.
+**A `DESIGN.md` line count is not the check.** That test would assume the protocol was
+mostly going away; §11.1 keeps the state machine in Linear and §11.4 keeps the adapters, so
+most of it stays by decision, and a document that did not shrink is the *expected* outcome
+rather than a failure signal.
 
-**The test that replaces it is the one stats already answers (§11.5):** does a ticket
-reach `Done` faster, and for fewer Actions minutes, than the baseline taken before any of
-this landed? That measures the thing these changes are for, rather than a proxy for it.
+**Nor is "does a ticket reach `Done` faster".** That is the obvious headline and the
+baseline refutes it. Measured 2026-09-16, before anything landed
+(`docs/baselines/2026-09-16.md`): of 1047.2 h of ticket time, **81.2% is waiting on the
+author** — `design_review`, `triage` and `blocked`, all author-held by DESIGN §3's own
+table — against 9.6% in the agent and CI states. A ticket's wall-clock is mostly a human's
+response time, and nothing in C0–C6 touches it. A cutover that halved every agent state
+would move the headline by under five percent, and a fortnight where the author was quick
+would swamp it either way.
+
+**So the check is scoped to what the changes reach:**
+
+1. **Time in `designing`, `in_progress`, `reconciling` and `checks`**, per state, against
+   the baseline's per-state rows. These are what C1, C2, C3, C5 and C6 move.
+2. **Actions minutes**, over a window both captures share — the baseline's run table
+   begins 2026-08-26 and the project begins 2026-08-12, so an all-time comparison would
+   report a rise that is only the collector having seen more.
+3. **Author latency tracked beside those, never inside them.** It is the largest number in
+   the system and the one this work does not address; folding it in hides both.
+
+**And that scoping is itself a finding worth keeping**, because it is the same mistake
+`agentTotal` makes one level down: on the baseline, 83.8% of that rollup is
+`design_review`. A number that sums actors moved by different things cannot answer a
+question about one of them.
 
 Take the baseline before the first change lands. It is not reconstructible afterwards.
 
