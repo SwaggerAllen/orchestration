@@ -10,9 +10,11 @@ it in the commit that implements it, and this file loses the entry at the same t
 the failure it exists to prevent. A rule without its reason is a rule the next session
 violates reasonably.
 
-**What it does not cover.** Catapult is out of scope as a feature target. Orchestration
-is made to write code well first; Catapult's own delivery needs (per-PR environments,
-AI-driven manual tests) are deferred with their reasons in §8 and §9.
+**Scope.** Catapult is out of scope as a *feature* target — nothing here builds Catapult
+functionality. Two things about delivering it are in scope and land with these changes:
+per-PR preview environments for pull requests into Catapult (§7), and the AI-driven
+manual test gate they exist to carry (§8). What stays out is per-PR environments for the
+projects Catapult *produces*, which belong to the hosted tier (§7).
 
 ---
 
@@ -241,8 +243,9 @@ guarantee downstream (§13).
 **So Linear keeps intake, priority, attention and webhooks, and nothing else.**
 
 **The concurrency ceiling is the subscription, not the infrastructure.** This is the
-load-bearing consequence and it decides §6 and §7: building isolation to run agents the
-plan cannot feed buys nothing.
+load-bearing consequence and it decides §6 and §8.2: building isolation to run agents the
+plan cannot feed buys nothing, and a judge pass spends the same allowance the dev agent
+does.
 
 ---
 
@@ -255,10 +258,13 @@ Cloudflare Worker. There is no database, no container and no App Platform app �
 DigitalOcean app belongs to Catapult, and this pipeline only reads its deployments API
 to confirm a SHA landed (`SETUP.md` provisions no app for this repo).
 
-**Orchestration's own PRs get no AI-driven manual tests either.** The gates plus the
-rehearsal are the verification, and the rehearsal already exercises the real agents
-against a real project end to end. Adding judged assertions to a repo whose output is a
-state machine would buy nondeterminism for coverage the fixtures already have.
+**Orchestration's own PRs get no AI-driven manual tests, and Catapult's do (§8).** The
+asymmetry is deliberate rather than a sequencing accident. This repo's output is a state
+machine, and the gates plus the rehearsal already assert it end to end against a real
+project in terms the pipeline controls — states, files, marker kinds and marker fields.
+Judged assertions would buy nondeterminism for coverage the fixtures already have.
+Catapult's output includes generated prose and a running surface, which the fixtures
+cannot reach at all; that is the difference, and it is the whole of it.
 
 ---
 
@@ -297,41 +303,110 @@ holds. Deploy it trigger-less and drive it by webhook.
 
 ---
 
-## 7. Per-PR environments, for when Catapult needs them
+## 7. Per-PR environments for Catapult's own PRs
 
-Deferred with Catapult, recorded so the decision is not re-derived.
+**Decision.** Render preview environments for PRs into the Catapult repository, landing
+as part of these changes. A running Catapult per PR is what the §8 gate drives; without
+it there is nothing for a manual test to act on.
 
-- **Render.** Preview environments provision the whole blueprint, including a database,
-  per PR.
+**The scope boundary, stated because it is the one most easily widened:** this covers
+**PRs into Catapult**. It does **not** cover per-PR environments for the projects
+Catapult *produces*. Those are the hosted tier — many tenants, customer content, cost
+control — and they are a product decision about Catapult's runtime rather than a CI
+decision about our own pull requests.
+
+**Kubernetes belongs to that second question and to no part of this one.** The expensive
+part of a CI preview is the data — Postgres, EventStore and Oban provisioned, migrated
+and seeded — and a cluster supplies pods cheaply while doing nothing about that.
+Conflating the hosted tier with our own CI is how the cluster arrives two years early.
+
 - **Fly.io is out**, on the author's own experience of its downtime. Not a
   price-or-fit judgment and not open to re-argument on those grounds.
-- **A branching Postgres (Neon and similar) probably drops out** if Render's blueprint
-  supplies a per-preview database. Unmeasured — see §10.
-- **Kubernetes is not the answer for CI environments.** The expensive part of a per-PR
-  environment is the data — Postgres, EventStore and Oban provisioned, migrated and
-  seeded — and a cluster supplies pods cheaply while doing nothing about that. The case
-  for Kubernetes arrives with the hosted tier running customers' generated projects,
-  which is a product decision about Catapult and not a CI decision about our own PRs.
-  Conflating the two is how the cluster arrives two years early.
+- **A branching Postgres (Neon and similar) drops out** if Render's blueprint supplies a
+  per-preview database. Unmeasured — §10.
+
+### 7.1 Two consequences to settle, not settled here
+
+- **Production is DigitalOcean App Platform and previews would be Render.** Two
+  platforms is two build paths, and a preview that differs from production is a gate
+  measuring something other than what ships. Either production moves to Render too, or
+  the differences are enumerated and held deliberately. Naming it here because the cost
+  of discovering it later is a gate everyone trusts and shouldn't.
+- **The static storybook preview may be subsumed.** `bin/preview-build.sh` publishes a
+  static storybook to Cloudflare Pages for design review, and a running Catapult already
+  serves the storybook through `CatapultWeb.Router`. If the Render preview serves it,
+  the Pages path is redundant — but `bin/preview-build.sh` never exits non-zero on
+  purpose, so that a failing preview cannot fail the agent job and stop tickets
+  dispatching, and a Render preview has no such guarantee. Settle the failure semantics
+  before retiring anything.
 
 ---
 
-## 8. AI-driven manual tests, deferred
+## 8. AI-driven manual tests of Catapult
 
-Deferred deliberately, not dropped. Two reasons, both about sequencing:
+**Decision.** In scope, landing with §7 rather than deferred behind it.
 
-1. Orchestration should be reliably writing code before a nondeterministic gate is added
-   to the thing that judges whether it did.
-2. The target that needs them is Catapult, and Catapult needs a running instance per PR
-   to drive — which is §7, which is deferred.
+**The defect profile is the argument.** The tickets this pipeline has been fixing on
+Catapult are seam defects — a chain handing every agent an empty context, atoms reaching
+a projector as strings, `declared_in` paths spelling with underscores what the schema
+spells with hyphens. Both sides correct, the crossing unasserted. A green unit suite
+cannot see any of them, and this repo's own CLAUDE.md records the same shape from the
+other end: breaking the host-to-core outcome mapping printed `ok` because nothing
+asserted that crossing at all.
 
-The defect profile that motivates them is recorded so the argument survives: the
-tickets this pipeline has been fixing on Catapult are seam defects — a chain handing
-every agent an empty context, atoms reaching a projector as strings, `declared_in` paths
-spelling with underscores what the schema spells with hyphens. Both sides correct, the
-crossing unasserted. A green unit suite cannot see any of them, and this repo's own
-CLAUDE.md records the same shape from the other end: breaking the host-to-core outcome
-mapping printed `ok` because nothing asserted that crossing at all.
+**For the generation chain a judged assertion is the only practical one.** The output is
+generated prose, so a deterministic assertion over it is either vacuous or brittle.
+`ORC-230` is the measurement rather than the worry: the live suite proved two rounds and
+called it quiescence.
+
+### 8.1 Where the gate sits
+
+**In `Checks`, before reconcile.** DESIGN §14 records the intended shape as staging with
+a manual test gate "between `Reconciling` and `Merged`". That placement was forced by
+there being one environment — nothing ran the branch, so the earliest instance to drive
+was post-merge. A per-PR preview removes the constraint, and the difference is what a
+failure costs: caught in `Checks` it is a rework, caught after `Merged` it is a revert of
+something already deployed. Close or re-scope §14's staging item in the same change.
+
+**Failure routes through the machinery that exists.** A failing gate is CI red: the
+failure comment, first on the branch → `Ready for rework`, second → `Blocked` (§12). No
+new state and no new flavour.
+
+### 8.2 The rules
+
+1. **A manual test is a file** — `tests/manual/<id>.md`, added to Catapult's
+   `designOwnedPaths`, carrying a rule id with its reason in the `.reasons.md` sibling
+   (conventions §12). It states preconditions, steps, expected observations, and **what
+   would make this test wrong**.
+2. **The spec and the test are one artifact.** Acceptance criteria precise enough for an
+   agent to implement against are precise enough for a different agent to verify
+   against, and writing them twice is the labour this exists to save. The design pass
+   writes them once.
+3. **The evidence is the artifact, not the verdict.** Screenshots, the trace, the HTTP
+   transcript, the generated document, kept as run artifacts. **A pass with no evidence
+   is a failure** — the same rule as "a probe must assert that it edited something", for
+   the same reason: the dangerous outcome is not a judge that fails, it is one that never
+   ran and printed `ok`.
+4. **The judge never sees the diff.** A separate session holding the test file and the
+   running preview, with no access to the implementation. Otherwise this rebuilds
+   `awaitingDispatchOf` — the pass that wrote the code writing the assertion that agrees
+   with it.
+5. **A new manual test is proven by breaking the thing.** Run it against the feature
+   commit reverted and record the failure beside the test. A manual test that has never
+   failed is unproven, and here that proof is cheap in a way a unit test's is not.
+6. **Two tiers.** Per-PR runs only the tests whose seams the diff touches, selected by
+   inverting the file map `internal/filemap` already computes; the full set runs at the
+   milestone boundary, beside the live suite. The selection is not an optimisation — a
+   judge pass spends the subscription, and §4 makes the subscription the ceiling.
+7. **Verdicts are GitHub check runs.** Per-commit by construction, history queryable,
+   native red and green. That is the ops-free answer to where a verdict lives, and it is
+   what makes rule 8 decidable without a store.
+8. **A verdict that differs from the one recorded for the same test on the same SHA is a
+   finding about the judge**, filed to Triage. It is never a re-run, and **it does not
+   count toward §12's two.** Without this, a flapping judge spends a ticket's escalation
+   budget and parks work that was never broken.
+9. **They replace the brittle integration layer, not the unit suite.** Catapult's fast
+   deterministic tests stay exactly as they are.
 
 ---
 
@@ -351,6 +426,13 @@ directional and applied to a real diff, not asserted in advance.
 
 Each of these is a guess until somebody takes it. Recorded as guesses on purpose.
 
+- **Render preview provisioning time** for Catapult's EventStore plus Oban seed and
+  migrate. **On the critical path**, not a curiosity: it is the §8 gate's latency on
+  every PR, and it decides §7's Neon question with it.
+- **What a judge pass costs against the subscription.** Unmeasured, and it sets how
+  large §8.2's per-PR tier can be. Measure it on one real ticket's selection before
+  arming the gate, because the failure mode is a ceiling hit mid-milestone with tickets
+  queued behind it.
 - **Cloudflare preview versions and bindings.** A `wrangler versions upload` preview URL
   is believed to share the production script's bindings, which would mean a preview
   Worker writing into production's `ProjectState` and `SweepDebounce` — silently, and
@@ -362,6 +444,3 @@ Each of these is a guess until somebody takes it. Recorded as guesses on purpose
   driver survives the merge reconcile performs, is unverified. **Probe:** two branches
   each rewriting `CHANGE.md`, merged in a job, asserting which version survives — and
   asserting the assertion by running it once without the driver configured.
-- **Render preview provisioning time** for Catapult's EventStore plus Oban seed and
-  migrate. This is the number that decides whether previews are pleasant or a wait, and
-  it decides §7's Neon question with it.
