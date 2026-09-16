@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SwaggerAllen/orchestration/internal/agent"
+	"github.com/SwaggerAllen/orchestration/internal/changespec"
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/host"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -191,6 +192,16 @@ func replay(t *testing.T) *replayWorld {
 	// the job runs them: what the pass wrote, its record diff, and the
 	// record as it stood when it started.
 	changed := runShell(t, dir, w.tmp, authoredCommand(t, before))
+	// The replay reconstructs a design pass from a real merge, and those
+	// merges predate the spec file. FinishDesign holds every artifacts
+	// pass to writing one, so a replay without it stands for a pass the
+	// protocol no longer allows — and would fail on the spec rather than
+	// on the record review this exercises.
+	if err := os.WriteFile(filepath.Join(dir, changespec.Name),
+		[]byte(changespec.Header(w.res.TicketKey, w.res.Title)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed = strings.TrimRight(changed, "\n") + "\n" + changespec.Name + "\n"
 	write(t, pipe, "changed.txt", changed)
 	write(t, pipe, "record-diff.patch", runShell(t, dir, w.tmp, recordCommand(t, before)))
 	runShell(t, dir, w.tmp, exportScript(t, before))

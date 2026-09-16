@@ -74,6 +74,13 @@ possible; there is otherwise nothing whose history could be read.
 It does not duplicate the Linear description. The description is the immutable argument
 (§2.3) and stays canonical for *why*. `CHANGE.md` is *what will be built and where*.
 
+**It is design-owned, and has to be.** DESIGN §5's ownership audit refuses a design pass
+that writes outside `designOwnedPaths`, so without the file listed there the gate rejects
+the very write this section requires — which is how it was found. Being design-owned is
+also what keeps dev out of it: dev implements against the sketch, it does not rewrite it.
+Every project's config gains the entry, which is a value in an existing array rather than
+a schema change, so it merges project-side with no ordering hazard (§11's table).
+
 **Why one overwritten file rather than `specs/<TICKET>.md` per ticket.** A per-ticket
 directory grows without bound, and every entry in it is a claim about the tree that was
 true when it merged and is evidence about nothing afterwards — the failure Catapult's
@@ -120,8 +127,21 @@ definition (keep our version, exit zero).
 
 ### 1.3 The file names its ticket, and the harness asserts it
 
-Line one is `# <TICKET-KEY> — <title>`. `pipeline agent claim` and
-`pipeline agent finish` both assert it matches the ticket being worked.
+Line one is `# <TICKET-KEY> — <title>`, and `internal/changespec` is its grammar — a
+parse/format module rather than a convention, for the reason PLAN §1 gives about marker
+comments.
+
+**The assertion lives at finish, not at claim, and the ordering is why.** The agent job
+claims *before* it checks out the ticket branch, because the branch is an output of the
+claim — so at claim time the tree is still on `main`, carrying the previous ticket's spec.
+A claim-time assertion would fail on every ticket for a reason that has nothing to do with
+the ticket.
+
+The design finish holds an artifacts pass to both halves: that the file **names this
+ticket**, and that **this pass wrote it**. The second is not redundant. The file sits at
+the root of every branch and always names somebody, so a pass that edited screens and
+systems and left the previous ticket's spec in place would satisfy the first check for the
+worst possible reason.
 
 **This is what makes the automatic resolution safe rather than merely convenient.** A
 resolution that went the wrong way, a design pass that forgot to overwrite, and a dev

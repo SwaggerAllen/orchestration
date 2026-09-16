@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SwaggerAllen/orchestration/internal/changespec"
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/marker"
@@ -29,7 +30,7 @@ func TestDesignArtifactsFlow(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"home", "cap"}, Systems: []string{"caps"}, Summary: "Two states added; cap_reached carries the copy decision."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -62,7 +63,7 @@ func TestDesignDecisionlessAutoPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"search"}, Summary: "No screens, no structural change; index work inside search."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -110,7 +111,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatalf("mode = %q", res.Mode)
 	}
 	o := &DesignOutcome{Outcome: "clear", Summary: "The colliding ticket rewrote a different region; this scope still holds."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	issues, _ := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
@@ -132,7 +133,7 @@ func TestDesignRereadClearAndDemote(t *testing.T) {
 		t.Fatal(err)
 	}
 	o2 := &DesignOutcome{Outcome: "demote", Summary: "The ground moved under this scope; it needs a fresh pass."}
-	if err := FinishDesign(ctx, p, h, res2, o2, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res2, o2, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, demoted.ID); got != protocol.ReadyForRedesign {
@@ -251,7 +252,7 @@ func TestDesignPostsThePreviewLinkBeforeAskingForReview(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
 	const url = "https://abc123.orchestration-dummy.pages.dev"
-	if err := FinishDesign(ctx, p, h, res, o, url, "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, url, "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -288,7 +289,7 @@ func TestDesignWithoutAPreviewPostsNoLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, &DesignOutcome{Outcome: "artifacts", Summary: "s"}, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -314,9 +315,11 @@ func TestDesignFinishRecordsTheBaseSHA(t *testing.T) {
 	tr, h, cfg, p := world(t)
 	i := seed(t, tr, cfg, "Cap screen", "The argument, with no Base line", protocol.ReadyForDesign)
 
-	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b"}
+	// DesignOwnedPaths as a real claim carries it: the ownership audit
+	// reads the claim, not the config, and this pass now changes a file.
+	res := &ClaimResult{TicketID: i.ID, TicketKey: i.Key, Title: i.Title, Branch: "b", DesignOwnedPaths: cfg.DesignOwnedPaths}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "abc1234", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -375,7 +378,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, "")
+	err = FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, "")
 	if err == nil {
 		t.Fatal("a touch list naming a doc that does not exist was accepted")
 	}
@@ -390,7 +393,7 @@ func TestDesignRefusesATouchListNamingADocThatDoesNotExist(t *testing.T) {
 
 	// The correct spelling passes, and so does a screen beside it.
 	o = &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core_dsl"}, Screens: []string{"home"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatalf("a touch list naming real docs was refused: %v", err)
 	}
 }
@@ -409,7 +412,7 @@ func TestDesignReportsEveryUnknownDocAtOnce(t *testing.T) {
 	}
 
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"core-dsl", "foundation"}}
-	err = FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, "")
+	err = FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, "")
 	if err == nil {
 		t.Fatal("unknown docs were accepted")
 	}
@@ -434,7 +437,7 @@ func TestDesignAcceptsAnyNameWhenTheProjectHasNoDocs(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Summary: "s", Systems: []string{"anything"}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatalf("a project with no system docs was refused: %v", err)
 	}
 }
@@ -529,7 +532,7 @@ func TestDesignFinishRefusesStraysOutsideOwnedPaths(t *testing.T) {
 		"lib/sample/greetings.ex",
 		"lib/sample_web/live/home_live.ex",
 	}
-	err = FinishDesign(ctx, p, h, res, o, "", "", changed, nil, nil, "")
+	err = FinishDesign(ctx, p, h, res, o, "", "", append(designedSpec(t, cfg, res.TicketKey), changed...), nil, nil, "")
 	if err == nil {
 		t.Fatal("finish accepted a pass that committed implementation")
 	}
@@ -580,7 +583,7 @@ func TestDesignFinishAcceptsOwnedPaths(t *testing.T) {
 		"lib/sample_web/components/cap_banner.ex",
 		"non-asks.md",
 	}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", changed, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", append(designedSpec(t, cfg, res.TicketKey), changed...), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -603,7 +606,7 @@ func TestDesignPrerequisiteParksTheTicket(t *testing.T) {
 	}
 	const summary = "systems/queue.md is not on main yet; ORC-140 writes it. Nothing to draw against until that lands."
 	o := &DesignOutcome{Outcome: "prerequisite", Summary: summary}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
@@ -717,7 +720,7 @@ func TestANarrowedPassReleasesTheLabelItNoLongerDeclares(t *testing.T) {
 	// The narrowed pass: engine only, on a branch that touches engine
 	// only. Nothing on it is mapped by systems/delivery.md.
 	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Retries belong in the engine after all."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, []string{"lib/engine/retry.ex", "systems/engine.md"}, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), []string{"lib/engine/retry.ex", "systems/engine.md"}, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	labels := issueLabels(t, tr, cfg, i.ID)
@@ -756,7 +759,7 @@ func TestALabelTheBranchStillNeedsIsKeptAndSaidSo(t *testing.T) {
 	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Engine only."}
 	// An earlier round already wrote a delivery file onto the branch.
 	branch := []string{"lib/engine/retry.ex", "lib/delivery/queue.ex"}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, branch, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), branch, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !issueLabels(t, tr, cfg, i.ID)["system:delivery"] {
@@ -784,7 +787,7 @@ func TestNothingIsReleasedWithoutABranchFileList(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Systems: []string{"engine"}, Summary: "Engine only."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if !issueLabels(t, tr, cfg, i.ID)["system:delivery"] {
@@ -894,7 +897,7 @@ func TestARecordReviewDeclineSendsTheTicketBackWithItsFindings(t *testing.T) {
 	// A preview URL is handed in and must not be posted: there is nothing
 	// to review yet, and a link on a ticket going back to the queue is a
 	// link to work the author was not asked to look at.
-	if err := FinishDesign(ctx, p, h, res, o, "https://preview.example", "", nil, nil, review, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "https://preview.example", "", designedSpec(t, cfg, res.TicketKey), nil, review, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForRedesign {
@@ -951,7 +954,7 @@ func TestARecordReviewPassIsSaidOnTheTicket(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
-	if err := FinishDesign(ctx, p, h, res, o, "https://preview.example", "", nil, nil, &RecordReview{Verdict: "pass"}, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "https://preview.example", "", designedSpec(t, cfg, res.TicketKey), nil, &RecordReview{Verdict: "pass"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -996,7 +999,7 @@ func TestNoRecordReviewLeavesTheArtifactsPassUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -1024,7 +1027,7 @@ func TestAReviewerThatDiedIsSaidAndThePassProceeds(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "artifacts", Screens: []string{"cap"}, Summary: "Two states."}
 	const death = "the subscription model run exited 249\n--- stderr ---\nclaude native binary not installed"
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, nil, death); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, nil, death); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.DesignReview {
@@ -1058,7 +1061,7 @@ func TestADeclineOnADecisionlessPassIsRecordedNotActedOn(t *testing.T) {
 	}
 	o := &DesignOutcome{Outcome: "decisionless", Systems: []string{"caps"}, Summary: "Nothing to decide."}
 	review := &RecordReview{Verdict: "decline", Findings: []RecordFinding{{File: "docs/non-goals.md", Quote: "The second pass considered", Why: "pass narration"}}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, review, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, review, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForDev {
@@ -1111,7 +1114,7 @@ func TestAContradictionDeclineNamesTheRuleOnTheTicket(t *testing.T) {
 	review := &RecordReview{Verdict: "decline", Findings: []RecordFinding{
 		{File: "systems/caps.md", Quote: "Stores may share a connection", Why: "the entry records why they never do", Kind: "contradiction", ID: "caps#17"},
 	}}
-	if err := FinishDesign(ctx, p, h, res, o, "", "", nil, nil, review, ""); err != nil {
+	if err := FinishDesign(ctx, p, h, res, o, "", "", designedSpec(t, cfg, res.TicketKey), nil, review, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.ReadyForRedesign {
@@ -1154,4 +1157,18 @@ func TestAClaimFromTheRedesignQueueIsANormalPass(t *testing.T) {
 	if got := issueState(t, tr, cfg, i.ID); got != protocol.Designing {
 		t.Errorf("state = %q, want the claim to have taken it out of the redesign queue", got)
 	}
+}
+
+// designedSpec writes the spec file a design pass owes and returns it as
+// that pass's changed-file list. FinishDesign holds an artifacts pass to
+// both halves — that CHANGE.md names this ticket, and that this pass
+// wrote it — so a fixture that skips it stands for a pass the protocol
+// does not allow.
+func designedSpec(t *testing.T, cfg *config.Config, key string) []string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(cfg.Root, changespec.Name),
+		[]byte(changespec.Header(key, "the sketch")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return []string{changespec.Name}
 }
