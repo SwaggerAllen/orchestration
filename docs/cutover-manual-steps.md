@@ -136,12 +136,41 @@ corrected to price previews at the production plan.
 
 ### 12. Preview provisioning time — the gate's latency on every PR
 
-`ops-free-pipeline.md` §10 wants this, and C5's per-PR gate waits on it.
+`ops-free-pipeline.md` §10 wants this, and two numbers are currently
+guesses because of it.
+
+**`pipeline-manual-tests.yml` waits ten minutes for a preview**, polling
+every fifteen seconds, and that bound was chosen to be longer than a build
+and shorter than a coffee rather than measured. If the real figure is
+large, the shape to move to is triggering the gate on `deployment_status`
+instead of waiting inside a job — Render posts one when the preview goes
+live, which is the same fact the sweep's own wake-up already uses.
+
 It also decides whether `deploy.timeout` is the right bound for the
 "preview is not coming" comment or merely an available one.
 
 *Worked when:* a figure exists, taken from real previews rather than from
-Render's documentation.
+Render's documentation, and both bounds are set against it or explicitly
+left.
+
+### 12b. Write Catapult's first manual tests, and prove one by breaking the thing
+
+`tests/manual/` carries its README and no tests, so the gate selects
+nothing and the audit says it skipped. That is correct and it is also the
+whole subsystem doing nothing yet.
+
+The first ones should be the seam defects §8's argument is built on — the
+chain handing every agent an empty context, atoms reaching a projector as
+strings, `declared_in` paths spelling with underscores what the schema
+spells with hyphens. Those are the shapes a green unit suite missed.
+
+**§8.3 rule 5: a new test is proven by breaking the thing.** Run it
+against the feature commit reverted and record the failure beside the
+test. A manual test that has never failed is unproven, and here the proof
+is cheap in a way a unit test's is not.
+
+*Worked when:* at least one test exists, is selected by a diff touching
+its seam, and its recorded proof shows it failing against the revert.
 
 ### 13. What a judge pass costs against the subscription
 

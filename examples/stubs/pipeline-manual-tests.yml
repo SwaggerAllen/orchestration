@@ -1,0 +1,149 @@
+# Project stub: the manual test gate (orchestration's
+# ops-free-pipeline.md §8).
+#
+# **A `pull_request` workflow, not a dispatched agent run.** Every other
+# agent stub is `workflow_dispatch` because the sweep decides when it
+# runs; this one is CI. §8.1 puts the gate in `Checks`, and the failure
+# route is the one that already exists — a red check on the PR, the
+# failure comment, first on the branch to `Ready for rework` and second to
+# `Blocked` (DESIGN §12). So it needs no correlating `run-name` and the
+# sweep needs no new rule: it reads this like any other workflow run.
+#
+# Two jobs, because the selection has to happen before the matrix exists.
+name: pipeline-manual-tests
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  # The verdict. **This must be the workflow's own token** — no
+  # fine-grained token can be granted the check-runs API at all, so an
+  # AGENT_GITHUB_TOKEN here answers 403 for a reason no setting fixes.
+  checks: write
+
+# One run per PR head. A superseded run's verdicts would attach to a
+# commit nobody is reviewing, and worse, a slow one landing after a newer
+# one would look to §8.3 rule 8 like the judge disagreeing with itself.
+concurrency:
+  group: manual-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+      any: ${{ steps.pick.outputs.any }}
+      preview_url: ${{ steps.preview.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The diff needs both sides. A shallow checkout gives a
+          # merge-base of nothing and selects every test — which is the
+          # expensive direction, since a judge pass spends the model
+          # subscription.
+          fetch-depth: 0
+
+      - name: set up the pipeline
+        uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+        with:
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}
+
+      - name: pick the tests this diff obliges
+        id: pick
+        run: |
+          set -euo pipefail
+          # Against the base, not the previous commit: the gate is about
+          # what this PR changes as a whole, and a push that touches one
+          # file would otherwise drop every test the PR's earlier commits
+          # obliged.
+          git diff --name-only "origin/${{ github.event.pull_request.base.ref }}...HEAD" > changed.txt
+          M="$(pipeline manual-tests --changed-files changed.txt --format json)"
+          echo "matrix=$M" >> "$GITHUB_OUTPUT"
+          # A matrix with an empty include is legal and runs no jobs, but
+          # a job whose `if` reads it would still be skipped rather than
+          # absent — so the count is published separately and the judge
+          # job is gated on it. Skipped and absent print differently in
+          # the Checks tab, and "no manual test covered this diff" is
+          # worth being able to see.
+          python3 - "$M" <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          print("any=%s" % ("true" if json.loads(sys.argv[1])["include"] else "false"))
+          PY
+          echo "selected: $M"
+
+      # The preview is built out-of-band from this workflow, so it is
+      # probably not up when the PR opens. Waited for rather than assumed,
+      # and read rather than derived: the platform reports its own preview
+      # as a deployment on the PR, and building a URL from the branch name
+      # would be guessing at somebody else's slugging and handing the
+      # guess to a judge as the thing under test (DESIGN §4).
+      #
+      # **The bound is a guess and says so.** Nobody has measured how long
+      # a Render preview takes to provision — it is an open item — so ten
+      # minutes is a placeholder chosen to be longer than a build and
+      # shorter than a coffee. Runner minutes are cheap next to what a
+      # preview's own lifetime costs, which is why waiting here rather
+      # than re-triggering on `deployment_status` is affordable; if the
+      # measurement comes back large, that trigger is the shape to move
+      # to.
+      - name: wait for the preview
+        id: preview
+        # Only when something will read it. A diff obliging no manual
+        # test should not pay ten minutes of runner time for a URL nobody
+        # is going to open — and it should not fail the PR when the
+        # preview is genuinely absent either, which it would if this ran
+        # unconditionally on a docs-only change.
+        if: steps.pick.outputs.any == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          for i in $(seq 1 40); do
+            if URL="$(pipeline preview-url --branch "$BRANCH")"; then
+              echo "url=$URL" >> "$GITHUB_OUTPUT"
+              echo "preview: $URL"
+              exit 0
+            fi
+            rc=$?
+            # 3 is "not yet"; anything else is a failed preview or a
+            # broken read, and polling past it wastes the whole window on
+            # something that is not coming.
+            if [ "$rc" -ne 3 ]; then
+              echo "::error::the preview is not coming (exit $rc)" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "::error::no preview for $BRANCH after 10 minutes" >&2
+          exit 1
+
+
+  judge:
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      # One failing test must not cancel the others: every selected test
+      # is meant to produce a verdict, and a cancelled sibling records
+      # none — which leaves the next pass over this commit unable to
+      # detect a disagreement.
+      fail-fast: false
+      matrix: ${{ fromJson(needs.select.outputs.matrix) }}
+    steps:
+      # **No checkout here.** The judge action makes its own, narrowed to
+      # tests/manual, because what the judge may see is the whole point
+      # (§8.3 rule 4). Checking the project out first would undo it.
+      - uses: SwaggerAllen/orchestration/.github/actions/agent-judge@main
+        with:
+          test_path: ${{ matrix.path }}
+          test_id: ${{ matrix.id }}
+          sha: ${{ github.event.pull_request.head.sha }}
+          preview_url: ${{ needs.select.outputs.preview_url }}
+          github_token: ${{ github.token }}
+          linear_api_key: ${{ secrets.LINEAR_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          pipeline_repo_token: ${{ secrets.PIPELINE_REPO_TOKEN }}

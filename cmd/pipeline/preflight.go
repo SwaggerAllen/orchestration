@@ -376,6 +376,14 @@ var unexercised = []struct{ scope, why string }{
 	{"contents: write", "pushing the agent's commits to the ticket branch"},
 	{"pull-requests: write", "opening the PR and flipping the draft off"},
 	{"deployments: write", "recording the stand-in deployment after a merge"},
+	// The one entry here that preflight could not probe even if it were
+	// willing to leave litter: no fine-grained token can be granted the
+	// check-runs API at all, so this is unexercisable rather than merely
+	// unexercised. Named anyway, because the list's job is to keep the
+	// green line honest about what a passing preflight has not
+	// established — and "could not have" is exactly the case a reader
+	// would otherwise assume was covered.
+	{"checks: write", "recording a manual test verdict, from the judge job's own token — preflight cannot probe this at all"},
 	{"LINEAR_API_KEY (write)", "every transition, comment and label the harness makes"},
 	{"PIPELINE_STATE_TOKEN (write)", "recording each move before making it, which is what makes the invariants enforceable"},
 }

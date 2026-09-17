@@ -71,6 +71,8 @@ func run(args []string) error {
 		return cmdManualTests(args[1:])
 	case "manual-verdict":
 		return cmdManualVerdict(args[1:])
+	case "preview-url":
+		return cmdPreviewURL(args[1:])
 	case "non-asks":
 		return cmdNonAsks(args[1:])
 	case "reasons":

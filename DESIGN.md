@@ -1461,7 +1461,28 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
 
 **CI (blocking, in `Checks`):**
 - compile, format, warnings-as-errors, type checking, module boundary rules
-- static storybook export builds and publishes
+- **the manual tests whose seams the diff touches pass, judged.** A manual test is a file under
+  `tests/manual/`, its front matter naming the docs that own the code it exercises
+  (`covers: [system:engine]`); the diff's seams come from the same file maps the mutex reads, so
+  one place declares what a path belongs to. Per PR only the selected ones run — a judge pass
+  spends the model subscription — and **the full set runs at the milestone boundary** (§10),
+  which is what keeps the directory from becoming a pile of claims nothing checks.
+  - **The judge never sees the diff.** It gets one test file and a running preview, from a
+    checkout that carries `tests/manual/` and nothing else. A pass that can read the
+    implementation writes the assertion that agrees with it, which is the shape that shipped
+    `awaitingDispatchOf`; the checkout is what makes the rule hold rather than the prompt.
+  - **A pass with no evidence is a failure.** Screenshots, transcripts and the observation log
+    are run artifacts, and a verdict with nothing attached is indistinguishable from a judge
+    that never ran — the same reasoning as a probe having to assert that it edited something.
+  - **Verdicts are check runs**, one per test, named `manual/<id>` so two runs over one commit
+    are comparable. A verdict differing from one already recorded for that test on that commit
+    is a finding about the *judge*: recorded `neutral`, filed to Triage as a `harness` finding,
+    and **it does not count toward the two failures below.** Without that, a flapping judge
+    spends a ticket's escalation budget and parks work that was never broken.
+  - **A manual test that covers a seam no doc declares fails the audit.** It could never be
+    selected, so it could never fail, which makes it a claim nothing checks — the thing letting
+    the directory accumulate was supposed to avoid.
+- static storybook export builds and publishes, where a project still publishes one (§4)
 - **a new component module or theme token not named in the issue fails the build** — the class
   audit, promoted from convention to enforcement, so a proposed component cannot arrive
   unannounced inside an artifact. Components are enforced: a file added under the project's
@@ -1602,8 +1623,8 @@ where the person about to widen workspace access will actually see it.
 
 ## 10. The milestone boundary
 
-Every milestone ends with a hard pause — the author's second touchpoint, and the only place
-manual testing happens.
+Every milestone ends with a hard pause — the author's second touchpoint, and where the *full*
+manual test set runs (§9).
 
 **The pause is tracked by a ticket, not by pipeline state.** Every other handoff in this system
 is a ticket in a state; modelling this one as a phase of the controller is what leaves it with
@@ -3012,9 +3033,13 @@ completed while a boundary was running.
   what remains uncovered is files owned by no system — the router, the manifests — which are
   named in sketches and caught only textually by git. The mutex's quality is the partition's
   quality: revisit the system map when one label starts serializing unrelated work.
-- **Staging.** With one environment, the post-deploy check runs against production. The intended
-  eventual shape is staging with a manual test gate, which would sit between `Reconciling` and
-  `Merged`.
+- **Staging.** With one environment, the post-deploy check runs against production. Staging
+  itself stays open; the manual test gate this item bundled with it does not, and **it does not
+  sit between `Reconciling` and `Merged`.** It runs in `Checks`, before reconcile — a per-PR
+  preview environment (§4) means the branch has a running instance, so the earliest instance to
+  drive is no longer the post-merge one. That was the only reason the later placement was
+  proposed, and the difference is what a failure costs: caught in `Checks` it is a rework,
+  caught after `Merged` it is a revert of something already deployed.
 - **Tracker plan limits.** Confirm webhook and API access on whatever plan the project is on
   before the control plane assumes either; free tiers vary and change.
 - **A stalled boundary halts the queue silently.** A *crashed* boundary run is now caught by
