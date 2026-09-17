@@ -156,6 +156,42 @@ type Checks struct {
 	FailedJobs []string
 }
 
+// PreviewStatus is what the host knows about a branch's preview
+// environment.
+type PreviewStatus string
+
+const (
+	// PreviewNone: nothing has claimed to deploy this branch. A project
+	// with no previews wired and a project whose preview has been torn
+	// down are the same answer, and both mean "post nothing" (DESIGN §4).
+	PreviewNone PreviewStatus = ""
+	// PreviewPending: the platform has taken the branch and not finished.
+	PreviewPending PreviewStatus = "pending"
+	PreviewReady   PreviewStatus = "ready"
+	PreviewFailed  PreviewStatus = "failed"
+)
+
+// Preview is a branch's preview environment as the code host reports it.
+//
+// Read from the host rather than from the deploy platform, because the
+// platform is the one thing here that varies per project while the report
+// does not: Render represents a PR preview as a GitHub deployment on the
+// PR (its own changelog, 2024-09-09, replacing the PR comment it posted
+// before), and so does anything else with a GitHub integration. It is
+// also DESIGN §4's existing rule about the URL — reported by the
+// publisher rather than derived from a branch name — holding for a
+// publisher we no longer run ourselves.
+type Preview struct {
+	Status PreviewStatus
+	// URL is where the preview is, set when Ready. It is the
+	// environment_url the platform attached to its own deployment status;
+	// nothing here builds it.
+	URL string
+	// Description is what the platform said, carried so a failure comment
+	// can quote the platform rather than paraphrase it. Often empty.
+	Description string
+}
+
 // JobLog is one failing CI job with the tail of its output. The dev
 // agent's rework scope is the failure comment, and a comment that says
 // "fix what the linked run reports" is only a scope to a reader who can
@@ -332,6 +368,20 @@ type Host interface {
 	// recorded for an agent merge and every ticket sat in Merged until
 	// the deploy timeout moved it to Blocked.
 	RecordDeployment(ctx context.Context, sha, environment string) error
+	// PreviewFor reports the preview environment for a branch: where it
+	// is, and whether it is there yet.
+	//
+	// By branch rather than by PR number because that is what separates a
+	// preview from production. A ticket branch is never the default
+	// branch, and production deploys land on the default branch, so
+	// filtering on the ref cannot pick production up — which matters
+	// because deleting or mis-reporting production would be the one
+	// unrecoverable mistake here, the same reason §4's preview cleanup
+	// names it explicitly rather than trusting a branch filter.
+	//
+	// Not on the deploy port: that port is one production platform per
+	// project, and this is per branch and read from the host.
+	PreviewFor(ctx context.Context, branch string) (Preview, error)
 	// ReadFile returns a file's content on the default branch and
 	// whether it exists at all. Missing is not an error: the boundary's
 	// first pass on a milestone reads a note that is not there yet.
