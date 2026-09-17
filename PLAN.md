@@ -399,12 +399,48 @@ move. Removes the screen and system label partition, amends DESIGN §6 and §7.
 
 **Measured rather than assumed, because §14's prose reads worse than the code is:** §14
 says system labels "extend the mutex and the re-evaluation machinery to declared
-structure", which suggests the re-evaluation rules are entangled. They are not.
-`MutexLabels` and `HoldsMutex` sit on the ticket in `snapshot.go`, `MutexBlocker` has two
-callers (`pickup.go`, `order.go`), `promote.go` carries the mid-milestone rules, and the
+structure", which suggests the re-evaluation rules are entangled. They are not. The
 collision verdicts live in `reconcile` with no core coupling to the prefixes at all — one
-reference in the whole package. The sim scenarios asserting mutex behaviour are the other
-half of the work.
+reference in the whole package.
+
+**The rest of that survey was wrong, in the way a list in prose goes wrong.** Re-derived
+from the tree rather than from the sentence above it, because the entry named some of the
+sites and a partial list reads as a checklist:
+
+| the surface | where |
+| --- | --- |
+| the ticket-side accessors | `MutexLabels`, `HoldsMutex` — `snapshot.go` |
+| the strict reading (may this ticket *enter* a queue) | `MutexHolder` — `snapshot.go`, one caller in `sweep.go` |
+| the tie-broken reading (may work *start* now) | `MutexBlocker` — `snapshot.go`, callers in `sweep.go` and `pickup.go` |
+| a third, inline re-implementation | `order.go`, using `HoldsMutex` + `MutexLabels` directly |
+| the pickup assertion's own check | `agent/agent.go`, `HoldsMutex` + `HasLabel` |
+| the design pass's label reconciliation | `reconcileMutexLabels`, `staleMutexLabels`, `requiredMutexLabels` — `design.go` |
+| the CI requirement | `filemap.Audit`'s "a changed path requires that doc's label" |
+| the vocabulary | `protocol.ScreenLabelPrefix`, `protocol.SystemLabelPrefix` |
+
+Two corrections in that table. **`MutexBlocker`'s callers are `sweep.go` and `pickup.go`,
+not `pickup.go` and `order.go`** — `order.go` never calls it, and instead carries its own
+inline loop over `HoldsMutex` and `MutexLabels`, which is the "two implementations of one
+rule is how they drift" hazard sitting unnoticed in the survey that was supposed to find
+it. And **`MutexHolder` is a third entry point the survey does not mention at all**,
+distinct from `MutexBlocker` by exactly the deadlock tie-break.
+
+**`filemap.OwnerLabels` survives C6, and its name will be the only thing left that says
+"label".** It maps changed paths to the docs that own them, which the mutex used to consume
+as "the labels this branch requires" — and which `manual-tests` now consumes as "the seams
+this diff touches" (§8.3 rule 6). So C6 removes its pre-C6 caller and leaves the function,
+renamed to say what it does.
+
+**The deadlock the tie-break exists for is an argument for this change, not a footnote to
+it.** `MutexBlocker`'s comment records ORC-171 and ORC-174 sharing two system labels and
+sitting in `Ready for rework` for an hour and thirty-five minutes, each the other's
+holder, the dev agent idle and the sweep planning nothing — broken only when the author
+moved one to `Blocked`. Conflicts-as-mutex has no such state: both tickets proceed, and
+git decides at merge time. The tie-break is a repair to a failure mode the label mutex
+creates and the replacement does not have, which is the strongest thing in favour of
+making the swap.
+
+The sim scenarios asserting mutex behaviour are the other half of the work.
 *Exit: the scenarios rewritten to assert conflict-parking where they asserted mutex
 refusal, and a rehearsal with two overlapping tickets landing without a label between
 them.*
