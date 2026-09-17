@@ -628,3 +628,81 @@ func TestAuditReportsRuleSideBytesPerPortedDoc(t *testing.T) {
 		t.Error("an unported doc was sized; the report is about the port's progress")
 	}
 }
+
+// The manual test set's reachability rides on the same root, so it fails
+// the same way and is covered the same way.
+//
+// This is the wiring, not the rule: internal/manualtest tests Problems
+// itself. Reverting the one line that appends its findings to the audit's
+// violations printed `ok` against a suite that covered the rule
+// thoroughly — the shape CLAUDE.md records for awaitingDispatchOf and for
+// the host-to-core mapping, where each half was asserted and the crossing
+// was not.
+func TestAuditGatesManualTestReachability(t *testing.T) {
+	root := project(t)
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func() error {
+		return cmdAudit([]string{
+			"--config", filepath.Join(root, "pipeline.config.json"),
+			"--changed-files", listFile(t, "lib/app/billing/invoice.ex"),
+			"--labels", "system:billing",
+		})
+	}
+
+	// Reachable: `system:billing` is what systems/billing.md declares.
+	mustWrite("tests/manual/invoice-renders.md", "---\ncovers:\n  - system:billing\n---\n\n# renders\n")
+	if err := run(); err != nil {
+		t.Fatalf("a reachable manual test failed the audit: %v", err)
+	}
+
+	// Unreachable: no doc declares this seam, so no diff selects it and
+	// it can never fail — an unchecked claim, which is the pile §8.2's
+	// argument depends on not existing.
+	mustWrite("tests/manual/orphan.md", "---\ncovers:\n  - system:billling\n---\n\n# typo\n")
+	var err error
+	// Violations go to stderr and the error carries only the count —
+	// this command's existing shape, so the detail is asserted where the
+	// audit actually puts it. A reader fixing this needs the file and the
+	// seam, and "1 violations" is neither.
+	out := captureStderr(t, func() { err = run() })
+	if err == nil {
+		t.Fatal("a manual test covering a seam no doc declares must fail the audit")
+	}
+	for _, want := range []string{"tests/manual/orphan.md", "billling", "no system or screen doc declares"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the audit's output does not name %q:\n%s", want, out)
+		}
+	}
+	// Repo-relative, so the reader is told which file to fix rather than
+	// where the runner put its checkout.
+	if strings.Contains(out, root) {
+		t.Errorf("the violation names the runner's absolute path:\n%s", out)
+	}
+}
+
+// "This project has no manual tests yet" and "every manual test is
+// reachable" must not print the same line — the distinction the class
+// audit's own skips exist for.
+func TestAuditSaysItSkippedManualTestsRatherThanPassingThem(t *testing.T) {
+	root := project(t)
+	out := captureStdout(t, func() {
+		if err := cmdAudit([]string{
+			"--config", filepath.Join(root, "pipeline.config.json"),
+			"--changed-files", listFile(t, "lib/app/billing/invoice.ex"),
+			"--labels", "system:billing",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "manual tests: skipped") {
+		t.Errorf("no skip line for a project with no manual tests:\n%s", out)
+	}
+}

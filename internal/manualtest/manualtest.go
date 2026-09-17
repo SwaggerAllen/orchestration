@@ -24,6 +24,7 @@ package manualtest
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -45,17 +46,27 @@ type Test struct {
 	// ID is the basename without extension, which is what the check run
 	// is named after and what the boundary batch reports.
 	ID string
-	// Path is repo-relative.
+	// Path is repo-relative, always — see Load.
 	Path string
 	// Covers are the seams this test exercises, as filemap spells a
 	// mutex label: "system:engine", "screen:board".
 	Covers []string
 }
 
-// Load reads every manual test under dir. A missing directory is not an
-// error — a project with no manual tests yet is legal, and the gate has
-// nothing to run rather than something to complain about.
-func Load(dir string) ([]Test, error) {
+// Load reads every manual test under root's Dir. A missing directory is
+// not an error — a project with no manual tests yet is legal, and the
+// gate has nothing to run rather than something to complain about.
+//
+// It takes the project root rather than the tests directory so that
+// Test.Path is repo-relative by construction. Every consumer wants that
+// spelling and none wants the runner's: a check run's name has to match
+// across commits for rule 8 to compare two verdicts for one test, a
+// sparse-checkout pattern is repo-relative by definition, and an audit
+// violation naming `/tmp/…/tests/manual/x.md` tells the reader where the
+// runner put the checkout instead of which file to go and fix. Written
+// the other way round first, and the audit's own output said so.
+func Load(root string) ([]Test, error) {
+	dir := filepath.Join(root, Dir)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -84,7 +95,7 @@ func Load(dir string) ([]Test, error) {
 		}
 		tests = append(tests, Test{
 			ID:     strings.TrimSuffix(name, ".md"),
-			Path:   filepath.ToSlash(filepath.Join(dir, name)),
+			Path:   path.Join(Dir, name),
 			Covers: covers,
 		})
 	}

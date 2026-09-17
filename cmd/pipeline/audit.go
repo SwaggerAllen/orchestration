@@ -14,6 +14,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/citations"
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
+	"github.com/SwaggerAllen/orchestration/internal/manualtest"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
@@ -125,6 +126,31 @@ func cmdAudit(args []string) error {
 	}
 
 	violations := filemap.Audit(systems, screens, changed, labels)
+
+	// The manual test set's own coherence (ops-free-pipeline.md §8.3).
+	// Gated here rather than reported, because the failure it catches is
+	// silent by construction: a test covering a seam no doc declares is
+	// never selected by any diff and so never fails, which is the
+	// unchecked-claim pile §8.2's argument depends on not existing.
+	//
+	// Read as the docs stand rather than from the diff, like the doc lint
+	// below: a test that stopped being reachable when a system doc was
+	// renamed is unreachable on every ticket after, not only the one that
+	// renamed it.
+	manualTests, err := manualtest.Load(*root)
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(manualTests) == 0:
+		// Skipped, not passed — the same distinction the class audit
+		// below draws. "This project has no manual tests yet" and "every
+		// manual test is reachable" must not print the same line.
+		fmt.Printf("manual tests: skipped — no tests under %s (ops-free-pipeline.md §8)\n", manualtest.Dir)
+	default:
+		violations = append(violations, manualtest.Problems(manualTests, systems, screens)...)
+		fmt.Printf("manual tests: %d checked for reachability\n", len(manualTests))
+	}
 
 	// The doc lint reads the docs as they stand rather than the diff:
 	// the rule is about what a doc contains, and a doc that has held a

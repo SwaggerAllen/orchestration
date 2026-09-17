@@ -9,9 +9,20 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 )
 
-func write(t *testing.T, dir, name, body string) {
+// tree returns a project root with an empty tests/manual/ in it, since
+// Load takes the root and derives Dir itself.
+func tree(t *testing.T) string {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, Dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func write(t *testing.T, root, name, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, Dir, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -33,7 +44,7 @@ func ids(tests []Test) []string {
 }
 
 func TestLoadReadsCoversAndSkipsNonTests(t *testing.T) {
-	dir := t.TempDir()
+	dir := tree(t)
 	write(t, dir, "queue-drains.md", covering("system:delivery", "screen:board"))
 	write(t, dir, "queue-drains.reasons.md", "## #1\n\nwhy\n")
 	write(t, dir, "README.md", "not a test\n")
@@ -49,7 +60,7 @@ func TestLoadReadsCoversAndSkipsNonTests(t *testing.T) {
 	if !reflect.DeepEqual(got[0].Covers, []string{"system:delivery", "screen:board"}) {
 		t.Errorf("covers = %v", got[0].Covers)
 	}
-	if got[0].Path != filepath.ToSlash(filepath.Join(dir, "queue-drains.md")) {
+	if got[0].Path != "tests/manual/queue-drains.md" {
 		t.Errorf("path = %q", got[0].Path)
 	}
 }
@@ -58,7 +69,7 @@ func TestLoadReadsCoversAndSkipsNonTests(t *testing.T) {
 // id nobody recognises — and it would be reported as covering nothing,
 // which is a finding about a file that is not a test at all.
 func TestLoadSkipsTheReasonsSibling(t *testing.T) {
-	dir := t.TempDir()
+	dir := tree(t)
 	write(t, dir, "a.reasons.md", covering("system:engine"))
 	got, err := Load(dir)
 	if err != nil {

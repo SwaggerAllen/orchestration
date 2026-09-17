@@ -67,6 +67,8 @@ func run(args []string) error {
 		return cmdPreflight(args[1:])
 	case "audit":
 		return cmdAudit(args[1:])
+	case "manual-tests":
+		return cmdManualTests(args[1:])
 	case "non-asks":
 		return cmdNonAsks(args[1:])
 	case "reasons":
@@ -113,6 +115,10 @@ commands:
            (requires LINEAR_API_KEY; GITHUB_TOKEN adds the host checks)
   audit    mutex audit for CI: changed paths vs the screen and system
            file maps and the ticket's labels (DESIGN 9)
+  manual-tests
+           which manual tests a run should execute: --changed-files
+           selects the ones whose seams the diff touches, --all is the
+           milestone boundary batch (ops-free-pipeline.md 8)
   non-asks what the author has already refused about a scope this run
            has just discovered (DESIGN 4). The prompt's slice is
            selected before the pass starts, against labels a first
