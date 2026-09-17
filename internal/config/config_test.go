@@ -127,6 +127,53 @@ func TestValidateNamesEveryMissingField(t *testing.T) {
 	}
 }
 
+// The first of the three merges that retire the Pages preview (PLAN §6.2,
+// C4). This is the one that gives the project a side to go first from: it
+// has to validate against a config that still carries the block *and* one
+// that has dropped it, or each side alone is invalid and the project's
+// every command fails until both have landed.
+func TestValidateAcceptsAConfigWithNoPreviewBlock(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(m map[string]any)
+	}{
+		{"key absent", func(m map[string]any) { delete(m, "preview") }},
+		{"block empty", func(m map[string]any) { m["preview"] = map[string]any{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sampleAsMap(t)
+			tc.mutate(m)
+			c, err := Load(writeConfig(t, m))
+			if err != nil {
+				t.Fatalf("a project with no preview wired must validate: %v", err)
+			}
+			if c.Preview != (Preview{}) {
+				t.Errorf("preview = %+v, want the zero value", c.Preview)
+			}
+		})
+	}
+}
+
+// Optional as a block, required as a whole. Half a Pages preview publishes
+// nowhere while reading as configured, and the three keys are only
+// meaningful together — so dropping one is a typo, not a project opting
+// out. The rows in TestValidateNamesEveryMissingField above are exactly
+// that case and still fail; this asserts the two behaviours are different,
+// which is the whole content of "optional as a block".
+func TestValidateStillRejectsAHalfWiredPreview(t *testing.T) {
+	m := sampleAsMap(t)
+	m["preview"] = map[string]any{"pagesProject": "sample-storybook"}
+	_, err := Load(writeConfig(t, m))
+	if err == nil {
+		t.Fatal("a preview block naming a project but nothing to publish must fail")
+	}
+	for _, want := range []string{"preview.buildCommand: missing", "preview.outputDir: missing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
 func TestValidateRejectsDuplicateTrackerNames(t *testing.T) {
 	m := sampleAsMap(t)
 	m["states"].(map[string]any)["reworking"] = "In progress"

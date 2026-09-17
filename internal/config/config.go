@@ -227,6 +227,14 @@ var DeployProviders = []string{"render", "digitalocean", "github"}
 
 // Preview configures the static storybook export (DESIGN §4): what builds
 // it and where Cloudflare Pages serves it.
+//
+// The whole block is optional, and a project that omits it has no preview
+// — which DESIGN §4 already calls silence rather than a dead link. It is
+// being retired (PLAN §6.2, C4): design review reads the storybook from
+// the running preview instead, so nothing here is built or published by
+// the agent job. Comparison against the zero value is what makes "omitted"
+// a state, so a field added here would quietly make an empty block
+// non-empty — which is why nothing should be added to it.
 type Preview struct {
 	PagesProject string `json:"pagesProject"`
 	// BuildCommand produces the static export; OutputDir is what gets
@@ -384,14 +392,28 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Preview.PagesProject == "" {
-		add("preview.pagesProject: missing")
-	}
-	if c.Preview.BuildCommand == "" {
-		add("preview.buildCommand: missing")
-	}
-	if c.Preview.OutputDir == "" {
-		add("preview.outputDir: missing")
+	// Optional as a block, required as a whole: a project either wires the
+	// Cloudflare Pages export or it does not, and half of it publishes
+	// nowhere while looking configured.
+	//
+	// Optional is the first of the three merges that retire this block
+	// (PLAN §6.2, C4). Required unconditionally, it deadlocked: removing
+	// the block from a project fails validation here, and removing the
+	// field here makes the project's block an unknown key —
+	// DisallowUnknownFields — so each side alone is invalid. That is the
+	// protocol-state shape, and the ninety minutes it cost is recorded in
+	// CLAUDE.md. Loosening first is what gives the project a side to go
+	// first from.
+	if c.Preview != (Preview{}) {
+		if c.Preview.PagesProject == "" {
+			add("preview.pagesProject: missing")
+		}
+		if c.Preview.BuildCommand == "" {
+			add("preview.buildCommand: missing")
+		}
+		if c.Preview.OutputDir == "" {
+			add("preview.outputDir: missing")
+		}
 	}
 	if len(c.Actors) == 0 {
 		add("actors: missing")
