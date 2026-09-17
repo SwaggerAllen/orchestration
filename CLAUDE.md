@@ -136,10 +136,21 @@ against the live API rather than against the constants beside it.
 `internal/sim` runs a scenario to convergence and checks its `expect`
 steps. `expect` carries `state`, `hasLabels`, `lacksLabels`, `assignee`,
 `markers`, **`runKind`** and **`runLive`** — and only the last two say an
-agent was actually dispatched. Sixteen of the twenty-three scenarios use
-them. The one that did not is the one above.
+agent was actually dispatched.
 
-If what is under test is that something *runs*, assert the run.
+**The nine that assert no run are named rather than counted**, because a
+count is a claim the next pass re-derives from nothing and this one was
+already two milestones stale when it was read: `assignment_follows_the_ball`,
+`ci_red_twice_blocks`, `deploy_outcomes`, `design_queue_promotion`,
+`empty`, `milestone_correction`, `preview_announced_in_design_review`,
+`preview_not_coming_is_said_once`, `stale_claim_blocks`. Every other
+scenario asserts one. `awaitingDispatchOf` above shipped behind one of
+these, and the list is short enough that adding to it is a decision rather
+than an omission.
+
+If what is under test is that something *runs*, assert the run. If what is
+under test is a *comment* — the preview pair — assert `markers`, and
+assert the count on a second sweep too, or nothing says it is said once.
 
 ## Adding a protocol state is a two-repo change, and there is no safe order
 

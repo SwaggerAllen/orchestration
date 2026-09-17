@@ -351,6 +351,34 @@ preview is published per branch today and per PR after.
 preview is reported on the ticket rather than silently absent — the one genuinely new
 rule, since the Pages build could not fail by construction.*
 
+**Merge 1 and the new rule are done; merges 2 and 3 are the project's and what follows
+it.** The preview block is optional as a block and required as a whole, `host.PreviewFor`
+reads the branch's preview from the code host, and the sweep announces it or says once
+that it is not coming (DESIGN §4). What remains is Catapult removing its `preview` block
+and `bin/preview-build.sh`, then the `Preview` field coming out here.
+
+Four things building it settled that this entry had wrong or silent:
+
+- **`previews.expireAfterDays` is Render's, not ours.** It is a `render.yaml` Blueprint key
+  on the project, so "previews on with `expireAfterDays` set" adds no config field here and
+  is entirely a Catapult change. Written as though it were a pipeline field, it would have
+  been a fourth merge in the ordering table for no reason.
+- **The preview is read from the code host, not from Render.** Render represents a PR
+  preview as a GitHub deployment on the PR — its own changelog, 2024-09-09, replacing the
+  comment it used to post. That keeps DESIGN §4's "reported by the publisher, never derived"
+  intact for a publisher we no longer run, needs no second credential, and works for any
+  platform with a GitHub integration rather than for Render alone.
+- **The announcement cannot happen at design finish.** The PR is seconds old there, so the
+  preview is always still building. §7.3's "Design review already hands the author the ball"
+  describes where the ball is, not when the comment is posted; the comment is the sweep's.
+- **Pending needs a bound and `deploy.timeout` is it.** Same question — how long to wait for
+  a platform before saying it will not finish — and borrowing it invents no threshold, which
+  is the failure CLAUDE.md records surviving review once.
+
+The two publishing paths coexist while the cutover runs: a project still on Pages posts the
+url-bearing marker from its design job, and the sweep reads that marker as terminal and
+stays quiet. So merge 2 has no window to straddle.
+
 **C5 — The manual test gate.** The largest item and the only new subsystem:
 `tests/manual/**` in Catapult's `designOwnedPaths`, the judge session and its isolation
 from the diff, evidence as run artifacts, verdicts as check runs, the seam-based per-PR
