@@ -2152,3 +2152,131 @@ func TestPickupAdmitsTheRedesignQueueForDesignOnly(t *testing.T) {
 		}
 	}
 }
+
+// previewComment is a ticket comment carrying a preview marker, the way
+// the sweep's own ActComment lands on the ticket and the next snapshot
+// reads it back.
+func previewComment(fields map[string]string) func(*Ticket) {
+	return func(t *Ticket) {
+		m := marker.Marker{Kind: marker.Preview, Fields: fields}
+		t.Comments = append(t.Comments, Comment{Body: m.Comment("preview"), Actor: RoleControlPlane, At: t0.Add(-time.Minute)})
+	}
+}
+
+func withPreview(state PreviewState, url, why string) func(*Ticket) {
+	return func(t *Ticket) { t.Preview = PreviewInfo{State: state, URL: url, Why: why} }
+}
+
+// Design review is the author reading the rendered states, and the ticket
+// asking for that review has to say where they are (DESIGN §4). The design
+// job used to know the URL because it had just published; it no longer
+// publishes, so this is where the announcement happens.
+func TestPreviewReadyIsAnnouncedOnTheTicket(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewReady, "https://orc-9.example.dev", "")))
+	a := find(Sweep(s), ActComment, "T1")
+	if a == nil {
+		t.Fatal("a ready preview must be announced")
+	}
+	if a.Marker == nil || a.Marker.Kind != marker.Preview || a.Marker.Fields["url"] != "https://orc-9.example.dev" {
+		t.Errorf("marker = %+v", a.Marker)
+	}
+	if !strings.Contains(a.Prose, "https://orc-9.example.dev") {
+		t.Errorf("prose does not carry the URL: %q", a.Prose)
+	}
+}
+
+// Convergent: the comment it plans is the marker the next snapshot reads,
+// so the ticket stops qualifying the moment the write lands. Without this
+// the author gets the same link every hour for as long as the ticket sits
+// in review.
+func TestPreviewAlreadyAnnouncedSaysNothingMore(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewReady, "https://orc-9.example.dev", ""),
+		previewComment(map[string]string{"url": "https://orc-9.example.dev"})))
+	if a := find(Sweep(s), ActComment, "T1"); a != nil {
+		t.Errorf("announced a preview the ticket already carries: %+v", a.Marker)
+	}
+}
+
+// Still building is not news. A comment per sweep saying so would be.
+func TestPreviewPendingWithinTheTimeoutSaysNothing(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewPending, "", "")))
+	if a := find(Sweep(s), ActComment, "T1"); a != nil {
+		t.Errorf("commented on a preview that is merely still building: %+v", a.Prose)
+	}
+}
+
+// Past the deploy timeout it stops being "still building" and starts being
+// "not coming". The bound is deploy.timeout rather than a number invented
+// for previews: it is the same question that timeout already answers.
+func TestPreviewPendingPastTheTimeoutIsReported(t *testing.T) {
+	tick := tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewPending, "", ""))
+	tick.StateSince = t0.Add(-31 * time.Minute) // DeployTimeout is 30m
+	a := find(Sweep(snap(tick)), ActComment, "T1")
+	if a == nil {
+		t.Fatal("a preview that never arrived must be reported, not waited on forever")
+	}
+	if a.Marker == nil || a.Marker.Fields["state"] != "failed" {
+		t.Errorf("marker = %+v", a.Marker)
+	}
+	if a.Marker.Fields["url"] != "" {
+		t.Errorf("a preview that is not coming must carry no URL: %+v", a.Marker)
+	}
+}
+
+// The failure is reported with the platform's own words rather than
+// paraphrased, because the author is the one who has to go and look.
+func TestPreviewFailedIsReportedWithThePlatformsReason(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewFailed, "", "build exited 1: mix compile")))
+	a := find(Sweep(s), ActComment, "T1")
+	if a == nil {
+		t.Fatal("a failed preview must be reported")
+	}
+	if !strings.Contains(a.Prose, "build exited 1: mix compile") {
+		t.Errorf("prose does not quote the platform: %q", a.Prose)
+	}
+}
+
+func TestPreviewFailureIsSaidOnce(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewFailed, "", ""),
+		previewComment(map[string]string{"state": "failed"})))
+	if a := find(Sweep(s), ActComment, "T1"); a != nil {
+		t.Errorf("repeated a failure already on the ticket: %+v", a.Prose)
+	}
+}
+
+// The failure marker suppresses further failures and nothing else. A
+// preview that failed and was rebuilt still gets announced — which is why
+// the terminal predicate is a url-bearing marker rather than any preview
+// marker.
+func TestAPreviewThatFailedAndThenBuiltIsStillAnnounced(t *testing.T) {
+	s := snap(tk("T1", protocol.DesignReview, arrived(protocol.Designing, RoleDesign),
+		withPreview(PreviewReady, "https://orc-9.example.dev", ""),
+		previewComment(map[string]string{"state": "failed"})))
+	a := find(Sweep(s), ActComment, "T1")
+	if a == nil {
+		t.Fatal("a rebuilt preview must still be announced after an earlier failure")
+	}
+	if a.Marker.Fields["url"] != "https://orc-9.example.dev" {
+		t.Errorf("marker = %+v", a.Marker)
+	}
+}
+
+// Every other state has an agent working or a queue to join. Design review
+// is the one where the author is reading, and it is the only one that
+// wants a preview announced.
+func TestPreviewIsOnlyAnnouncedInDesignReview(t *testing.T) {
+	for _, state := range []protocol.State{protocol.Designing, protocol.ReadyForDev, protocol.InProgress, protocol.Merged} {
+		t.Run(string(state), func(t *testing.T) {
+			s := snap(tk("T1", state, withPreview(PreviewReady, "https://orc-9.example.dev", "")))
+			if a := find(Sweep(s), ActComment, "T1"); a != nil && a.Marker != nil && a.Marker.Kind == marker.Preview {
+				t.Errorf("announced a preview in %s", state)
+			}
+		})
+	}
+}

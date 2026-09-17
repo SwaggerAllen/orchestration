@@ -119,12 +119,22 @@ const (
 	// under the kind it counts, which is what kept the conflict rule
 	// re-reading its own output as a fourth conflict.
 	Blocked Kind = "blocked"
-	// Preview records where this design pass's storybook export was
-	// published. Design review is the author reading the rendered
-	// states (DESIGN §4), and until this existed the ticket asking for
-	// that review never said where to find them — the URL had to be
-	// reconstructed from a branch name and a Pages project. Field:
-	// url=<the published preview>.
+	// Preview records this pass's preview environment. Design review is
+	// the author reading the rendered states (DESIGN §4), and until this
+	// existed the ticket asking for that review never said where to find
+	// them — the URL had to be reconstructed from a branch name and a
+	// Pages project.
+	//
+	// Fields: url=<where the preview is>, and state=failed on the one
+	// that reports a preview that is not coming. A marker with no `state`
+	// carries a URL and means ready — that is every marker written before
+	// the field existed, and reading absent as ready is what keeps those
+	// tickets legible.
+	//
+	// The url-bearing one is terminal: once a preview has been announced
+	// there is nothing further to say, and that is the predicate the sweep
+	// uses to stop looking. A `state=failed` marker is not terminal, so a
+	// preview that fails and is later rebuilt still gets announced.
 	Preview Kind = "preview"
 	// ClaimFailed records a run that died before it held the ticket.
 	//

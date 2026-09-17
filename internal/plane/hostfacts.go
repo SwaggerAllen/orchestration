@@ -120,6 +120,34 @@ func (p *Plane) attachHostFacts(ctx context.Context, tickets []*core.Ticket) err
 		if pr == nil {
 			continue
 		}
+		// The branch preview, for tickets in Design review that have not
+		// been told where it is yet. Bounded the same way the verdict
+		// below is, and by the same reasoning: one extra call per ticket
+		// in one state, and none at all once the ticket carries a URL.
+		//
+		// The terminal predicate is a url-bearing preview marker rather
+		// than any preview marker, so the "not coming" comment does not
+		// stop a preview that is later rebuilt from being announced.
+		if t.State == protocol.DesignReview && !core.HasPreviewURL(t) {
+			pv, err := p.Host.PreviewFor(ctx, pr.Branch)
+			if err != nil {
+				// Per-ticket, degraded like every other fact in this
+				// file: an unreadable preview leaves the ticket with no
+				// preview state, which the core reads as nothing to say
+				// and waits on. A snapshot that aborts here would cost
+				// every other ticket its facts over a comment.
+				fmt.Fprintf(os.Stderr, "pipeline: %s: preview unreadable, leaving it unannounced: %v\n", t.Key, err)
+			} else {
+				switch pv.Status {
+				case host.PreviewReady:
+					t.Preview = core.PreviewInfo{State: core.PreviewReady, URL: pv.URL}
+				case host.PreviewPending:
+					t.Preview = core.PreviewInfo{State: core.PreviewPending, Why: pv.Description}
+				case host.PreviewFailed:
+					t.Preview = core.PreviewInfo{State: core.PreviewFailed, Why: pv.Description}
+				}
+			}
+		}
 		// Checks verdicts are fetched only where the sweep reads them —
 		// tickets in Checks with the draft flag off (DESIGN §13) — to
 		// keep the snapshot a bounded number of API calls.

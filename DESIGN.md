@@ -436,14 +436,48 @@ relying on the branch filter, since deleting production would be the one unrecov
 mistake in an otherwise janitorial job.
 
 **The preview URL goes on the ticket, from the publisher.** A ticket arriving in `Design
-review` is a ticket asking to be looked at, so it says where — the design pass posts a `preview`
-marker carrying the URL wrangler reported, in the same breath as the transition. Reported rather
-than derived: Cloudflare's branch-alias slugging is its own rule, truncation and hashing
-included, so building the URL from a branch name and a project name would be guessing at
-someone else's algorithm and handing the author the guess as a link. A project with no preview
-wired posts nothing, which is silence rather than a dead link.
+review` is a ticket asking to be looked at, so it says where — a `preview` marker carrying the
+URL the publisher reported. Reported rather than derived: a platform's branch slugging is its
+own rule, truncation and hashing included, so building the URL from a branch name and a project
+name would be guessing at someone else's algorithm and handing the author the guess as a link.
+A project with no preview wired posts nothing, which is silence rather than a dead link.
 
-**The publishing target is Cloudflare Pages.** Every branch gets a stable preview URL with no
+**The sweep announces it, because the publisher is no longer the design job.** When the design
+job built and published the export itself it knew the URL the moment it had it, and posted in
+the same breath as the transition. A platform preview is built out-of-band from the PR, so at
+finish there is nothing to announce yet. The sweep reads the branch's newest deployment on the
+code host while the ticket sits in `Design review`, and:
+
+| what the host reports | what the ticket gets |
+|---|---|
+| ready | the `preview` marker, carrying `url` |
+| failed | one comment saying so, marker `state=failed`, quoting the platform |
+| pending, within the deploy timeout | nothing — still building is not news |
+| pending, past it | the same `state=failed` comment: it is not coming |
+| nothing | nothing — a project with no previews wired |
+
+**A url-bearing `preview` marker is terminal and a `state=failed` one is not.** Once a preview
+has been announced there is nothing further to say, and that marker is what stops the rule
+looking — the same convergence the merge backfill relies on, where the comment a rule plans is
+the fact that disqualifies the ticket next time. A failure is only suppressed by another
+failure, so a preview that failed and was later rebuilt is still announced.
+
+**The bound on pending is the deploy timeout, not a number of its own.** The question is the one
+that timeout already answers — how long to wait for a platform to finish before saying it will
+not — and a project that finds it wrong has one key to change rather than two.
+
+**None of this is a `Blocked` flavour.** `Design review` already hands the author the ball. A
+preview that is not coming makes the ball they are holding one they cannot act on, and this is
+the comment that gives it back to them.
+
+**The publishing target is the deploy platform's own preview environment**, where it has one,
+and Cloudflare Pages otherwise. A platform that builds a preview per pull request reports it as
+a deployment on the code host — Render does, and has since it replaced the PR comment it used to
+post — which is the same "reported by the publisher" the rule above requires, from a publisher
+the pipeline does not run. It also removes a second build path: a preview built by different
+machinery from production is a review of something other than what ships.
+
+**The Cloudflare Pages route, which it replaces.** Every branch gets a stable preview URL with no
 machinery of ours — per-branch previews are the platform's own feature, and glue code we don't
 write is glue code that can't silently break. The alternatives all cost more than they look:
 GitHub Pages is one site per repo, so per-branch previews mean serialization and cleanup code

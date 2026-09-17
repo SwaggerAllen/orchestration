@@ -160,6 +160,28 @@ const (
 )
 
 // Ticket is one issue as the sweep sees it.
+// PreviewState is what the snapshot knows about a ticket's branch preview.
+// It mirrors host.PreviewStatus rather than reusing it, for the reason
+// CIInfo does not reuse host.Checks: the core is the protocol and takes no
+// dependency on the code host.
+type PreviewState string
+
+const (
+	PreviewUnknown PreviewState = ""
+	PreviewPending PreviewState = "pending"
+	PreviewReady   PreviewState = "ready"
+	PreviewFailed  PreviewState = "failed"
+)
+
+// PreviewInfo is the branch preview as the snapshot found it.
+type PreviewInfo struct {
+	State PreviewState
+	URL   string
+	// Why is the platform's own words about a failure, quoted rather than
+	// paraphrased in the comment. Often empty.
+	Why string
+}
+
 type Ticket struct {
 	ID    string
 	Key   string
@@ -188,7 +210,12 @@ type Ticket struct {
 	AssigneeID string
 	CI         CIInfo
 	Deploy     DeployStatus
-	Run        *Run
+	// Preview is the branch preview the host reports, filled only for
+	// tickets in Design review that have no preview URL on them yet —
+	// the one place the sweep reads it, and the same bounding the CI
+	// verdict gets.
+	Preview PreviewInfo
+	Run     *Run
 	// LiveRuns is every run still executing against this ticket. Run
 	// collapses to one and that is right for every rule but one — see
 	// OtherLiveRun, and the two boundary agents that ran one ticket to

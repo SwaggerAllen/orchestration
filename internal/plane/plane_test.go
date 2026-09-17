@@ -10,6 +10,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/config"
 	"github.com/SwaggerAllen/orchestration/internal/core"
 	"github.com/SwaggerAllen/orchestration/internal/host"
+	"github.com/SwaggerAllen/orchestration/internal/marker"
 	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/setup"
 	"github.com/SwaggerAllen/orchestration/internal/state"
@@ -516,5 +517,147 @@ func TestBuildReadsLinearsOwnDuplicateCategory(t *testing.T) {
 	}
 	if got[bystander.ID] != protocol.Todo {
 		t.Errorf("the bystander read as %q, want %q", got[bystander.ID], protocol.Todo)
+	}
+}
+
+// The snapshot reads the preview only where the sweep acts on it, and
+// stops paying once the ticket carries the URL. Bounded the same way the
+// CI verdict is, and for the same reason: one extra host call per ticket
+// in one state is affordable, one per ticket is not.
+func TestBuildReadsThePreviewOnlyForUnannouncedDesignReview(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	h := host.NewMemory()
+	p = p.WithHost(h)
+
+	waiting := seedIssue(t, tr, cfg, "In design review, no preview yet", protocol.DesignReview)
+	told := seedIssue(t, tr, cfg, "In design review, already told", protocol.DesignReview)
+	elsewhere := seedIssue(t, tr, cfg, "Not in design review", protocol.ReadyForDev)
+
+	h.PRs = []host.PR{
+		{Number: 1, Branch: waiting.Key + "-a", HeadSHA: "sha-a"},
+		{Number: 2, Branch: told.Key + "-b", HeadSHA: "sha-b"},
+		{Number: 3, Branch: elsewhere.Key + "-c", HeadSHA: "sha-c"},
+	}
+	h.Previews[waiting.Key+"-a"] = host.Preview{Status: host.PreviewReady, URL: "https://a.example.dev"}
+	h.Previews[told.Key+"-b"] = host.Preview{Status: host.PreviewReady, URL: "https://b.example.dev"}
+	h.Previews[elsewhere.Key+"-c"] = host.Preview{Status: host.PreviewReady, URL: "https://c.example.dev"}
+
+	m := marker.Marker{Kind: marker.Preview, Fields: map[string]string{"url": "https://b.example.dev"}}
+	if err := tr.CommentOnIssue(ctx, told.ID, m.Comment("Preview for this pass")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*core.Ticket{}
+	for _, tk := range snap.Tickets {
+		got[tk.ID] = tk
+	}
+	if s := got[waiting.ID].Preview.State; s != core.PreviewReady {
+		t.Errorf("the ticket waiting on a preview carries %q, want ready", s)
+	}
+	if got[waiting.ID].Preview.URL != "https://a.example.dev" {
+		t.Errorf("preview URL = %q", got[waiting.ID].Preview.URL)
+	}
+	// Not read, because there is nothing left to say. The core would say
+	// nothing either — it checks the same marker — but paying for the
+	// call every hour for as long as a ticket sits in review is the cost
+	// this skip exists for.
+	if s := got[told.ID].Preview.State; s != core.PreviewUnknown {
+		t.Errorf("read the preview for a ticket already told about it: %q", s)
+	}
+	if s := got[elsewhere.ID].Preview.State; s != core.PreviewUnknown {
+		t.Errorf("read the preview for a ticket outside Design review: %q", s)
+	}
+}
+
+// One ticket's unreadable preview costs that ticket a comment, not every
+// other ticket its facts — the rule this file already settled for CI
+// verdicts, after Catapult's ORC-7 died building a snapshot over a 403 on
+// a ticket it had no interest in.
+func TestBuildDegradesOneTicketsUnreadablePreview(t *testing.T) {
+	ctx := context.Background()
+	tr, cfg, p := world(t)
+	h := host.NewMemory()
+	p = p.WithHost(h)
+
+	broken := seedIssue(t, tr, cfg, "Preview unreadable", protocol.DesignReview)
+	fine := seedIssue(t, tr, cfg, "Preview readable", protocol.DesignReview)
+
+	h.PRs = []host.PR{
+		{Number: 1, Branch: broken.Key + "-a", HeadSHA: "sha-a"},
+		{Number: 2, Branch: fine.Key + "-b", HeadSHA: "sha-b"},
+	}
+	h.FailPreviewFor[broken.Key+"-a"] = true
+	h.Previews[fine.Key+"-b"] = host.Preview{Status: host.PreviewReady, URL: "https://b.example.dev"}
+
+	snap, err := p.Build(ctx, time.Now(), false)
+	if err != nil {
+		t.Fatalf("one ticket's unreadable preview took the whole snapshot down: %v", err)
+	}
+	got := map[string]*core.Ticket{}
+	for _, tk := range snap.Tickets {
+		got[tk.ID] = tk
+	}
+	if s := got[broken.ID].Preview.State; s != core.PreviewUnknown {
+		t.Errorf("the unreadable ticket carries %q — it must carry nothing", s)
+	}
+	if s := got[fine.ID].Preview.State; s != core.PreviewReady {
+		t.Errorf("the readable ticket lost its preview too: %q", s)
+	}
+}
+
+// The crossing from what the host reports to what the core acts on.
+//
+// Asserted as a table rather than through the ready case alone, because
+// this is the shape CLAUDE.md records for the host-to-core outcome
+// mapping: the adapter's tests proved the host's answer was read, the core
+// tests proved the rule acted on a state, and the link between them was
+// unasserted — so breaking it printed ok. Dropping the pending arm here
+// does exactly that: it silently converts "still building" into "nothing
+// to say", which is the difference between a bounded wait and a ticket
+// that never gets told.
+func TestBuildCarriesEveryPreviewStateToTheCore(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		from host.Preview
+		want core.PreviewInfo
+	}{
+		{"ready", host.Preview{Status: host.PreviewReady, URL: "https://a.example.dev"},
+			core.PreviewInfo{State: core.PreviewReady, URL: "https://a.example.dev"}},
+		{"pending", host.Preview{Status: host.PreviewPending, Description: "building"},
+			core.PreviewInfo{State: core.PreviewPending, Why: "building"}},
+		{"failed", host.Preview{Status: host.PreviewFailed, Description: "exited 1"},
+			core.PreviewInfo{State: core.PreviewFailed, Why: "exited 1"}},
+		{"none", host.Preview{Status: host.PreviewNone}, core.PreviewInfo{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tr, cfg, p := world(t)
+			h := host.NewMemory()
+			p = p.WithHost(h)
+
+			iss := seedIssue(t, tr, cfg, "In design review", protocol.DesignReview)
+			h.PRs = []host.PR{{Number: 1, Branch: iss.Key + "-a", HeadSHA: "sha-a"}}
+			h.Previews[iss.Key+"-a"] = tc.from
+
+			snap, err := p.Build(ctx, time.Now(), false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tk := range snap.Tickets {
+				if tk.ID != iss.ID {
+					continue
+				}
+				if tk.Preview != tc.want {
+					t.Errorf("host %+v -> core %+v, want %+v", tc.from, tk.Preview, tc.want)
+				}
+				return
+			}
+			t.Fatal("ticket missing from the snapshot")
+		})
 	}
 }

@@ -243,25 +243,43 @@ test("a deployment status wakes the sweep", () => {
   );
 });
 
-// Only `success` can advance anything: the deploy check reads the newest
-// successful deployment and compares its commit against the merge commit,
-// and a failed deploy is caught by the deploy timeout rather than by an
-// event. One deployment walking queued -> in_progress -> success is three
-// webhooks minutes apart, which is three sweeps no five-second window can
-// coalesce.
-test("only a successful deployment status wakes the sweep", () => {
+// The terminal states wake the sweep and the in-flight ones do not.
+//
+// `success` is what the deploy check reads — the newest successful
+// deployment, compared against the merge commit. `failure` and `error` are
+// for previews: the platform builds a branch preview out-of-band, and a
+// preview that failed is news the author in Design review can act on,
+// where waiting for the hourly beat would hold the review open over a link
+// that was never going to arrive.
+//
+// The in-flight half is the one with teeth. One deployment walking
+// queued -> in_progress -> success is three webhooks minutes apart, which
+// is three sweeps no five-second window can coalesce, and the first two
+// carry nothing the sweep would act on. `inactive` is a superseded
+// deployment, which is not news either.
+const deploymentStatusWakes: Record<string, boolean> = {
+  success: true,
+  failure: true,
+  error: true,
+  queued: false,
+  in_progress: false,
+  pending: false,
+  inactive: false,
+};
+
+test("a deployment status wakes the sweep only when it is terminal", () => {
   const at = (state: string) => ({
     action: "created",
     repository: { full_name: "acme/app" },
     deployment_status: { state },
   });
-  for (const state of ["queued", "in_progress", "failure", "error", "inactive"]) {
-    assert.deepEqual(githubTargets(GH_PROJECTS, "deployment_status", at(state)), [], state);
+  for (const [state, wakes] of Object.entries(deploymentStatusWakes)) {
+    assert.deepEqual(
+      githubTargets(GH_PROJECTS, "deployment_status", at(state)).map((p) => p.repository),
+      wakes ? ["acme/app"] : [],
+      state,
+    );
   }
-  assert.deepEqual(
-    githubTargets(GH_PROJECTS, "deployment_status", at("success")).map((p) => p.repository),
-    ["acme/app"],
-  );
 });
 
 // A payload with no deployment_status at all must not be read as success.

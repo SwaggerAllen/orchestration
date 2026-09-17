@@ -102,6 +102,11 @@ func Sweep(s *Snapshot) []Action {
 	// check reads to decide a Merged ticket landed, and postDeployFor is
 	// that check's other half.
 	unmoved(mergeBackfillFor)
+	// A comment on a ticket nobody is moving. It is here rather than
+	// beside the resolutions because it changes no state at all: Design
+	// review is the author's, and this only makes what they are holding
+	// actionable.
+	unmoved(previewFor)
 	// Resolution first: a deploy that landed retires the ticket, which
 	// releases its mutex labels and clears it as a blocker for everything
 	// judged after this point.
@@ -372,6 +377,88 @@ func mergeBackfillFor(_ *Snapshot, t *Ticket) []Action {
 		})
 	}
 	return acts
+}
+
+// previewFor announces the branch preview on a ticket in Design review, or
+// says once that it is not coming.
+//
+// Design review is the author reading the rendered states, and DESIGN §4
+// has always said the ticket asking for that review should say where to
+// find them. The publisher used to be the design job itself, which knew
+// the URL the moment it had published and put it on the ticket in the same
+// breath as the transition. It no longer publishes: the preview is the
+// deploy platform's, built out-of-band from the PR, so at finish there is
+// nothing to announce yet and the announcement moved here.
+//
+// Three outcomes, and only two of them write:
+//
+//   - ready: the URL goes on the ticket. Terminal — a url-bearing marker
+//     is what stops this rule looking, so it cannot re-fire.
+//   - failed: said once. Not terminal, because a preview that failed and
+//     was rebuilt still deserves announcing, so the suppression is a
+//     failed marker rather than any marker.
+//   - pending: nothing. A preview that is merely still building is not
+//     news, and a comment per sweep saying so would be.
+//
+// Pending has a bound, and it is deploy.timeout rather than a number
+// invented here. The question is the same one that timeout already
+// answers — how long to wait for a platform to finish before saying it
+// will not — and a threshold nobody has measured is the invention
+// CLAUDE.md records surviving review once. Borrowed rather than
+// duplicated, so a project that finds it wrong has one key to change.
+//
+// Not a Blocked flavour. Design review already hands the author the ball;
+// this makes the ball they hold one they can act on.
+func previewFor(s *Snapshot, t *Ticket) []Action {
+	if t.State != protocol.DesignReview || HasPreviewURL(t) {
+		return nil
+	}
+	switch t.Preview.State {
+	case PreviewReady:
+		if t.Preview.URL == "" {
+			// The host promises a URL with a ready preview, so this is
+			// unreachable rather than tolerated. Announcing it anyway
+			// would post the dead link §4 chose silence over.
+			return nil
+		}
+		return []Action{{
+			Kind:     ActComment,
+			TicketID: t.ID,
+			Marker:   &marker.Marker{Kind: marker.Preview, Fields: map[string]string{"url": t.Preview.URL}},
+			Prose: "Preview for this pass: " + t.Preview.URL + "\n\n" +
+				"This is what Design review reads — the rendered states, alongside the doc diff on the PR.",
+			Reason: "preview is up; announcing it on the ticket (DESIGN §4)",
+		}}
+	case PreviewFailed:
+		return previewNotComing(t, "The preview build failed, so there are no rendered states to read for this pass.", t.Preview.Why)
+	case PreviewPending:
+		if s.Now.Sub(t.StateSince) < s.DeployTimeout {
+			return nil
+		}
+		return previewNotComing(t,
+			"The preview has not finished building since this ticket reached Design review, which is longer than the deploy timeout allows a platform.",
+			t.Preview.Why)
+	}
+	return nil
+}
+
+// previewNotComing is the one comment that says a preview is not arriving,
+// suppressed by its own output so it is said once rather than every sweep.
+func previewNotComing(t *Ticket, what, why string) []Action {
+	if hasMarkerField(t, marker.Preview, "state", "failed") {
+		return nil
+	}
+	prose := what + " The doc diff on the PR is still reviewable; this says so rather than leaving you waiting on a link that is not coming."
+	if why != "" {
+		prose += "\n\nThe platform said: " + why
+	}
+	return []Action{{
+		Kind:     ActComment,
+		TicketID: t.ID,
+		Marker:   &marker.Marker{Kind: marker.Preview, Fields: map[string]string{"state": "failed"}},
+		Prose:    prose,
+		Reason:   "preview is not coming; saying so rather than leaving the review waiting (DESIGN §4)",
+	}}
 }
 
 // arrival is the transition this sweep judges, and who made it.
