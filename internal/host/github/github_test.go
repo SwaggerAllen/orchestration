@@ -415,6 +415,16 @@ func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) b
 //
 // Written as a scan of every function rather than of one body, so
 // moving code between helpers cannot quietly move the call back.
+//
+// **Scoped to `github.go`, and `checkruns.go` is the exception.** Every
+// function here is on the snapshot's path; those two are not, because
+// they implement `host.CheckRuns`, which `host.Host` does not include —
+// so nothing holding the plane's port can reach them, and their one
+// caller runs inside a workflow job under its own GITHUB_TOKEN. The file
+// boundary is how that exception is stated instead of a name on an
+// allowlist, and `TestHostPortExcludesTheCheckRunsAPI` is what makes the
+// boundary mean something: the reason those methods are safe is the
+// interface they are off, not the file they are in.
 func TestNothingReachesTheChecksAPI(t *testing.T) {
 	body, err := os.ReadFile("github.go")
 	if err != nil {
@@ -998,5 +1008,96 @@ func TestPreviewForSuccessWithNoURLIsPending(t *testing.T) {
 	}
 	if p.Description != "still wiring up" {
 		t.Errorf("description = %q, want the platform's own words", p.Description)
+	}
+}
+
+func TestCheckRunsForFiltersByPrefixAndCompletion(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if !strings.HasSuffix(r.URL.Path, "/check-runs") {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		return http.StatusOK, map[string]any{"check_runs": []map[string]any{
+			{"name": "manual/queue-drains", "conclusion": "success", "status": "completed",
+				"details_url": "https://gh/run/1", "output": map[string]any{"title": "passed", "summary": "s"}},
+			{"name": "manual/board-renders", "conclusion": "failure", "status": "completed",
+				"details_url": "https://gh/run/2", "output": map[string]any{"title": "failed", "summary": "s"}},
+			// Not a manual verdict.
+			{"name": "gates", "conclusion": "success", "status": "completed"},
+			// In flight: carries no conclusion, and reading one as a
+			// verdict would have rule 8 compare against a blank and
+			// report every running judge as a disagreement.
+			{"name": "manual/still-going", "conclusion": "", "status": "in_progress"},
+		}}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).CheckRunsFor(context.Background(), "sha1", "manual/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d runs, want the two completed manual ones: %+v", len(got), got)
+	}
+	if got[0].Name != "manual/queue-drains" || got[0].Conclusion != host.CheckRunSuccess ||
+		got[0].DetailsURL != "https://gh/run/1" || got[0].Title != "passed" {
+		t.Errorf("run = %+v", got[0])
+	}
+	if got[1].Conclusion != host.CheckRunFailure {
+		t.Errorf("run = %+v", got[1])
+	}
+}
+
+func TestCreateCheckRunPostsTheVerdict(t *testing.T) {
+	var got map[string]any
+	srv := fakeGitHub(t, func(r *http.Request, body map[string]any) (int, any) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/check-runs") {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		got = body
+		return http.StatusCreated, map[string]any{"id": 1}
+	})
+	defer srv.Close()
+
+	err := client(t, srv).CreateCheckRun(context.Background(), host.CheckRun{
+		SHA: "sha1", Name: "manual/queue-drains", Conclusion: host.CheckRunFailure,
+		Title: "the queue did not drain", Summary: "step 3 observed 2 jobs",
+		DetailsURL: "https://gh/run/7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["head_sha"] != "sha1" || got["name"] != "manual/queue-drains" ||
+		got["conclusion"] != "failure" || got["status"] != "completed" {
+		t.Errorf("body = %+v", got)
+	}
+	// The evidence link is what makes §8.3 rule 3 checkable rather than
+	// aspirational, so it has to reach GitHub.
+	if got["details_url"] != "https://gh/run/7" {
+		t.Errorf("details_url = %v", got["details_url"])
+	}
+	out, _ := got["output"].(map[string]any)
+	if out["title"] != "the queue did not drain" {
+		t.Errorf("output = %+v", out)
+	}
+}
+
+// GitHub rejects an empty details_url rather than ignoring it, and a
+// verdict has to be recordable even when the missing evidence is the
+// reason it failed.
+func TestCreateCheckRunOmitsAnEmptyDetailsURL(t *testing.T) {
+	var got map[string]any
+	srv := fakeGitHub(t, func(_ *http.Request, body map[string]any) (int, any) {
+		got = body
+		return http.StatusCreated, map[string]any{"id": 1}
+	})
+	defer srv.Close()
+
+	if err := client(t, srv).CreateCheckRun(context.Background(), host.CheckRun{
+		SHA: "sha1", Name: "manual/x", Conclusion: host.CheckRunFailure, Title: "no evidence",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got["details_url"]; present {
+		t.Errorf("details_url sent as %v, want the key omitted", got["details_url"])
 	}
 }
