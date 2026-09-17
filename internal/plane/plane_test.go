@@ -136,31 +136,28 @@ func TestBuildCurrentMilestone(t *testing.T) {
 	}
 }
 
-// The M2 composition test: seed an illegal promotion in the fake tracker,
+// The M2 composition test: seed an illegal write in the fake tracker,
 // then Build -> Sweep -> Execute -> Build and watch the revert land as
 // tracker state — the same loop the live control plane runs.
-func TestLiveShapedLoopRevertsIllegalPromotion(t *testing.T) {
+//
+// **The loop is what this asserts, not the rule it seeds.** It was
+// written against the mutex's promotion revert, which is gone (DESIGN
+// §6), so the violation swapped to the writer matrix: only the
+// post-deploy check writes Done, so an author moving a ticket there from
+// Design review is reverted (§9). Any reverting rule serves — what is
+// under test is that a sweep's decision becomes tracker state and a
+// marker comment.
+func TestLiveShapedLoopRevertsAnIllegalWrite(t *testing.T) {
 	ctx := context.Background()
 	tr, cfg, p := world(t)
 
-	inFlight := seedIssue(t, tr, cfg, "Holder", protocol.InProgress)
-	if _, err := tr.CreateLabel(ctx, cfg.Tracker.TeamID, "screen:home"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tr.AddIssueLabel(ctx, cfg.Tracker.TeamID, inFlight.ID, "screen:home"); err != nil {
-		t.Fatal(err)
-	}
-
-	victim := seedIssue(t, tr, cfg, "Collider", protocol.DesignReview)
+	victim := seedIssue(t, tr, cfg, "Closed by hand", protocol.DesignReview)
 	// The design pass left it here, and said so. The author's move below
 	// is then a divergence from that record — which is the whole way the
-	// sweep now tells the two apart.
+	// sweep tells the two apart.
 	recordSeed(t, p, victim.ID, protocol.DesignReview)
-	if err := tr.AddIssueLabel(ctx, cfg.Tracker.TeamID, victim.ID, "screen:home"); err != nil {
-		t.Fatal(err)
-	}
 	tr.ActorID = "usr_author"
-	if err := tr.UpdateIssueState(ctx, victim.ID, stateID(t, tr, cfg, protocol.ReadyForDev)); err != nil {
+	if err := tr.UpdateIssueState(ctx, victim.ID, stateID(t, tr, cfg, protocol.Done)); err != nil {
 		t.Fatal(err)
 	}
 	tr.ActorID = "memory-bot"

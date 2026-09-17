@@ -321,15 +321,6 @@ func revertFor(s *Snapshot, t *Ticket) ([]Action, bool) {
 			"This ticket carries re-evaluate: an unresolved collision. It cannot move forward until the owning thread clears the label."), true
 	}
 
-	// The mutex — screen and system labels under one rule — enforced at
-	// promotion into Ready for dev (DESIGN §6).
-	if t.State == protocol.ReadyForDev {
-		if other, mine := MutexHolder(s, t); other != nil {
-			return revert("mutex",
-				fmt.Sprintf("Mutex label %q is already in flight on %s. Two in-flight tickets may not share a screen or a system (DESIGN §6).", mine, other.Key)), true
-		}
-	}
-
 	// Writer matrix: who may write which state (DESIGN §3, §9).
 	if rule, prose, bad := writerViolation(t, last); bad {
 		return revert(rule, prose), true
@@ -1162,18 +1153,6 @@ func dispatches(s *Snapshot, moving map[string]bool) []Action {
 				continue
 			}
 			// The same question the pickup assertion asks, through the
-			// same function. Asked here too because the dispatcher used
-			// not to: it would send a ticket whose screen or system was
-			// held straight into an assertion that could only refuse, and
-			// since the refusal leaves the ticket in the queue, it did it
-			// again on the next beat, and the next. Each of those was a
-			// full job — checkout, toolchain, services — spent to be told
-			// no. Blocker rather than Holder: this asks whether work may
-			// start now, so an idle queued holder yields to a ticket that
-			// precedes it instead of the pair stalling each other.
-			if other, _ := MutexBlocker(s, t); other != nil {
-				continue
-			}
 			// During the pause: only tickets blocking the boundary ticket,
 			// plus Urgent, which overrides the pause (DESIGN §8, §10).
 			if paused && !t.Urgent() && (boundary == nil || !blocks(t, boundary.ID)) {

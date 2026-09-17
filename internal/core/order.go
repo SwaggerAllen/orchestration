@@ -88,13 +88,18 @@ type OrderedTicket struct {
 	// would otherwise disagree, and it exists to carry that difference
 	// rather than to hide it.
 	DesignCanStart bool
-	// MutexHeldBy names an in-flight ticket sharing a mutex label with
-	// this one. Not a blocker and not printed as one — design may run on
-	// both at once — but promotion into Ready for dev would be reverted
-	// (DESIGN §6), so a ticket that reads as ready is really queued, and
-	// the design it produces is the kind most likely to be re-evaluated
-	// before it lands (DESIGN §7).
-	MutexHeldBy []Neighbour
+	// ScopeSharedWith names an in-flight ticket whose declared scope
+	// overlaps this one's. Not a blocker and not printed as one, and it
+	// no longer means the promotion would be reverted — nothing refuses
+	// on a shared scope (DESIGN §6).
+	//
+	// It is still worth the line, for the half of the old reason that
+	// survives: two tickets in one system are two tickets whose branches
+	// will meet in a merge, and §7's collision rule fires on exactly this
+	// overlap. A design produced against a shared system is the kind most
+	// likely to be re-evaluated before it lands, and the report exists to
+	// say so before the work rather than after.
+	ScopeSharedWith []Neighbour
 }
 
 // Neighbour is a related ticket, named enough to act on without a lookup.
@@ -102,7 +107,7 @@ type Neighbour struct {
 	Key   string
 	Title string
 	State protocol.State
-	// Label is the shared mutex label, on MutexHeldBy entries only.
+	// Label is the shared scope label, on ScopeSharedWith entries only.
 	Label string
 }
 
@@ -345,16 +350,16 @@ func describe(t *Ticket, byID map[string]*Ticket, openBlockers func(*Ticket) []*
 			ot.Blocks = append(ot.Blocks, Neighbour{Key: b.Key, Title: b.Title, State: b.State})
 		}
 	}
-	// Only for tickets not yet started: an in-flight ticket already holds
-	// its labels, and telling it that it collides with itself is noise.
+	// Only for tickets not yet started: an in-flight ticket's own scope
+	// overlapping itself is noise.
 	if !isStarted(t) {
 		for _, other := range considered {
-			if other.ID == t.ID || !other.HoldsMutex() {
+			if other.ID == t.ID || !other.InFlightOnScope() {
 				continue
 			}
-			for _, mine := range t.MutexLabels() {
+			for _, mine := range t.ScopeLabels() {
 				if other.HasLabel(mine) {
-					ot.MutexHeldBy = append(ot.MutexHeldBy, Neighbour{
+					ot.ScopeSharedWith = append(ot.ScopeSharedWith, Neighbour{
 						Key: other.Key, Title: other.Title, State: other.State, Label: mine,
 					})
 				}

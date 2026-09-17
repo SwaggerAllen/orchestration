@@ -957,93 +957,59 @@ Consequences:
 
 Three mechanisms, each covering what the others can't.
 
-**Mutex labels are a file-level mutex.** Two kinds, one rule: *no two in-flight tickets may
-share a `screen:<name>` or `system:<name>` label.* Screen labels cover design artifacts, which
-are per-screen files; system labels cover the structural units the sketch declares — for a
-Phoenix app, contexts — each mapped to its paths by its own doc's file map (§4). Enforced at
-promotion into `Ready for dev`: a ticket whose mutex label is already in flight does not
-promote. This prevents most collisions rather than detecting them. The declaration is
-trustworthy for the same reason in both cases: design *creates* the screen files, and the
-sketch *is* the system touch list — with CI auditing both against the file maps (§9), because
-a diff that wanders outside its declared labels is a mutex nobody took.
+**Git conflicts are the file-level mutex.** Two in-flight tickets may touch the same files, and
+the collision is detected where it exists — in the merge, by the tool whose whole job is
+three-way merges — rather than predicted from a declaration and prevented. The dev job merges
+the base branch in before it works (§3), so a divergence surfaces during the run rather than as
+a bounce at reconcile; a conflict the pass can explain it resolves, and one where both sides
+touch the same rule id parks the ticket with the `conflict` label and a comment naming the two
+claims (§12).
 
-**The label's spelling is the doc's filename, and the design pass is refused if it is not.**
-CI derives the label it requires as `system:` plus the doc's filename without `.md`, so the
-name in the touch list and the name on disk are one string living in two places. A pass
-declaring a doc that does not exist now fails at the moment it declares it, naming the near
-miss. It used to succeed: the label was created from whatever was declared, took part in the
-mutex like any other, and could not be satisfied by any diff. Catapult's `ORC-5` declared
-`core-dsl` against `systems/core_dsl.md` and the mismatch survived design, the author's
-sign-off and a full dev run — 22 modules, 60 tests, three commits — before surfacing as 28
-audit violations on every path the ticket was about, with a push-back asking a human to rename
-a label as the only outcome left. The information needed to refuse existed at the moment the
-label was created.
+**Nothing refuses on a shared scope.** Promotion into `Ready for dev`, the dispatcher and the
+pickup assertion all used to, and none does now. The `screen:<name>` and `system:<name>` labels
+remain as the declared-scope audit CI runs against the file maps (§5, §9) — a record of what a
+pass said it was touching, which the ownership check and the record review both read. They are
+not a lock.
 
-**A design pass's touch list is the whole label set, not an addition to it.** The declared
-labels are attached and the mutex labels the ticket carries that the pass did *not* declare are
-released. They were add-only until ORC-158, and narrowing is routine — the author sends a
-ticket back from `Design review` and the next pass draws less — so the label the first pass
-took stayed on the ticket holding the mutex against every other ticket naming that system, with
-no legal way for any pass to clear it. Catapult's `ORC-141` sat on `system:delivery` that way;
-only a direct tracker write got it off.
+**Detecting beats predicting here, and the label mutex's own history is the argument.** A
+prevention scheme has to be *right* about scope before the work is done, and every way it was
+wrong cost real time:
 
-**A label the branch's own files require is never released**, whatever the touch list says. CI
-derives the labels it demands from the diff (§9), so releasing one the diff needs fails the
-next push — and the narrowing pass cannot know what an earlier pass or a dev round already put
-on the branch. Design's touch list is a prediction and the branch is evidence; evidence wins,
-and the kept label is reported on the ticket rather than dropped silently, because a pass and a
-branch that disagree about a ticket's scope is a thing for a person to look at.
+- **A label could be created that no diff could satisfy.** Catapult's `ORC-5` declared
+  `core-dsl` against `systems/core_dsl.md`, and the mismatch survived design, the author's
+  sign-off and a full dev run — 22 modules, 60 tests, three commits — before surfacing as 28
+  audit violations on every path the ticket was about.
+- **The labels were add-only, so narrowing was impossible.** A pass drawing less than the last
+  left the first pass's label holding the mutex against every other ticket naming that system,
+  with no legal way for any pass to clear it. `ORC-141` sat on `system:delivery` that way; only
+  a direct tracker write got it off. The fix was a release rule, which then needed its own
+  exception — a label the branch's files require is never released, because the narrowing pass
+  cannot know what an earlier pass or a dev round already put on the branch.
+- **Two waiting tickets deadlocked each other.** The rule was enforced at three doors and only
+  one was preventive, so the state it guarded against arrived anyway: a CI-red bounce lands a
+  ticket in `Ready for rework` whether or not another holds its scope. `ORC-171` and `ORC-174`
+  shared two system labels and sat in `Ready for rework` together from 03:37:28Z to 05:12:52Z
+  on 2026-08-31 — an hour and thirty-five minutes with the dev agent idle and the sweep
+  planning nothing, ended only by the author moving one to `Blocked` by hand. The repair was a
+  tie-break: an idle queued holder yields to a ticket that precedes it.
 
-The release is checked against everything the branch changes against main, which is not the
-per-pass file list the ownership audit (§5) reads: that one is scoped to the run so a stray is
-billed to the pass that wrote it, while this asks whether the *branch* is done with a system.
-An absent list releases nothing and says so — a wiring gap must not read as permission — and a
-`prerequisite` pass (§3) declares no touch list at all, so it releases nothing either: a pass
-that could not read its scope does not get to decide the mutex.
+Every one of those is a repair to a failure the prevention created, and **a conflict has none of
+them.** There is nothing to get wrong before the work, nothing to release, and no state in
+which two tickets are each other's holder — both proceed, and git decides at the merge.
 
-**"In flight" for this rule stops at `Merged`.** A merged ticket's branch is gone and its
-commits are on main, so a ticket starting afterwards contains that work rather than racing it —
-there is no concurrent edit left to prevent. Counting `Merged` held the labels for the whole
-deploy-detection window instead, which on a platform with no deploy webhook is up to an hour of
-a queue held by a ticket that was finished. If the deploy fails and the author sends it back,
-it re-enters the queue and re-takes the mutex then, which is ordinary contention rather than a
-special case.
+**What is given up is prevention**, and that is the trade: two tickets may now do work that
+collides, and the second one pays for the merge. What makes it affordable is that the merge
+happens *inside the dev run* rather than at reconcile, so the pass resolving it is one already
+holding the context — and that the conflict is on the ticket spec as well as the code, so it
+arrives with the stack of specs that produced it (§4).
 
-**An idle queued holder yields to a ticket that precedes it.** The rule is enforced at three
-doors and only one of them is preventive, so the state it guards against arrives anyway: a
-CI-red bounce lands a ticket in `Ready for rework` whether or not another already holds its
-label, and the author moving one out of `Blocked` does the same. Two tickets that arrive that
-way are each other's holder, so neither dispatches and neither can be picked up — the mutex
-stops serializing them and stalls both, with the dev agent idle and the sweep planning nothing.
-Catapult's `ORC-171` and `ORC-174` share `system:delivery` and `system:platform_content` and
-sat in `Ready for rework` together from 03:37:28Z to 05:12:52Z on 2026-08-31 — an hour and
-thirty-five minutes, ended only by the author moving one to `Blocked` by hand, after which the
-other started `Reworking` seventy-seven seconds later.
+**The file maps are unaffected and are not the mutex.** `systems/*.md` and `screens/*.md`
+declare their paths (§4), and four things read them: the mutex audit's scope check, the design
+ownership audit (§5), the record review's selection of reasons entries (§4), and the manual
+test gate's per-PR selection (§9).
 
-So a holder that is *waiting* — in `Ready for dev` or `Ready for rework` with no run live on it
-— does not block a ticket that precedes it (§7). Precedence is a total order, so exactly one of
-any set of idle tickets sharing a label is free and the rest are held by it; the winner's claim
-writes its working state, which is not waiting, and from that beat it holds the label
-unconditionally. Two agents are never in one system at one time, which is what this section is
-for. What changes is that "both waiting" no longer reads as "both working". The tie-break only
-ever unblocks: it can free a ticket that was stuck, never start a second agent.
-
-**The dispatcher asks the same question the pickup assertion does**, through the same
-function. It used not to ask at all, so a ticket whose label was held was dispatched into an
-assertion that could only refuse — and because the refusal leaves the ticket in the queue, the
-next beat did it again. Each of those was a full billed job with a checkout, a toolchain and a
-service container, spent to be told no. Two places asking one question is exactly the shape
-that drifts, so there is one `MutexBlocker` and two callers: the pickup assertion and the
-dispatcher. Both ask whether work may *start* now, and the tie-break is part of that answer.
-
-**The promotion revert asks a different question and gets the strict answer.** May this ticket
-*enter* the queue is not may work start on it, so that door calls `MutexHolder`, which applies
-no tie-break: every in-flight holder short of `Merged` blocks. It is the preventive half of
-this section, and the deadlock does not arrive through it — both tickets above reached `Ready
-for rework` by bouncing, a path this door never sees — so relaxing it would widen what may
-queue on one system while rescuing nothing already stuck. The two functions share one loop, so
-the set of holders and the label reported cannot drift apart; the tie-break is the whole
-difference between them.
+**The screen mutex's other half never was the labels.** Two design passes cannot run at once
+because there is one design agent — agent singularity, below.
 
 **Agent singularity is enforced twice, at two different moments, and both halves are load
 bearing.** Everything that asks "is this agent kind busy" reads the agent-run list, and a run
@@ -1073,8 +1039,9 @@ which is the one direction that hurts. Release is holder-scoped, so a run that j
 race cannot hand back the winner's lock.
 
 **Files owned by no system** — the router, the mix manifest — are named in the sketch when
-touched and left to git's textual conflict detection. Giving them labels would serialize
-every ticket through them, which is the mutex failing in the other direction.
+touched and left to git's textual conflict detection, which is now what every file gets (§6).
+Giving them labels would have serialized every ticket through them, and that was the argument
+against labels here before it was the argument against them anywhere.
 
 **Every ticket gets a design pass** — including tech debt, backend work and bugs. The pass is
 cheap and it is the only thing positioned to notice a ticket touching a screen or a system
@@ -1096,8 +1063,9 @@ branch is open. Recorded as the merge-base SHA, compared at pickup. Resolution p
 is not in its expected state, and records the id in a comment. State-transition-as-claim plus
 expected-state assertion is the whole mechanism; nothing more is needed at one dev agent.
 
-**The pickup assertion also re-verifies the §9 invariants** — screen mutex, no `re-evaluate`,
-sign-off actor — not just the state. Tracker enforcement is detect-and-revert (§9), so an agent
+**The pickup assertion also re-verifies the §9 invariants** — no `re-evaluate`, sign-off
+actor, no open blocker — not just the state. A shared scope is not among them: nothing refuses
+on one (§6). Tracker enforcement is detect-and-revert (§9), so an agent
 can briefly see a state the control plane is about to undo; refusing to act on anything that
 fails the invariants is what makes that window harmless.
 
@@ -1258,10 +1226,11 @@ must not get, because the author is doing the moving and the record has to follo
 lead. When the label comes off, the record and the tracker agree, and ordinary judgement resumes
 from wherever the author left it.
 
-One deliberate difference from `author-only`: **a `resync` ticket keeps its mutex.** The label
-repairs where the pipeline thinks the ticket is and says nothing about the branch it may still
-have open on that system, so releasing the mutex would let a second ticket start on the same
-files while the first one's work is still out there. `author-only` releases it because no agent
+One deliberate difference from `author-only`: **a `resync` ticket still counts as in flight on
+its declared scope.** The label repairs where the pipeline thinks the ticket is and says nothing
+about the branch it may still have open on that system. Nothing refuses on a shared scope (§6),
+so this decides no dispatch — what it decides is whether §7's collision rule tells a second
+ticket about the overlap, and an author-attended repair is not an absent ticket. `author-only` releases it because no agent
 is ever coming for such a ticket at all, which is a different fact.
 
 **`author-only` exists because some tickets have no agent-legal path to completion.** The
@@ -1571,8 +1540,6 @@ revert is real, and it is closed from the other side — every agent's pickup as
 re-verifies these invariants before acting, so a state the control plane is about to undo is
 one no agent will act on.
 
-- promotion into `Ready for dev` while a mutex label is already in flight → reverted, on the
-  strict reading with no tie-break (§6)
 - any forward transition while `re-evaluate` is set → reverted
 - `Designing` → `Ready for dev` without passing through `Design review`, or a sign-off not made
   by the author → reverted — unless the design agent's marker comment declares a decisionless
@@ -2171,8 +2138,8 @@ pre-merge check cannot see it.
   *paragraph* rather than a missing feature — a standing decision that didn't land, copy that
   got paraphrased.
 - **Cannot tell** → merge, state → `Merged`, **plus the `needs-review` label**. Merging anyway
-  is deliberate: holding it would keep the screen mutex locked for weeks and stall everything
-  behind it, and "cannot tell" was never a finding of fault. Ambiguity must never resolve itself
+  is deliberate: holding it would leave a ticket occupying the reconcile agent and the queue
+  behind it for weeks, and "cannot tell" was never a finding of fault. Ambiguity must never resolve itself
   as pass.
 
 **Post-deploy — the thin check.** Mechanical, no judgment: did the deploy succeed, and do the
@@ -2409,8 +2376,8 @@ meaning for `249` is how an opaque number becomes a misleading one. The captured
 answer to "what does this mean"; the number is only where to start.
 
 **Two failures wear the same shape, and they want opposite handling.** A pickup assertion that
-refuses is the pipeline working — a held mutex, an agent of that kind already running, an open
-blocker — and the ticket is exactly where it should be; parking it would pull work the protocol
+refuses is the pipeline working — an agent of that kind already running, an open blocker, an
+unresolved `re-evaluate` — and the ticket is exactly where it should be; parking it would pull work the protocol
 deliberately left alone out of the queue. A snapshot that could not be built is the harness
 unable to evaluate the question at all, which is a failure like any other and the author's to
 see. Both are a claim command exiting non-zero.
@@ -3028,11 +2995,14 @@ completed while a boundary was running.
   claim, the branch context and the reason, to buy a nudge. Until someone is waiting on the
   author who isn't the author, the assumption is that they are prompt. Revisit this at the
   same time as alerting, not before; they are the same feature seen from two ends.
-- **Semantic conflict in dev-owned files is covered to the extent the system map is honest.**
-  System labels (§6) extend the mutex and the re-evaluation machinery to declared structure;
-  what remains uncovered is files owned by no system — the router, the manifests — which are
-  named in sketches and caught only textually by git. The mutex's quality is the partition's
-  quality: revisit the system map when one label starts serializing unrelated work.
+- **Semantic conflict is what git cannot see, and nothing here covers it.** §6 replaced the
+  label mutex with git's own conflict detection, which closed the open item this used to be —
+  the partition's quality no longer decides anything, because there is no partition. What it
+  does not close is the case it never could: two branches that merge cleanly and mean different
+  things. A textual merge is silent about that by construction, and the things positioned to
+  notice are the design pass reading a system doc that a sibling ticket has already changed, and
+  the manual test gate driving the merged result (§9). Neither is a guarantee. Worth revisiting
+  when one is observed, rather than designed against in advance.
 - **Staging.** With one environment, the post-deploy check runs against production. Staging
   itself stays open; the manual test gate this item bundled with it does not, and **it does not
   sit between `Reconciling` and `Merged`.** It runs in `Checks`, before reconcile — a per-PR
@@ -3048,10 +3018,11 @@ completed while a boundary was running.
   somebody looks — there is no alerting anywhere in this design. The cheapest fix is a
   scheduled check that pings when any ticket has been in `Blocked` past a threshold; it is
   deliberately not specified here.
-- **Concurrent dev agents remain a deliberate later decision, but the distance shrank.** The
-  mutex now covers declared structure (§6), the run-per-ticket correlation is an owner
-  dimension in practice, and the single-dispatcher control plane (§13) makes
-  state-transition-as-claim safe for a second dev whose ticket shares no mutex label with
-  in-flight work. What flipping the switch still requires: a system map proven against months
+- **Concurrent dev agents remain a deliberate later decision, and the distance shrank
+  differently than expected.** The obstacle used to be partitioning the work so two agents could
+  not collide, which is what the label mutex was for; §6 now lets them collide and has git
+  detect it, so the partition is no longer the thing to get right. The run-per-ticket
+  correlation is an owner dimension in practice, and the single-dispatcher control plane (§13)
+  makes state-transition-as-claim safe. What flipping the switch still requires: a system map proven against months
   of real sketches, and the author able to absorb the review throughput two agents produce —
   the bottleneck moves to the human, which is the correct failure mode.

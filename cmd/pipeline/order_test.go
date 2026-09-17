@@ -19,7 +19,7 @@ func TestPrintedOrderCarriesTitleLinkAndBothDirections(t *testing.T) {
 			State:     protocol.Todo,
 			BlockedBy: []core.Neighbour{{Key: "ORC-3", Title: "Land the workflow edit", State: protocol.InProgress}},
 			Blocks:    []core.Neighbour{{Key: "ORC-9", Title: "Wire the screen", State: protocol.Backlog}},
-			MutexHeldBy: []core.Neighbour{{
+			ScopeSharedWith: []core.Neighbour{{
 				Key: "ORC-4", Title: "Engine work", State: protocol.Checks, Label: "system:engine",
 			}},
 		}},
@@ -39,10 +39,12 @@ func TestPrintedOrderCarriesTitleLinkAndBothDirections(t *testing.T) {
 			t.Errorf("the report is missing %q:\n%s", want, got)
 		}
 	}
-	// The mutex line must not read as a blocker, or the reader will treat
-	// a designable ticket as unavailable.
-	if !strings.Contains(got, "designing this now is legal") {
-		t.Errorf("the mutex note reads as a blocker:\n%s", got)
+	// The scope line must not read as a blocker, or the reader will treat
+	// an available ticket as unavailable. Nothing refuses on a shared
+	// scope (DESIGN §6), so the note says what it actually means: both
+	// run, and their branches meet in a merge.
+	if !strings.Contains(got, "both may run") {
+		t.Errorf("the scope note reads as a blocker:\n%s", got)
 	}
 	// And it says the ordering is derived, so nobody pastes it somewhere
 	// as a plan and acts on it a week later.
@@ -67,7 +69,7 @@ func TestTheMarkdownOrderLinksEveryKey(t *testing.T) {
 				Note:      "outside the current milestone",
 				BlockedBy: []core.Neighbour{{Key: "ORC-3", Title: "Land the workflow edit", State: protocol.InProgress}},
 				Blocks:    []core.Neighbour{{Key: "ORC-9", Title: "Wire the screen", State: protocol.Backlog}},
-				MutexHeldBy: []core.Neighbour{{
+				ScopeSharedWith: []core.Neighbour{{
 					Key: "ORC-4", Title: "Engine work", State: protocol.Checks, Label: "system:engine",
 				}},
 			}},
@@ -93,10 +95,10 @@ func TestTheMarkdownOrderLinksEveryKey(t *testing.T) {
 			t.Errorf("the report is missing %q:\n%s", want, got)
 		}
 	}
-	// Same trap as the text form: a mutex collision that reads as a
-	// blocker makes a designable ticket look unavailable.
-	if !strings.Contains(got, "designing this now is legal") {
-		t.Errorf("the mutex note reads as a blocker:\n%s", got)
+	// Same trap as the text form: a shared scope that reads as a blocker
+	// makes an available ticket look unavailable.
+	if !strings.Contains(got, "both may run") {
+		t.Errorf("the scope note reads as a blocker:\n%s", got)
 	}
 	// An empty layer says so rather than vanishing — "no tickets are
 	// ready" and "the report stopped early" must not look alike.

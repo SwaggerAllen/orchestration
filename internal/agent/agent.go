@@ -1059,7 +1059,7 @@ func flagCollisions(ctx context.Context, p *plane.Plane, res *ClaimResult, added
 	flagged := map[string]bool{}
 	for _, label := range added {
 		for _, other := range snap.Tickets {
-			if other.ID == mine.ID || !other.HoldsMutex() || !other.HasLabel(label) {
+			if other.ID == mine.ID || !other.InFlightOnScope() || !other.HasLabel(label) {
 				continue
 			}
 			loser := other

@@ -305,18 +305,6 @@ func (t *Ticket) Unmanaged() bool {
 	return t.HasLabel(LabelAuthorOnly) || t.HasLabel(LabelResync)
 }
 
-// MutexLabels returns the ticket's mutex labels — screen: and system:
-// alike, one rule for both kinds (DESIGN §6).
-func (t *Ticket) MutexLabels() []string {
-	var out []string
-	for _, l := range t.Labels {
-		if hasPrefix(l, protocol.ScreenLabelPrefix) || hasPrefix(l, protocol.SystemLabelPrefix) {
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
 func hasPrefix(s, prefix string) bool {
 	return len(s) > len(prefix) && s[:len(prefix)] == prefix
 }
@@ -327,7 +315,7 @@ func (t *Ticket) Resolved() bool {
 }
 
 // InFlight is the DESIGN vocabulary: any state from Ready for dev through
-// Merged inclusive. The screen mutex quantifies over this set.
+// Merged inclusive.
 func (t *Ticket) InFlight() bool {
 	switch t.State {
 	case protocol.ReadyForDev, protocol.InProgress, protocol.Checks, protocol.Reconciling,
@@ -353,123 +341,39 @@ type RecordedMove struct {
 	Role Role
 }
 
-// HoldsMutex reports whether this ticket's screen and system labels are
-// claimed against other tickets (DESIGN §6).
+// InFlightOnScope reports a ticket whose work could still be editing the
+// files its declared scope covers: in flight, short of Merged, and not
+// the author's own.
 //
-// In flight, minus Merged. The mutex exists so two dev agents do not edit
-// one screen or one system at the same time — and a merged ticket's work
-// is on main, its branch gone, with nothing being written. A ticket
-// branching off main afterwards cannot conflict with it; it *contains*
-// it.
+// Named for what it asks rather than for the mutex it used to serve —
+// nothing refuses on a shared scope any more (DESIGN §6), and a predicate
+// called HoldsMutex in a system with no mutex is a comment that lies in
+// the one place a reader cannot skip. §7's collision rule is what reads
+// it: a label acquired mid-flight that another ticket already carries is
+// worth telling both about, whether or not either is blocked by it.
 //
-// Counting Merged held the labels for the whole deploy-detection window
-// instead, which on a platform with no deploy webhook is up to an hour of
-// a queue held by a ticket that is finished. If the deploy fails and the
-// author sends it back for rework it re-enters the queue and re-takes the
-// mutex then, which is the ordinary contention case rather than a special
-// one.
-// Author-only tickets never hold it: they are the author's from Todo to
-// Done and no agent will ever be dispatched against one (DESIGN §8), so
-// counting one would park every ticket sharing its screen or system
-// behind work the pipeline is not doing and cannot observe finishing.
-func (t *Ticket) HoldsMutex() bool {
-	// Author-only, not Unmanaged: a resync ticket keeps its mutex. The
-	// label repairs where the pipeline thinks the ticket is, and says
-	// nothing about the branch it may still have open on that system —
-	// releasing the label here would let a second ticket start on the
-	// same files while the first one's work is still out there. An
-	// author-only ticket has no agent coming for it at all, which is a
-	// different fact and the one that exclusion rests on.
+// Merged is excluded because that ticket's branch is gone and its commits
+// are on main — a ticket branching afterwards contains that work rather
+// than racing it. Author-only is excluded because no agent is coming for
+// one at all, so nothing it declares says anything about a concurrent
+// edit.
+func (t *Ticket) InFlightOnScope() bool {
 	if t.HasLabel(LabelAuthorOnly) {
 		return false
 	}
 	return t.InFlight() && t.State != protocol.Merged
 }
 
-// MutexHolder returns another ticket holding a mutex label this one
-// carries, and the label, or nil. This is the strict reading of DESIGN
-// §6's invariant — every in-flight ticket short of Merged holds — and it
-// is what the promotion door asks: may this ticket *enter* the queue.
-//
-// MutexBlocker is what the dispatcher and the pickup assertion ask: may
-// work *start* on it now. The two questions differ by the tie-break
-// below, and nothing else: they share this loop, so the set of holders
-// and the label reported can never drift apart.
-//
-// Those two in particular must agree, and once did not — the dispatcher
-// never asked at all, so the sweep dispatched a ticket whose label was
-// held straight into a pickup assertion that could only refuse, every
-// beat, at a full billed job each time. That is why they call one
-// function rather than two, and why the tie-break lives here rather than
-// at either call site.
-func MutexHolder(s *Snapshot, t *Ticket) (*Ticket, string) {
-	return mutexHolder(s, t, false)
-}
-
-// MutexBlocker is MutexHolder with the deadlock tie-break applied: an
-// idle queued holder yields to a ticket that precedes it.
-//
-// Without it a pair of tickets sharing a label and both sitting in a
-// queue are each other's holder, so neither dispatches and neither can
-// ever be picked up — the mutex stops serializing them and starts
-// stalling both. The invariant is enforced at exactly one door, the
-// promotion revert, and nothing guards the others: a CI-red bounce lands
-// a ticket in Ready for rework whether or not another already holds its
-// label, and the author moving one out of Blocked does the same.
-//
-// Measured on Catapult, not reproduced from the rule: ORC-171 and
-// ORC-174 share system:delivery and system:platform_content, and both sat
-// in Ready for rework from 2026-08-31T03:37:28Z to 05:12:52Z — an hour
-// and thirty-five minutes with the dev agent idle and the sweep planning
-// nothing. It broke when the author moved ORC-171 to Blocked at 05:12:52,
-// taking it out of the in-flight set; ORC-174 started Reworking 77
-// seconds later, on the next sweep.
-//
-// The tie-break only ever unblocks, and it serializes rather than
-// widening: precedence is a total order (Precedes falls through to the
-// key), so of any set of idle queued tickets sharing a label exactly one
-// is free and the rest are held by it. The winner's claim writes its
-// working state, which is not idle, so from the next beat it holds the
-// label against the others unconditionally. Two agents are never in one
-// system at one time, which is what DESIGN §6 is for; what changes is
-// that "both waiting" no longer reads as "both working".
-//
-// The promotion door keeps the strict reading deliberately. It is the
-// preventive half of §6 and the deadlock does not arrive through it —
-// both tickets above reached Ready for rework by bouncing, a path that
-// door never sees — so relaxing it would widen what may queue on one
-// system while rescuing nothing.
-func MutexBlocker(s *Snapshot, t *Ticket) (*Ticket, string) {
-	return mutexHolder(s, t, true)
-}
-
-func mutexHolder(s *Snapshot, t *Ticket, yieldIdle bool) (*Ticket, string) {
-	for _, other := range s.Tickets {
-		if other.ID == t.ID || !other.HoldsMutex() {
-			continue
-		}
-		// The tie-break. Tested on the holder alone, never on t: at
-		// pickup the claiming run is already live on t, so a condition
-		// reading t.queuedIdle() would be true at dispatch and false at
-		// pickup — the two answering differently again, through a door
-		// built to stop exactly that.
-		if yieldIdle && other.queuedIdle() && Precedes(t, other) {
-			continue
-		}
-		for _, mine := range t.MutexLabels() {
-			if other.HasLabel(mine) {
-				return other, mine
-			}
+// ScopeLabels returns the ticket's declared-scope labels — screen: and
+// system: alike, one rule for both kinds (DESIGN §6).
+func (t *Ticket) ScopeLabels() []string {
+	var out []string
+	for _, l := range t.Labels {
+		if hasPrefix(l, protocol.ScreenLabelPrefix) || hasPrefix(l, protocol.SystemLabelPrefix) {
+			out = append(out, l)
 		}
 	}
-	return nil, ""
-}
-
-// queuedIdle reports a ticket waiting in a dev queue with no agent on it:
-// in flight for the mutex, but with nothing running that could be editing
-// the files the label covers.
-func (t *Ticket) queuedIdle() bool {
-	return (t.State == protocol.ReadyForDev || t.State == protocol.ReadyForRework) && !t.LiveRun("")
+	return out
 }
 
 // HandMerge is a merge the pipeline did not make: a PR the author

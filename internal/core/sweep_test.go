@@ -128,7 +128,12 @@ func TestNonAuthorSignOffReverts(t *testing.T) {
 	}
 }
 
-func TestScreenMutexRevertsCollidingPromotion(t *testing.T) {
+// A shared scope no longer refuses a promotion. Git decides the
+// collision at the merge instead (DESIGN §6), and the prevention this
+// replaces is what created the deadlock the tie-break below used to
+// repair — two tickets that arrived in a queue by bouncing were each
+// other's holder, so neither moved.
+func TestASharedScopeDoesNotRevertAPromotion(t *testing.T) {
 	inFlight := tk("T1", protocol.InProgress, func(t *Ticket) {
 		t.Labels = []string{"screen:home"}
 		t.Run = &Run{ID: "r1", Kind: AgentDev, Live: true}
@@ -136,9 +141,8 @@ func TestScreenMutexRevertsCollidingPromotion(t *testing.T) {
 	promoted := tk("T2", protocol.ReadyForDev,
 		arrived(protocol.DesignReview, RoleAuthor),
 		func(t *Ticket) { t.Labels = []string{"screen:home"} })
-	a := find(Sweep(snap(inFlight, promoted)), ActTransition, "T2")
-	if a == nil || a.To != protocol.DesignReview || a.Marker.Fields["rule"] != "mutex" {
-		t.Errorf("want screen-mutex revert, got %v", a)
+	if a := find(Sweep(snap(inFlight, promoted)), ActTransition, "T2"); a != nil {
+		t.Errorf("reverted a promotion over a shared scope: %v", *a)
 	}
 }
 
@@ -511,18 +515,21 @@ func TestResyncKeepsTheAgentsOff(t *testing.T) {
 	}
 }
 
-// The mutex is deliberately not released. The label repairs the record;
-// it says nothing about the branch the ticket may still have open, and
-// letting a second ticket start on the same system is the wrong risk to
-// take for a temporary, author-attended label.
-func TestResyncStillHoldsItsMutex(t *testing.T) {
+// A resync ticket still counts as in flight on its scope. The label
+// repairs the record; it says nothing about the branch the ticket may
+// still have open, so §7's collision rule should still tell both tickets
+// about a shared scope. Nothing refuses on it — that is DESIGN §6's
+// change — but the predicate is what the collision rule reads, and an
+// author-attended repair is not an absent ticket.
+func TestResyncIsStillInFlightOnItsScope(t *testing.T) {
 	repairing := tk("T1", protocol.ReadyForRework, func(x *Ticket) {
 		x.Labels = []string{LabelResync, "system:delivery"}
 	})
-	other := tk("T2", protocol.ReadyForDev, func(x *Ticket) { x.Labels = []string{"system:delivery"} })
-	s := snap(repairing, other)
-	if holder, _ := MutexHolder(s, other); holder == nil {
-		t.Error("a ticket under repair released its system mutex")
+	if !repairing.InFlightOnScope() {
+		t.Error("a ticket under repair reads as no longer working on its system")
+	}
+	if got := repairing.ScopeLabels(); len(got) != 1 || got[0] != "system:delivery" {
+		t.Errorf("scope labels = %v", got)
 	}
 }
 
@@ -1049,13 +1056,17 @@ func TestAStaleClaimOnTheRightAgentReadsAsBefore(t *testing.T) {
 	}
 }
 
-// The ORC-16 loop, in one test. A merged ticket whose deploy has landed
-// holds mutex labels a queued ticket needs. Before the fold, the pass
-// reasoned about the world as it was at the top of the sweep: ORC-21 was
-// still Merged for every rule, so the queue ticket was held — and on the
-// beats where it was dispatched anyway, the pickup assertion refused it,
-// at a full billed job each time.
-func TestADeployedTicketReleasesItsMutexWithinTheSamePass(t *testing.T) {
+// The ORC-16 loop, in one test: a deployed ticket retires and a queued
+// one dispatches in the *same* pass. Before the fold, the pass reasoned
+// about the world as it was at the top of the sweep, so a ticket that had
+// just been retired was still Merged for every later rule.
+//
+// It was written when a shared scope gated the dispatch, and the scope is
+// what made the two tickets interact. Nothing refuses on that now
+// (DESIGN §6), so the labels here no longer carry the test — the fold
+// does, and the assertion is unchanged because the fold is what it was
+// always about.
+func TestADeployedTicketRetiresAndAQueuedOneDispatchesInOnePass(t *testing.T) {
 	done := tk("T1", protocol.Merged, func(t *Ticket) {
 		t.Deploy = DeployDeployed
 		t.Labels = []string{"system:substrate"}
@@ -1074,10 +1085,13 @@ func TestADeployedTicketReleasesItsMutexWithinTheSamePass(t *testing.T) {
 	}
 }
 
-// The other half: while the holder is genuinely in flight, the sweep must
-// not dispatch into an assertion that can only refuse. Every one of those
-// cost a job with a checkout, a toolchain and a service container.
-func TestAHeldMutexStopsTheDispatchRatherThanThePickup(t *testing.T) {
+// A ticket sharing a scope with one in flight now dispatches, and its
+// pickup assertion allows it. Those two agreeing is the property worth
+// keeping from the rule this replaces: the dispatcher used not to ask at
+// all, so it sent tickets into an assertion that could only refuse, at a
+// full billed job each time. They agree here by having nothing to
+// disagree about.
+func TestASharedScopeStopsNeitherTheDispatchNorThePickup(t *testing.T) {
 	holder := tk("T1", protocol.Checks, func(t *Ticket) {
 		t.Labels = []string{"system:substrate"}
 	})
@@ -1086,25 +1100,23 @@ func TestAHeldMutexStopsTheDispatchRatherThanThePickup(t *testing.T) {
 	})
 
 	s := snap(holder, queued)
-	if d := find(Sweep(s), ActDispatch, "T2"); d != nil {
-		t.Errorf("dispatched into a pickup that refuses: %v", *d)
+	if d := find(Sweep(s), ActDispatch, "T2"); d == nil {
+		t.Error("a shared scope still stopped the dispatch")
 	}
-	// And the two agree, which is the reason they share a function.
-	if err := VerifyPickup(s, queued.ID, AgentDev, "r9"); err == nil {
-		t.Error("the dispatcher declined but the pickup assertion would have allowed it")
+	if err := VerifyPickup(s, queued.ID, AgentDev, "r9"); err != nil {
+		t.Errorf("the dispatcher allowed it but the pickup assertion refused: %v", err)
 	}
 }
 
 // Merged is finished work: the branch is gone and its commits are on
 // main, so a ticket starting afterwards contains it rather than racing
-// it. Holding the labels through Merged meant holding them for the whole
-// deploy-detection window — on a platform with no deploy webhook, up to
-// an hour of a queue held by a ticket that was done.
-func TestMergedDoesNotHoldTheMutex(t *testing.T) {
+// it. Nothing refuses on a shared scope now, but §7's collision rule
+// still reads this predicate, and telling two tickets they collide when
+// one of them is already merged is a comment about nothing.
+func TestMergedIsNotInFlightOnItsScope(t *testing.T) {
 	merged := tk("T1", protocol.Merged, func(t *Ticket) { t.Labels = []string{"screen:home"} })
-	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
-	if other, _ := MutexHolder(snap(merged, queued), queued); other != nil {
-		t.Errorf("a merged ticket still holds %q", "screen:home")
+	if merged.InFlightOnScope() {
+		t.Error("a merged ticket still reads as working on its screen")
 	}
 	// Every earlier state still does.
 	for _, st := range []protocol.State{
@@ -1112,8 +1124,8 @@ func TestMergedDoesNotHoldTheMutex(t *testing.T) {
 		protocol.Reconciling, protocol.ReadyForRework, protocol.Reworking,
 	} {
 		holder := tk("T3", st, func(t *Ticket) { t.Labels = []string{"screen:home"} })
-		if other, _ := MutexHolder(snap(holder, queued), queued); other == nil {
-			t.Errorf("%s does not hold the mutex", st)
+		if !holder.InFlightOnScope() {
+			t.Errorf("%s does not read as in flight on its scope", st)
 		}
 	}
 }
@@ -1412,20 +1424,19 @@ func TestAuthorOnlyClosuresAreNotReverted(t *testing.T) {
 }
 
 // Author-only work never reaches an agent, so nothing in the pipeline
-// ever observes it finishing. Counting it in the mutex would park every
-// ticket sharing its screen or system behind a human's calendar.
-func TestAuthorOnlyDoesNotHoldTheMutex(t *testing.T) {
+// ever observes it finishing — which is why §7's collision rule should
+// say nothing about one. Telling a queued ticket it collides with work no
+// agent is coming for is a comment pointing at a human's calendar.
+func TestAuthorOnlyIsNotInFlightOnItsScope(t *testing.T) {
 	mine := tk("A1", protocol.InProgress, func(t *Ticket) {
 		t.Labels = []string{"screen:home", LabelAuthorOnly}
 	})
-	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
-
-	s := snap(mine, queued)
-	if other, l := MutexHolder(s, queued); other != nil {
-		t.Errorf("an author-only ticket holds %q", l)
+	if mine.InFlightOnScope() {
+		t.Error("an author-only ticket reads as an agent working on its screen")
 	}
-	if d := find(Sweep(s), ActDispatch, "T2"); d == nil {
-		t.Error("the queued ticket was held behind an author-only ticket")
+	queued := tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"screen:home"} })
+	if d := find(Sweep(snap(mine, queued)), ActDispatch, "T2"); d == nil {
+		t.Error("the queued ticket was not dispatched")
 	}
 }
 
@@ -1509,10 +1520,6 @@ func TestEveryPickupRefusalIsMarkedAsOne(t *testing.T) {
 		{"re-evaluate", snap(tk("T1", protocol.ReadyForDev, func(t *Ticket) {
 			t.Labels = []string{LabelReEvaluate}
 		})), "T1", AgentDev},
-		{"mutex held", snap(
-			tk("T1", protocol.Checks, func(t *Ticket) { t.Labels = []string{"system:core"} }),
-			tk("T2", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"system:core"} }),
-		), "T2", AgentDev},
 		{"unknown ticket", snap(tk("T1", protocol.ReadyForDev)), "nope", AgentDev},
 		{"unknown kind", snap(tk("T1", protocol.ReadyForDev)), "T1", AgentKind("wat")},
 	}
@@ -1856,13 +1863,22 @@ func TestTheSameAttemptOfTheSameRunStaysSilent(t *testing.T) {
 	}
 }
 
-// Two tickets in a queue sharing a mutex label were each other's holder,
-// so the sweep planned nothing and the dev agent sat idle — the mutex
-// stalling both instead of serializing them. Measured on Catapult:
-// ORC-171 and ORC-174 share system:delivery and both sat in Ready for
+// The deadlock this used to need a tie-break for cannot happen now, and
+// the assertion is the same one for a different reason — which is the
+// interesting thing about it.
+//
+// Two tickets in a queue sharing a scope were each other's holder, so the
+// sweep planned nothing and the dev agent sat idle. Measured on Catapult:
+// ORC-171 and ORC-174 shared system:delivery and both sat in Ready for
 // rework from 2026-08-31T03:37:28Z to 05:12:52Z, an hour and thirty-five
-// minutes, until the author moved one to Blocked by hand.
-func TestIdleQueuedTicketsBreakTheTieByPrecedence(t *testing.T) {
+// minutes, until the author moved one to Blocked by hand. The repair was
+// a tie-break; DESIGN §6's change removes the thing it repaired.
+//
+// One still dispatches and one does not, because **there is one dev
+// agent** — singularity, not the scope. So the pair serializes for the
+// reason it always really should have, and precedence still picks which
+// goes first. The tie-break is gone and nothing replaced it.
+func TestOneOfTwoQueuedTicketsSharingAScopeDispatches(t *testing.T) {
 	first := tk("T1", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
 	second := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
 	s := snap(first, second)
@@ -1874,84 +1890,20 @@ func TestIdleQueuedTicketsBreakTheTieByPrecedence(t *testing.T) {
 		t.Error("the ticket precedence picks was not dispatched: the pair is still deadlocked")
 	}
 	if d := find(Sweep(s), ActDispatch, "T2"); d != nil {
-		t.Errorf("both tickets dispatched — the mutex stopped serializing them: %v", *d)
+		t.Errorf("both tickets dispatched — one dev agent means one dispatch: %v", *d)
 	}
 
-	// The dispatcher and the pickup assertion must agree, in both
-	// directions. Disagreement is a full billed job spent to be refused.
-	if err := VerifyPickup(s, first.ID, AgentDev, "r1"); err != nil {
-		t.Errorf("dispatched T1 into a pickup that refuses it: %v", err)
-	}
-	if err := VerifyPickup(s, second.ID, AgentDev, "r2"); err == nil {
-		t.Error("T2 was not dispatched but its pickup would have allowed it")
-	}
-}
-
-// The tie-break yields to precedence only for a holder that is waiting.
-// A holder with an agent on it, or one past the queues, still blocks
-// unconditionally — that is the invariant DESIGN §6 exists for, and
-// widening the tie-break to cover it would put two agents in one system.
-func TestAWorkingHolderStillBlocksWhoeverPrecedesIt(t *testing.T) {
-	queued := tk("T1", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
-	for _, st := range []protocol.State{
-		protocol.InProgress, protocol.Reworking, protocol.Checks, protocol.Reconciling,
-	} {
-		holder := tk("T2", st, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
-		s := snap(queued, holder)
-		if !Precedes(queued, holder) && st != protocol.InProgress {
-			// Precedence favours the further-along ticket, so the queued
-			// one loses anyway; the case worth pinning is the one where
-			// it wins the tie-break and must still be refused.
-			continue
+	// **Both pickups now allow, and that is correct rather than a gap.**
+	// The assertion this replaces was that the dispatcher and the pickup
+	// agreed about the scope; neither consults it, so there is nothing to
+	// disagree about. What stops a second agent is the dispatcher
+	// planning one dispatch per kind per pass, and the reservation behind
+	// it (DESIGN §6) — not a refusal at pickup, which would be a full
+	// billed job spent to be told no.
+	for _, tk := range []*Ticket{first, second} {
+		if err := VerifyPickup(s, tk.ID, AgentDev, "r1"); err != nil {
+			t.Errorf("%s: pickup refused over a shared scope: %v", tk.Key, err)
 		}
-		if other, _ := MutexBlocker(s, queued); other == nil {
-			t.Errorf("a holder in %s yielded to a ticket that precedes it", st)
-		}
-	}
-	// And a holder that is idle but in the queue with a live run on it —
-	// dispatched, not yet claimed — is working, not waiting.
-	live := tk("T2", protocol.ReadyForRework, func(t *Ticket) {
-		t.Labels = []string{"system:delivery"}
-		t.LiveRuns = []Run{{ID: "r9", Kind: AgentDev, Live: true}}
-		t.Run = &Run{ID: "r9", Kind: AgentDev, Live: true}
-	})
-	if other, _ := MutexBlocker(snap(queued, live), queued); other == nil {
-		t.Error("a queued holder with a live run yielded: two dev agents in one system")
-	}
-}
-
-// The promotion door keeps the strict reading of §6 deliberately: it is
-// the preventive half, and the deadlock does not arrive through it. Both
-// Catapult tickets reached Ready for rework by bouncing off CI, a path
-// this door never sees, so relaxing it would widen what may queue on one
-// system while rescuing nothing already stuck.
-func TestPromotionDoorKeepsTheStrictReading(t *testing.T) {
-	first := tk("T1", protocol.ReadyForDev, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
-	second := tk("T2", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
-	s := snap(first, second)
-	if other, _ := MutexHolder(s, first); other == nil {
-		t.Error("the promotion door stopped seeing an idle queued holder")
-	}
-	// The author promoting past it is still reverted — and the promoted
-	// ticket is Urgent deliberately. Ready for rework outranks Ready for
-	// dev in precedenceRank (70 to 40), so an ordinary promotion loses
-	// the tie-break to any idle holder and the door's choice of function
-	// changes nothing: the first version of this test asserted the revert
-	// on a non-urgent ticket, and relaxing the door to MutexBlocker left
-	// it passing. Urgent is the case where the promoting ticket wins
-	// precedence, so it is the only one that tells the two apart.
-	promoted := tk("T3", protocol.ReadyForDev, func(t *Ticket) {
-		t.Labels = []string{"system:delivery"}
-		t.Priority = urgentPriority
-	}, arrived(protocol.DesignReview, RoleAuthor))
-	held := tk("T4", protocol.ReadyForRework, func(t *Ticket) { t.Labels = []string{"system:delivery"} })
-	if !Precedes(promoted, held) {
-		t.Fatal("precondition: T3 must win the tie-break or this asserts nothing")
-	}
-	acts := Sweep(snap(promoted, held))
-	rev := find(acts, ActTransition, "T3")
-	if rev == nil || rev.To != protocol.DesignReview {
-		t.Errorf("the author's promotion past a held mutex was not reverted: %v", acts)
 	}
 }
 
