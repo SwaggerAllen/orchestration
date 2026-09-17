@@ -443,7 +443,36 @@ making the swap.
 The sim scenarios asserting mutex behaviour are the other half of the work.
 *Exit: the scenarios rewritten to assert conflict-parking where they asserted mutex
 refusal, and a rehearsal with two overlapping tickets landing without a label between
-them.*
+them.* The behaviour change is done and the scenarios are rewritten; the rehearsal is a
+manual step, and it is the one exit in C0–C6 that **cannot** be taken before the pipeline
+is running on Render.
+
+**The labels survive this and their removal is a separate change.** They stopped being a
+lock; they are still the declared-scope audit CI runs against the file maps, and the
+ownership check, the record review and the manual test gate's selection all read them. So
+C6 as landed is the behaviour, and what remains is deletion:
+`reconcileMutexLabels` and its two helpers, `filemap.Audit`'s label requirement,
+`protocol`'s two prefixes, `plane.EnsureMutexLabel`, §7's discovered-label machinery
+(`resolveDiscoveredLabel`, `flagCollisions`, `recordDiscoveredLabels`), setup's label
+provisioning, and the Linear labels themselves.
+
+**Do that one only after a rehearsal**, because it is the half with a live-system failure
+mode: the labels are what CI currently demands of a diff, so removing the audit and the
+creation in the wrong order fails every PR or leaves every PR demanding a label nothing
+creates. The ordering rule is the config-field one in reverse — the audit is the binary's
+and the labels are the tracker's, so the audit's requirement goes first and the
+provisioning second.
+
+**Two predicates were renamed rather than removed**, because §7's collision rule still
+reads them: `HoldsMutex` is `InFlightOnScope` and `MutexLabels` is `ScopeLabels`. A
+function called `HoldsMutex` in a system with no mutex is a comment lying in the one place
+a reader cannot skip.
+
+**What the removal turned up, and it is the strongest thing in the entry:** the argument
+against labels on unowned files — the router, the manifests, where giving them labels
+would serialize every ticket through them — was in DESIGN §6 from the beginning. It was
+the argument against labels *anywhere*, applied to the one case where the cost was
+obvious.
 
 ### 6.3 What this does not include
 

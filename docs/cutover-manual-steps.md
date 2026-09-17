@@ -110,6 +110,34 @@ silence.
 
 ---
 
+### 9b. C6: two overlapping tickets land without a label between them
+
+Two tickets whose declared scopes overlap, both taken through to merge.
+**The one exit in C0–C6 that cannot be taken before the pipeline runs on
+Render**, because it needs two real tickets in flight.
+
+*Worked when:* both merged; neither was refused a promotion, a dispatch or
+a pickup over the shared scope; and any conflict that arose was either
+resolved by the dev pass or parked with the `conflict` label — not bounced
+at reconcile.
+
+### 9c. C6's second half: delete the labels
+
+Only after 9b. The labels stopped being a lock and are still the
+declared-scope audit, so this is deletion with a live-system failure mode:
+they are what CI demands of a diff today.
+
+**Order matters and it is the config-field rule in reverse.** The audit
+lives in the binary and the labels live in the tracker, so the audit's
+requirement comes out first and the provisioning second — the other way
+round leaves every PR demanding a label nothing creates.
+
+The sites are in `PLAN.md` §6.2's C6 entry.
+
+*Worked when:* `grep -rn 'ScreenLabelPrefix\|SystemLabelPrefix'` is empty,
+a PR touching a mapped path passes with no scope label, and the Linear
+labels are gone.
+
 ## Measurements — take them while the thing is running
 
 ### 10. Render's database connection limit — the pool arithmetic depends on it
