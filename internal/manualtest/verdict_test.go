@@ -8,11 +8,11 @@ import (
 )
 
 func pass(id, evidence string) Verdict {
-	return Verdict{TestID: id, Passed: true, Title: "it drained", Summary: "observed 0 jobs", EvidenceURL: evidence}
+	return Verdict{TestID: id, SHA: "sha1", Passed: true, Title: "it drained", Summary: "observed 0 jobs", EvidenceURL: evidence}
 }
 
 func fail(id, evidence string) Verdict {
-	return Verdict{TestID: id, Passed: false, Title: "it did not drain", Summary: "observed 2 jobs", EvidenceURL: evidence}
+	return Verdict{TestID: id, SHA: "sha1", Passed: false, Title: "it did not drain", Summary: "observed 2 jobs", EvidenceURL: evidence}
 }
 
 func priorRun(id string, c host.CheckRunConclusion, url string) host.CheckRun {
@@ -184,6 +184,31 @@ func TestRecordAPassThatLostItsEvidenceDisagreesWithAPriorPass(t *testing.T) {
 	}
 	if cr.Conclusion != host.CheckRunNeutral {
 		t.Errorf("conclusion = %q", cr.Conclusion)
+	}
+}
+
+// Both the check run and the finding have to name the commit: the check
+// run because that is what a verdict is attached to, and the finding
+// because "the same test on the same SHA" is the identity rule 8 compares
+// by, and a finding that cannot name the commit is one nobody can go and
+// look at.
+func TestRecordCarriesTheCommitOntoBothOutputs(t *testing.T) {
+	cr, d := Record(fail("queue-drains", "https://gh/run/2"),
+		[]host.CheckRun{priorRun("queue-drains", host.CheckRunSuccess, "https://gh/run/1")})
+	if cr.SHA != "sha1" {
+		t.Errorf("check run SHA = %q", cr.SHA)
+	}
+	if d == nil || d.SHA != "sha1" {
+		t.Errorf("disagreement = %+v", d)
+	}
+	if !strings.Contains(d.String(), "sha1") {
+		t.Errorf("the finding does not name the commit: %q", d.String())
+	}
+	// And on the agreeing path too, where there is no disagreement to
+	// carry it.
+	clean, _ := Record(pass("queue-drains", "https://gh/run/1"), nil)
+	if clean.SHA != "sha1" {
+		t.Errorf("check run SHA = %q on the clean path", clean.SHA)
 	}
 }
 

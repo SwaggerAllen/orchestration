@@ -69,6 +69,8 @@ func run(args []string) error {
 		return cmdAudit(args[1:])
 	case "manual-tests":
 		return cmdManualTests(args[1:])
+	case "manual-verdict":
+		return cmdManualVerdict(args[1:])
 	case "non-asks":
 		return cmdNonAsks(args[1:])
 	case "reasons":

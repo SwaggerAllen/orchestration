@@ -98,12 +98,40 @@ no test could ever cover — a live run has not concluded, so the field was
 always the zero value. That line is gone rather than left. Read a passing
 probe as the question "which of those two is it", never as a green light.
 
-Measured 2026-08-23, because the folk version of this is wrong: the Go
-test cache does **not** serve a stale pass when you edit a file the test
-reads at runtime. Breaking `.github/actions/agent-dev/action.yml` after a
-cached `ok` re-ran the test and failed it. A `(cached)` line is not a
-reason to distrust a result, and `go clean -testcache` between probes is
-insurance, not a requirement.
+**A probe that edits a non-Go file must pass `-count=1`.** Measured
+2026-09-17, and it reverses what this section said before: the Go test
+cache *does* serve a stale pass after an edit to a file the test reads at
+runtime.
+
+```
+go test ./cmd/pipeline/            # warm cache
+<delete a line from .github/actions/agent-judge/action.yml>
+go test ./cmd/pipeline/            -> ok  (cached)
+go test ./cmd/pipeline/ -count=1   -> FAIL
+```
+
+An earlier measurement on `.github/actions/agent-dev/action.yml` recorded
+the opposite and concluded `go clean -testcache` was insurance rather than
+a requirement. Whatever the difference was — the package's Go sources
+changing in the same edit is the likeliest — the safe reading is the one
+above, because the failure mode is the one the whole discipline exists to
+prevent: a guard that is broken, a probe that prints `ok`, and nothing to
+tell them apart.
+
+**It also cost three real findings in one sitting.** Probes over
+`agent-judge/action.yml` reported five guards holding; re-run with
+`-count=1`, three of those five printed `ok` instead. All three were in
+shell embedded in the action, where the only available assertion was a
+grep for the step's own error text — so hardcoding the file count to zero
+disabled §8.3 rule 4's entire mechanical guarantee while every assertion
+passed. The guard moved into
+`.github/actions/agent-judge/assert-isolated-checkout.sh` so a test can
+*run* it against real git trees, which is this repo's own rule about gates
+arriving at the one place it had not been applied.
+
+Probes over `.go` files are unaffected: editing a source file invalidates
+the cache by construction. The rule is about data the test reads —
+workflow YAML, action YAML, prompts, testdata.
 
 ## A fake that rejects a real value hides the bug it was built to catch
 

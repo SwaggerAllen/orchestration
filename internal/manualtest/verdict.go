@@ -20,6 +20,11 @@ func CheckRunName(testID string) string { return NamePrefix + testID }
 // Verdict is what one judge pass concluded about one test.
 type Verdict struct {
 	TestID string
+	// SHA is the commit judged. Carried here rather than patched onto
+	// the check run afterwards, because it is half the identity rule 8
+	// compares by — "the same test on the same SHA" — and a Disagreement
+	// that cannot name the commit is a finding nobody can go and look at.
+	SHA string
 	// Passed is the judge's own answer about the thing under test.
 	Passed bool
 	// Title and Summary are the judge's words, shown in the Checks tab.
@@ -34,6 +39,8 @@ type Verdict struct {
 // the judge, not about the code.
 type Disagreement struct {
 	TestID string
+	// SHA is the commit both verdicts were about.
+	SHA string
 	// Prior and Now are the two conclusions.
 	Prior, Now host.CheckRunConclusion
 	// PriorDetailsURL is the earlier run, so the two can be read
@@ -42,8 +49,8 @@ type Disagreement struct {
 }
 
 func (d Disagreement) String() string {
-	return fmt.Sprintf("%s: this pass concluded %q on a commit already recorded as %q (%s)",
-		d.TestID, d.Now, d.Prior, d.PriorDetailsURL)
+	return fmt.Sprintf("%s on %s: this pass concluded %q on a commit already recorded as %q (%s)",
+		d.TestID, d.SHA, d.Now, d.Prior, d.PriorDetailsURL)
 }
 
 // Record decides the check run to write for a verdict, given the verdicts
@@ -82,6 +89,7 @@ func (d Disagreement) String() string {
 func Record(v Verdict, prior []host.CheckRun) (host.CheckRun, *Disagreement) {
 	name := CheckRunName(v.TestID)
 	out := host.CheckRun{
+		SHA:        v.SHA,
 		Name:       name,
 		Title:      v.Title,
 		Summary:    v.Summary,
@@ -107,10 +115,11 @@ func Record(v Verdict, prior []host.CheckRun) (host.CheckRun, *Disagreement) {
 			continue
 		}
 		d := &Disagreement{
-			TestID: v.TestID, Prior: p.Conclusion, Now: out.Conclusion,
+			TestID: v.TestID, SHA: v.SHA, Prior: p.Conclusion, Now: out.Conclusion,
 			PriorDetailsURL: p.DetailsURL,
 		}
 		return host.CheckRun{
+			SHA:        v.SHA,
 			Name:       name,
 			Conclusion: host.CheckRunNeutral,
 			Title:      "the judge disagreed with itself on this commit",

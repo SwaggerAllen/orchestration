@@ -73,9 +73,13 @@ func TestComposeBaseWithoutContextIsUnchanged(t *testing.T) {
 func TestEveryAgentActionInjectsRepoContext(t *testing.T) {
 	const flag = "--repo-context"
 	root := filepath.Join("..", "..")
-	actions, err := filepath.Glob(filepath.Join(root, ".github", "actions", "agent-*", "action.yml"))
-	if err != nil || len(actions) == 0 {
-		t.Fatalf("found no agent actions to check: %v", err)
+	// The claim/finish actions only. agent-judge injects no repo context
+	// deliberately: it checks out tests/manual and nothing else, so
+	// there is no repo for it to be oriented in — which is §8.3 rule 4
+	// rather than an omission.
+	var actions []string
+	for _, d := range claimFinishAgentDirs(t) {
+		actions = append(actions, filepath.Join(d, "action.yml"))
 	}
 	for _, w := range actions {
 		body, err := os.ReadFile(w)

@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/SwaggerAllen/orchestration/internal/host/github"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,6 +61,51 @@ func TestCheckoutWorkflowsGrantContents(t *testing.T) {
 // '#' inside a quoted string — but the workflows here have none, and a
 // false positive is a test that fails loudly rather than one that
 // passes quietly.
+// claimFinishAgentDirs are the agent actions built around a ticket claim
+// and a finish: they claim, run a model, write an outcome, and land it or
+// abort. Several guards in this package hold every one of them to that
+// shape.
+//
+// **`agent-judge` is excluded, and the exclusion is the point rather than
+// a convenience.** It judges a *commit*, not a ticket: nothing is
+// claimed, no outcome is written, no state is transitioned, and its
+// verdict is a check run rather than a move. Holding it to the claim
+// contract would mean inventing a claim for it to satisfy the tests,
+// which is the tail wagging the dog.
+//
+// The exclusion is asserted rather than subtracted, so a real agent
+// action cannot join the list by being added to it quietly: the set of
+// excluded names is fixed here, and a name in it that is not on disk
+// fails just as loudly as one on disk that is not covered.
+func claimFinishAgentDirs(t *testing.T) []string {
+	t.Helper()
+	excluded := map[string]bool{"agent-judge": true}
+
+	all, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range all {
+		name := filepath.Base(d)
+		seen[name] = true
+		if excluded[name] {
+			continue
+		}
+		out = append(out, d)
+	}
+	for name := range excluded {
+		if !seen[name] {
+			t.Errorf("%s is excluded from the claim/finish guards but no longer exists — drop it from the list", name)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("found no claim/finish agent actions — the paths must have moved, or everything got excluded")
+	}
+	return out
+}
+
 func stripComments(body string) string {
 	lines := strings.Split(body, "\n")
 	for i, l := range lines {
@@ -308,14 +354,7 @@ func TestAgentActionsHandTheModelsPreparedArgumentToTheAbort(t *testing.T) {
 }
 
 func TestAgentActionsHandTheModelRunsOutputToTheAbort(t *testing.T) {
-	dirs, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dirs) == 0 {
-		t.Fatal("found no agent actions to check — the paths must have moved")
-	}
-	for _, d := range dirs {
+	for _, d := range claimFinishAgentDirs(t) {
 		raw, err := os.ReadFile(filepath.Join(d, "action.yml"))
 		if err != nil {
 			t.Fatal(err)
@@ -338,14 +377,7 @@ func TestAgentActionsHandTheModelRunsOutputToTheAbort(t *testing.T) {
 // author as "run failed: <url>" with the Go error that said exactly
 // what went wrong left in a collapsed step.
 func TestAgentActionsCaptureTheFinishStepsStderr(t *testing.T) {
-	dirs, err := filepath.Glob(filepath.Join("..", "..", ".github", "actions", "agent-*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dirs) == 0 {
-		t.Fatal("found no agent actions to check — the paths must have moved")
-	}
-	for _, d := range dirs {
+	for _, d := range claimFinishAgentDirs(t) {
 		raw, err := os.ReadFile(filepath.Join(d, "action.yml"))
 		if err != nil {
 			t.Fatal(err)
@@ -768,5 +800,174 @@ func TestTheReplayTableCountsAPassesFindingsAsCallouts(t *testing.T) {
 		if !strings.Contains(action, want.text) {
 			t.Errorf("review-replay/action.yml does not carry %s — %s", want.text, want.why)
 		}
+	}
+}
+
+// §8.3 rule 4's isolation has to be mechanical, and this is what keeps it
+// so.
+//
+// The rule is that the judge never sees the diff, and a prompt saying so
+// is not a guarantee: a model with the repository on disk can read the
+// implementation whatever it was told, and the failure is silent — the
+// pass that wrote the code writing the assertion that agrees with it,
+// which is awaitingDispatchOf rebuilt one layer up. A sparse checkout is
+// the guarantee, because then there is nothing to read.
+//
+// Asserted here because the action is the only place it exists. Nothing
+// else in the suite would notice the sparse-checkout block being dropped,
+// and a full checkout looks exactly like a working one.
+func TestTheJudgeChecksOutOnlyTheTests(t *testing.T) {
+	// Comments stripped, because the rationale for a rule is not a
+	// breach of it *and* not a satisfaction of it either. The first
+	// version of this test read the raw file and passed on the comment
+	// that explains why cone mode is off — so deleting the actual
+	// setting changed nothing. The same trap caught this test twice in
+	// one sitting; `stripComments` is the tool the package already had.
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "agent-judge", "action.yml")))
+
+	for _, want := range []string{
+		// The checkout is narrowed at all.
+		"sparse-checkout:",
+		"tests/manual",
+		// Cone mode takes directories and would pull in everything above
+		// them, so the pattern needs it off.
+		"sparse-checkout-cone-mode: false",
+		// And the narrowing is asserted rather than assumed: a pattern
+		// that stops matching degrades to a full checkout, which is the
+		// one failure this action exists to prevent. The check itself is
+		// a script, exercised below against real trees.
+		"assert-isolated-checkout.sh",
+		// The config is the one permitted extra and is named literally in
+		// the pattern, so a second file cannot arrive under the same
+		// allowance.
+		"pipeline.config.json",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("agent-judge/action.yml does not carry %q", want)
+		}
+	}
+
+	// The judged SHA, not the branch: a push landing mid-run would
+	// otherwise change the test under the judge, and the verdict would
+	// attach to a commit it did not read.
+	if !strings.Contains(body, "ref: ${{ inputs.sha }}") {
+		t.Error("the judge's checkout does not pin the judged SHA")
+	}
+
+	// The verdict is recorded even when the judge died, because a run
+	// with no check run leaves the next pass over that commit unable to
+	// detect a disagreement — rule 8 blinded by the absence of the thing
+	// it compares against.
+	// Anchored on the step form, not the bare phrase: the action's own
+	// `description:` line contains "record the verdict" too, and the
+	// first version of this assertion found that instead and reported a
+	// missing always() that was there. A substring search that can match
+	// prose is the weak-assertion trap one level up from misspelling a
+	// field name.
+	idx := strings.Index(body, "- name: record the verdict")
+	if idx < 0 {
+		t.Fatal("no verdict step")
+	}
+	tail := body[idx:]
+	if len(tail) > 200 {
+		tail = tail[:200]
+	}
+	if !strings.Contains(tail, "if: always()") {
+		t.Error("the verdict step is not always(), so a dead judge records nothing")
+	}
+}
+
+// The judge's own token, and the reason is measured: no fine-grained
+// token can be granted the check-runs API, so an AGENT_GITHUB_TOKEN here
+// answers 403 for a reason no setting fixes. The input's description is
+// where a caller reads that, and a caller who passes the wrong token gets
+// a 403 at the last step of a paid run.
+func TestTheJudgeSaysWhichTokenItNeeds(t *testing.T) {
+	body := repoFile(t, filepath.Join(".github", "actions", "agent-judge", "action.yml"))
+	for _, want := range []string{"checks: write", "fine-grained"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the github_token input does not mention %q", want)
+		}
+	}
+}
+
+// The isolation guard, executed rather than grepped.
+//
+// This exists because grepping was measured insufficient: with the check
+// inline in the action, hardcoding its file count to zero disabled §8.3
+// rule 4's entire mechanical guarantee and every assertion about the
+// action still passed — they were about the presence of text, not the
+// behaviour of a check. The script is the same one the action runs.
+func TestTheIsolationGuardRunsAgainstRealTrees(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("..", "..", ".github", "actions", "agent-judge", "assert-isolated-checkout.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(script); err != nil {
+		t.Fatalf("the action runs a script that is not there: %v", err)
+	}
+
+	tree := func(t *testing.T, files map[string]string) string {
+		t.Helper()
+		root := t.TempDir()
+		for rel, body := range files {
+			p := filepath.Join(root, rel)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, args := range [][]string{
+			{"init", "-q", "."}, {"add", "-A"},
+			{"-c", "user.email=a@b", "-c", "user.name=a", "commit", "-qm", "t"},
+		} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		return root
+	}
+
+	for _, tc := range []struct {
+		name    string
+		files   map[string]string
+		wantErr bool
+	}{
+		{"tests only", map[string]string{"tests/manual/a.md": "# a\n"}, false},
+		{"tests plus the permitted config", map[string]string{
+			"tests/manual/a.md": "# a\n", "pipeline.config.json": "{}\n"}, false},
+		// The failure the whole action exists to prevent.
+		{"an implementation file leaked in", map[string]string{
+			"tests/manual/a.md": "# a\n", "lib/app.ex": "defmodule App do\nend\n"}, true},
+		// A language this guard has never seen, which is the case a list
+		// of source extensions would miss and a count does not.
+		{"a language nobody thought of", map[string]string{
+			"tests/manual/a.md": "# a\n", "src/main.zig": "pub fn main() void {}\n"}, true},
+		// A sparse pattern that stopped matching: no tests at all. The
+		// judge has nothing to read, and passing here would let it
+		// report on a test it never saw.
+		{"no tests at all", map[string]string{"pipeline.config.json": "{}\n"}, true},
+		// A second file trying to ride the config's allowance.
+		{"a lookalike beside the config", map[string]string{
+			"tests/manual/a.md": "# a\n", "pipeline.config.json.bak": "{}\n"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", script)
+			cmd.Dir = tree(t, tc.files)
+			out, err := cmd.CombinedOutput()
+			if tc.wantErr && err == nil {
+				t.Errorf("the guard passed a tree it must refuse:\n%s", out)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("the guard refused a legal tree: %v\n%s", err, out)
+			}
+			if tc.wantErr && err != nil && !strings.Contains(string(out), "::error::") {
+				t.Errorf("the refusal is not annotated for the Actions log:\n%s", out)
+			}
+		})
 	}
 }
