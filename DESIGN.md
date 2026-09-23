@@ -2872,6 +2872,21 @@ Day and week buckets are likewise computed on read, because a stored bucket is a
 week boundaries that becomes a migration when it is wrong. Filter values are bound parameters;
 only a fixed allowlist of column and bucket names is ever interpolated.
 
+**The store is billed for rows read, so the write path may not scan.** Durable Object SQLite
+charges by the row a query touches rather than by the query, which makes an unqualified
+aggregate over a table that grows by design a cost with no ceiling. `putRuns` decided whether
+an `INSERT OR IGNORE` had ignored by counting the table before and after — two full scans per
+run — so one pass cost about `2 x batch x rows already stored`. It read a few hundred thousand
+rows on the first night and about nineteen million on the fourteenth, capping the account's
+whole daily allowance from roughly the fifth. The insert reports its own outcome through
+`RETURNING` instead, and the cost is now flat in the batch.
+
+The lesson is not about that one query. **A cost defect is invisible to a test that seeds three
+rows**: every assertion about this store passed throughout, because they all pass on a table
+small enough for a scan to be free. So the write paths carry a statement budget as an
+assertion, not just an answer — and it budgets statements rather than forbidding `COUNT(*)`,
+because the same cost arrives just as easily through `MAX()`, a bare `SELECT`, or a subquery.
+
 **Nothing is filtered on the way in.** The collector's own runs are marked rather than dropped,
 so runaway spend by the thing measuring spend stays visible. Collection is the irreversible
 step and filtering is free at read time, so a fact excluded at write is a question that can

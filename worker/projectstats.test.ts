@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 
-import { ProjectStats } from "./projectstats.ts";
+import { ProjectStats, type SqlLike } from "./projectstats.ts";
 import { memorySql } from "./sqlite.ts";
 
 const TOKEN = "stats-token";
@@ -576,4 +576,97 @@ test("the collector's bearer still writes and reads", async () => {
   const s = store();
   const res = await s.fetch(req("POST", "/tickets", { tickets: [ticket("ORC-9", 1, 1000)] }));
   assert.equal(res.status, 200);
+});
+
+// ---- what the write path is allowed to read ------------------------
+
+/**
+ * A SqlLike that records every statement, so a test can assert what the
+ * store asked SQLite to do rather than only what came back.
+ *
+ * It exists because the defect it guards against was invisible to every
+ * other test here: correct answers, correct rows, and a read cost
+ * quadratic in a table the tests seed three rows into.
+ */
+function recordingSql(): { sql: SqlLike; statements: string[] } {
+  const inner = memorySql();
+  const statements: string[] = [];
+  return {
+    statements,
+    sql: {
+      exec(query: string, ...bindings: unknown[]) {
+        statements.push(query);
+        return inner.exec(query, ...bindings);
+      },
+    },
+  };
+}
+
+/** Statements issued after the CREATE TABLE/INDEX block at construction. */
+function afterMigrate(rec: { statements: string[] }): string[] {
+  return rec.statements.filter(
+    (q) => !/^\s*create\s+(table|index)/i.test(q),
+  );
+}
+
+// THE COST, PINNED. `putRuns` must not read the run table to decide
+// whether OR IGNORE ignored — RETURNING says so for free.
+//
+// It used to call `SELECT COUNT(*) FROM run` twice per run, which has no
+// WHERE and therefore reads every row. Durable Object SQLite bills rows
+// read, so a pass cost about `2 x batch x rows stored`: with a 400-run
+// batch against ~12,000 stored rows that is ~19 million reads a night,
+// and it capped the account's daily allowance around the fifth nightly
+// pass. Every existing test still passed — they seed three rows, where
+// the scan is free.
+//
+// Asserted as a budget rather than a search for `COUNT(*)`: the cost is
+// "the write path scans the table", and someone can reintroduce that
+// with MAX(), a bare SELECT, or a subquery. Statements per run is the
+// property; the spelling is not.
+test("storing runs does not scan the run table", async () => {
+  const rec = recordingSql();
+  const s = new ProjectStats({ storage: { sql: rec.sql } }, { STATE_TOKEN: TOKEN });
+
+  const batch = Array.from({ length: 25 }, (_, i) => run(i + 1));
+  const res = await s.fetch(req("POST", "/runs", { runs: batch }));
+  assert.equal((await res.json() as any).inserted, 25);
+
+  const issued = afterMigrate(rec);
+  assert.equal(issued.length, 25, `the write path issued ${issued.length} statements for 25 runs`);
+  for (const q of issued) {
+    assert.match(q, /^\s*INSERT OR IGNORE INTO run\b/i, `unexpected statement: ${q}`);
+  }
+});
+
+// The same budget on the path that stores nothing new. A re-send is the
+// ordinary shape of a repeated pass — the run table is insert-only — and
+// it must not be the expensive one.
+test("re-sending stored runs does not scan the run table either", async () => {
+  const rec = recordingSql();
+  const s = new ProjectStats({ storage: { sql: rec.sql } }, { STATE_TOKEN: TOKEN });
+  const batch = Array.from({ length: 25 }, (_, i) => run(i + 1));
+
+  await s.fetch(req("POST", "/runs", { runs: batch }));
+  const before = afterMigrate(rec).length;
+  const again = await s.fetch(req("POST", "/runs", { runs: batch }));
+
+  assert.equal((await again.json() as any).inserted, 0, "a re-send inserted something");
+  assert.equal(afterMigrate(rec).length - before, 25, "the re-send cost more than one statement per run");
+});
+
+// The POSITIVE case, which nothing asserted before this change. The
+// insert-only test checks `inserted === 0` on a re-send, and would pass
+// just as happily if `inserted` were always 0 — which is exactly what a
+// RETURNING clause whose rows get discarded produces. `worker/sqlite.ts`
+// routes RETURNING like a query for that reason; this is the assertion
+// that would catch it if it stopped.
+test("a genuine insert is counted as one", async () => {
+  const s = store();
+  const first = await s.fetch(req("POST", "/runs", { runs: [run(1), run(2)] }));
+  assert.deepEqual(await first.json(), { received: 2, inserted: 2 });
+
+  const mixed = await s.fetch(req("POST", "/runs", { runs: [run(2), run(3)] }));
+  assert.deepEqual(await mixed.json(), { received: 2, inserted: 1 },
+    "a batch holding one known and one new run was miscounted");
 });
