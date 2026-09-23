@@ -25,7 +25,24 @@ export function memorySql(): SqlLike {
       // returns a cursor for either shape. node:sqlite splits them, and
       // refuses multi-statement SQL through prepare() — which is what
       // the CREATE TABLE blocks are, so they route to db.exec().
-      const isQuery = /^\s*(select|with)\b/i.test(query);
+      //
+      // A RETURNING clause makes a WRITE return rows, and it has to be
+      // routed like a query or this fake starts disagreeing with the
+      // runtime in the one direction that hides bugs. Measured on Node
+      // 22's node:sqlite:
+      //
+      //   prepare("INSERT OR IGNORE ... RETURNING run_id").all(1, "a")
+      //     -> [{ run_id: 1 }]      // inserted
+      //   .all(1, "a") again       -> []              // ignored
+      //   .run() on the same statement -> succeeds, ROWS DISCARDED
+      //
+      // That last line is the trap: `.run()` does not fail, so a caller
+      // reading the RETURNING rows to tell an insert from an ignore
+      // would see "ignored" every time, and every test would agree with
+      // it while the deployed Worker did the opposite. Which is
+      // `tracker.Memory` again, in the direction this file's own
+      // preamble warns about.
+      const isQuery = /^\s*(select|with)\b/i.test(query) || /\breturning\b/i.test(query);
       if (isQuery) {
         return db.prepare(query).all(...(bindings as never[])) as Record<string, unknown>[];
       }

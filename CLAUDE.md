@@ -131,6 +131,41 @@ system** — and it is the kind of claim that fails silently, because
 narrowing it does not break a test, it deletes one. Check such a list
 against the live API rather than against the constants beside it.
 
+## A test that seeds three rows cannot see a cost
+
+Every assertion about `ProjectStats` passed for a fortnight while it read
+nineteen million rows a night and capped the account's daily allowance.
+Nothing was wrong with the answers. `putRuns` learned whether an
+`INSERT OR IGNORE` had ignored by counting the table either side of the
+insert — `SELECT COUNT(*) FROM run`, no `WHERE`, so every row — twice per
+run, at 400 runs a batch, against a table that grows by design. The cost
+was `2 x batch x rows stored`: a few hundred thousand reads on the first
+night, about nineteen million on the fourteenth.
+
+The suite could not have caught it. It seeds three rows, and on three
+rows a full scan is free. Correctness tests are blind to complexity by
+construction, and the failure surfaced as a billing limit a fortnight
+later rather than as anything red.
+
+So where a write path's cost depends on how much data has accumulated,
+**assert the cost**: the store's write tests now record every statement
+and budget them per row. Budget them rather than forbidding the spelling
+that went wrong — `COUNT(*)` was this instance, and `MAX()`, a bare
+`SELECT` or a correlated subquery all reintroduce it while passing a grep.
+Both were probed: reinstating the scan and reintroducing it as `MAX()`
+each fail the budget.
+
+Two smaller things fell out of the same change, and both are the fake
+problem this file already describes one section down. `worker/sqlite.ts`
+routed every non-`SELECT` through `prepare().run()`, which **succeeds on
+a `RETURNING` clause and silently discards its rows** — measured on Node
+22 — so a caller reading those rows would have seen "ignored" every time
+while the deployed Worker saw the truth, and the whole suite would have
+agreed with the fake. And nothing asserted an insert was *counted*: the
+insert-only test checks `inserted === 0` on a re-send and passes just as
+happily if the figure is always zero. A negative assertion with no
+positive one beside it is half a test.
+
 ## The sim asserts what you tell it to assert
 
 `internal/sim` runs a scenario to convergence and checks its `expect`

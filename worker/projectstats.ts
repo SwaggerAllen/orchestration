@@ -345,23 +345,38 @@ export class ProjectStats {
     }
     let inserted = 0;
     for (const r of runs) {
-      const before = this.countRuns();
-      this.sql.exec(
+      // RETURNING, so the insert reports its own outcome: a row comes
+      // back when it inserted and nothing when the run_id was already
+      // held. The cursor is read for its length, not its contents.
+      //
+      // IT USED TO COUNT THE TABLE, and that is what capped a whole
+      // account's daily reads. `SELECT COUNT(*) FROM run` has no WHERE,
+      // so it reads every row, and it ran TWICE PER RUN — once before
+      // the insert and once after — purely to learn whether OR IGNORE
+      // had ignored. Durable Object SQLite bills rows read, so one pass
+      // cost roughly `2 x batch x rows already stored`: quadratic in a
+      // table that grows by design.
+      //
+      // Which is why it looked fine and then wasn't. The collector
+      // takes 400 runs per repository per pass and had been running
+      // nightly for a fortnight, so the table was near 12,000 rows and
+      // a single night's pass read about 19 million. The first few
+      // passes were nearly free; the cap arrived around the fifth and
+      // climbed from there. A cost that is invisible until the data
+      // accumulates is not caught by any test that seeds three rows.
+      const cursor = this.sql.exec(
         `INSERT OR IGNORE INTO run (run_id, repo, workflow, run_name, kind, ticket_key,
                                     started_at, duration_ms, billable_ms, job_count,
                                     conclusion, attempt, is_stats_job)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         RETURNING run_id`,
         r.run_id, r.repo, r.workflow ?? "", r.run_name ?? "", r.kind ?? "",
         r.ticket_key ?? null, r.started_at, r.duration_ms ?? 0, r.billable_ms ?? 0,
         r.job_count ?? 0, r.conclusion ?? "", r.attempt ?? 1, r.is_stats_job ? 1 : 0,
       );
-      if (this.countRuns() > before) inserted++;
+      if ([...cursor].length > 0) inserted++;
     }
     return Response.json({ received: runs.length, inserted });
-  }
-
-  private countRuns(): number {
-    return Number([...this.sql.exec("SELECT COUNT(*) AS c FROM run")][0].c);
   }
 
   private putWatermark(body: any): Response {
