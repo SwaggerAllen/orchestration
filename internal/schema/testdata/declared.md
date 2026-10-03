@@ -30,4 +30,9 @@ may carry is declared under the rule that admits it.
   - key `$entry.fills`: list, optional, when status is "plain"
   - key `$entry.owner`: string, required, when status is "queue" | "hold"
   - key `$entry.until`: string, optional, when status is "hold" | "queue"
+  - key `$entry.mode`: "auto" | "manual", optional, when status is not "plain"
+  - key `$entry.speed`: integer, optional, when mode is not "manual"
+  - key `$entry.depth`: integer, optional, when status is not "plain" and mode is not "manual"
+  - key `$entry.width`: integer, optional, when mode is not "manual" and status is not "plain"
+  - key `$entry.lane`: string, required, when status is "queue" and mode is "auto"
   - key `$entry.note`: any, optional

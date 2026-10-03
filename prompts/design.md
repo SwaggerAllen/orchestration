@@ -272,7 +272,8 @@ never committed.
 
   Every named member says `required` or `optional`; its
   container is declared too; `when <sibling> is "x"` makes a member
-  exist only while a sibling holds that value. State a key's type,
+  exist only while a sibling holds that value, `is not "x"` while it
+  holds anything else or is absent, and `and` joins conditions. State a key's type,
   presence and values there and nowhere else — prose restating them is
   a second statement nothing checks — and name a declared key in prose
   as `chain@tiers.*.review`. Run `pipeline schema <doc>` before you

@@ -530,8 +530,10 @@ by dot: a name, `*` for a map's values under keys the file chooses, `[]` after a
 list's items, and a leading `$name` for a shape that a type reuses. A type is alternatives joined
 by `|` — `string`, `integer`, `number`, `boolean`, `map`, `list`, `any`, a `"quoted"` value, a
 `$shape`. A named member says `required` or `optional`, because a contract that defaults presence
-has left half of every key unsaid, and `when <sibling> is "a" | "b"` makes a member exist only
-while a sibling holds one of those values. `pipeline schema <doc>` compiles a doc's declarations
+has left half of every key unsaid. `when` makes a member exist only while its conditions hold:
+`<sibling> is "a" | "b"` while the sibling holds one of those values, `<sibling> is not "a" | "b"`
+while it holds none of them or is absent, and `and` joins conditions that must all hold.
+`pipeline schema <doc>` compiles a doc's declarations
 to JSON Schema, draft 2020-12, deterministically: each node carries its rule as `x-rule` and that
 rule's lead as its description, a map declaring members is closed, `*` opens it to any key, and
 a map or list declaring no children is unconstrained. The output is generated on every use and
@@ -551,13 +553,26 @@ it: the citation proves #14 exists, not that #14 governs the key, and survives #
 rewritten to drop it. What the declarations still cannot cover is English restating them — a
 sentence calling a key optional that its declaration calls required — so a key's type, presence
 and values are stated in its declaration alone, and the prose around it says what it is for.
-Nor can `when` say that a member exists while a sibling holds anything *but* a value, or is
-absent. Measured on a scratch copy of Catapult's `docs/dsl/chain.md` declaring its loader's whole
-grammar — 66 declarations, against which the shipped `chain.yaml` validates and six injected
-drifts each fail: its supplied tiers (`generator: "supplied"`) and join tiers (`draft: "none"`)
-gate cleanly, and its generating tiers, which mostly omit `generator` and take its default, do
-not, so the keys only they carry are declared ungated. The key inventory stays exact; the schema
-accepts those keys on the other two kinds too.
+
+`when` has the shape one real grammar forced on it. Catapult's tiers are of three kinds —
+supplied (`generator: "supplied"`), join (`draft: "none"`) and generating, which is everything
+else — and on its tree every generating tier omits `generator` and takes its default. A key only
+generating tiers carry therefore exists while `generator is not "supplied" and draft is not
+"none"`: absent has to count as "not", or a defaulted discriminator can never be tested, and
+either condition alone admits the key on one of the other kinds, since a join tier has no
+`generator` and a supplied tier no `draft`. The two discriminators also gate each other —
+`generator` exists while `draft is not "none"`, `draft` while `generator is not "supplied"` — which
+is well defined because a condition tests a sibling's value, never whether the sibling was itself
+allowed. And the schema's gates test without leaving an annotation: an `if` that passes marks the
+keys its `properties` touched as evaluated, so a test written that way admits `generator` wherever
+another gate tested it and passed, on a join tier included. Each test is built from `required`
+and `not`, which make no annotations. Measured on a scratch copy of Catapult's `docs/dsl/chain.md`
+declaring its loader's whole grammar, 66 declarations: the shipped `chain.yaml` validates, and
+each of 20 kind-crossing mistakes — every generating-only key on a supplied and on a join tier,
+the generating-and-join keys on a supplied tier, `generator` on a join tier, `fields` and `source`
+on a generating one, a supplied tier without its `source` — is refused, while a generating tier
+omitting `generator` keeps its keys. With positive conditions alone, or with the annotating
+tests, the generating-only keys and the gated discriminators were accepted on the wrong kinds.
 
 **Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
 keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
@@ -1512,7 +1527,9 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
 - attribute declarations hold together (§4): every `- key` line parses and sits under a rule
   id; no path is declared twice; every path's container is declared, with a type that admits it
   — a map for a name or `*`, a list for `[]`; presence is stated by every named member and by
-  nothing else; a `when` names a declared, ungated sibling and only values it can hold; every
+  nothing else; each condition of a `when` names a declared sibling, once, and only values that
+  sibling can hold — under `is not` as under `is`, since excluding an impossible value is always
+  true and is in practice a misspelling; every
   `$shape` a type names is declared, and every declared one is used; and no map mixes `*` with
   gated members. A doc declaring anything is ported, so a declaration above every id is reported
   rather than skipped. `pipeline schema` refuses on the same findings — one check, called by

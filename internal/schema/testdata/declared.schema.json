@@ -5,12 +5,139 @@
       "allOf": [
         {
           "if": {
-            "properties": {
-              "status": {
-                "enum": [
-                  "hold",
-                  "queue"
+            "allOf": [
+              {
+                "not": {
+                  "properties": {
+                    "mode": {
+                      "not": {
+                        "enum": [
+                          "auto"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "mode"
                 ]
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "not": {
+                        "enum": [
+                          "queue"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "lane": {
+                "description": "An entry is a status, and its kind decides what else it carries.",
+                "type": "string",
+                "x-rule": "widget#5"
+              }
+            },
+            "required": [
+              "lane"
+            ]
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "manual"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "speed": {
+                "description": "An entry is a status, and its kind decides what else it carries.",
+                "type": "integer",
+                "x-rule": "widget#5"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "allOf": [
+              {
+                "not": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "manual"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                }
+              },
+              {
+                "not": {
+                  "properties": {
+                    "status": {
+                      "enum": [
+                        "plain"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "depth": {
+                "description": "An entry is a status, and its kind decides what else it carries.",
+                "type": "integer",
+                "x-rule": "widget#5"
+              },
+              "width": {
+                "description": "An entry is a status, and its kind decides what else it carries.",
+                "type": "integer",
+                "x-rule": "widget#5"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "status": {
+                  "not": {
+                    "enum": [
+                      "hold",
+                      "queue"
+                    ]
+                  }
+                }
               }
             },
             "required": [
@@ -37,11 +164,43 @@
         },
         {
           "if": {
+            "not": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "plain"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            }
+          },
+          "then": {
             "properties": {
-              "status": {
+              "mode": {
+                "description": "An entry is a status, and its kind decides what else it carries.",
                 "enum": [
-                  "plain"
-                ]
+                  "auto",
+                  "manual"
+                ],
+                "x-rule": "widget#5"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "status": {
+                  "not": {
+                    "enum": [
+                      "plain"
+                    ]
+                  }
+                }
               }
             },
             "required": [
@@ -60,11 +219,15 @@
         },
         {
           "if": {
-            "properties": {
-              "status": {
-                "enum": [
-                  "queue"
-                ]
+            "not": {
+              "properties": {
+                "status": {
+                  "not": {
+                    "enum": [
+                      "queue"
+                    ]
+                  }
+                }
               }
             },
             "required": [

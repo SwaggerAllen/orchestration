@@ -170,8 +170,7 @@ func (c compiler) object(n *node) map[string]any {
 		return o
 	}
 	type gate struct {
-		key      string
-		vals     []string
+		cond     map[string]any
 		props    map[string]any
 		required []string
 	}
@@ -186,19 +185,17 @@ func (c compiler) object(n *node) map[string]any {
 	for _, name := range names {
 		child := n.named[name]
 		d := child.decl
-		if d.When == "" {
+		if len(d.When) == 0 {
 			props[name] = c.node(child)
 			if d.Presence == "required" {
 				required = append(required, name)
 			}
 			continue
 		}
-		vals := append([]string(nil), d.WhenIs...)
-		sort.Strings(vals)
-		k := d.When + "\x00" + strings.Join(vals, "\x00")
+		k, cond := condition(d.When)
 		g, ok := gates[k]
 		if !ok {
-			g = &gate{key: d.When, vals: vals, props: map[string]any{}}
+			g = &gate{cond: cond, props: map[string]any{}}
 			gates[k] = g
 		}
 		g.props[name] = c.node(child)
@@ -221,18 +218,11 @@ func (c compiler) object(n *node) map[string]any {
 		var all []any
 		for _, k := range keys {
 			g := gates[k]
-			var vals []any
-			for _, v := range g.vals {
-				vals = append(vals, v)
-			}
 			then := map[string]any{"properties": g.props}
 			if len(g.required) > 0 {
 				then["required"] = g.required
 			}
-			all = append(all, map[string]any{
-				"if":   map[string]any{"properties": map[string]any{g.key: map[string]any{"enum": vals}}, "required": []string{g.key}},
-				"then": then,
-			})
+			all = append(all, map[string]any{"if": g.cond, "then": then})
 		}
 		o["allOf"] = all
 	}
@@ -242,6 +232,57 @@ func (c compiler) object(n *node) map[string]any {
 		o["unevaluatedProperties"] = false
 	}
 	return o
+}
+
+// condition renders a member's `when` as the `if` of its gate, with the
+// key members sharing a gate are grouped under: the same conditions in
+// any order and with their values in any order are one gate.
+//
+// A positive condition holds when the sibling is present and holds one of
+// the values; a negative one when it is absent or holds none of them —
+// absent has to count, or a discriminator the file may omit and default
+// could never be tested.
+//
+// Each test is written so that it records no annotation, which is the
+// whole shape of it. An `if` that passes contributes the keys its
+// `properties` touched to what unevaluatedProperties counts as
+// evaluated, so a test written as `{"properties": {"generator": …}}`
+// admits `generator` wherever that test passes — including on a kind
+// whose own gate refuses it. Measured on a scratch copy of Catapult's
+// docs/dsl/chain.md with python-jsonschema 4.26: `generator` gated on
+// `draft is not "none"` was still accepted on a join tier, because the
+// gate `generator is not "supplied"` tested it and passed. `not` keeps no
+// annotations and `required` makes none, so each test is built from those
+// two: positive is `required` plus `not` of "present and outside the
+// set", negative is `not` of "present and inside it".
+func condition(when []reasons.Condition) (string, map[string]any) {
+	conds := append([]reasons.Condition(nil), when...)
+	sort.Slice(conds, func(i, j int) bool { return conds[i].Sibling < conds[j].Sibling })
+	var tests []any
+	var key []string
+	for _, c := range conds {
+		vals := append([]string(nil), c.Values...)
+		sort.Strings(vals)
+		var enum []any
+		for _, v := range vals {
+			enum = append(enum, v)
+		}
+		in := map[string]any{"enum": enum}
+		var test map[string]any
+		op := "is"
+		if c.Not {
+			op = "is not"
+			test = map[string]any{"not": map[string]any{"required": []string{c.Sibling}, "properties": map[string]any{c.Sibling: in}}}
+		} else {
+			test = map[string]any{"required": []string{c.Sibling}, "not": map[string]any{"properties": map[string]any{c.Sibling: map[string]any{"not": in}}}}
+		}
+		tests = append(tests, test)
+		key = append(key, c.Sibling+" "+op+" "+strings.Join(vals, "|"))
+	}
+	if len(tests) == 1 {
+		return key[0], tests[0].(map[string]any)
+	}
+	return strings.Join(key, " and "), map[string]any{"allOf": tests}
 }
 
 // Marshal renders a compiled schema the way `pipeline schema` prints it:

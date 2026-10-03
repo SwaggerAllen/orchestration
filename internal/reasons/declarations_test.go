@@ -1,6 +1,7 @@
 package reasons
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -78,7 +79,10 @@ func TestAMalformedDeclarationSaysWhatToFix(t *testing.T) {
 		{"- key `a`: string, mandatory", `clause "mandatory" is not required`},
 		{"- key `a`: string, required, when k is queue", "when value queue is not \"quoted\""},
 		{"- key `a`: \"open, required", "opens a quote it does not close"},
-		{"- key `a`: string, when k is \"x\", when j is \"y\"", "two when clauses"},
+		{"- key `a`: string, when k is \"x\", when j is \"y\"", "two when clauses — join conditions with and"},
+		{"- key `a`: string, optional, when k is \"x\" and k is not \"y\"", "when names `k` twice"},
+		{"- key `a`: string, optional, when k equals \"x\"", `condition "k equals \"x\"" is not`},
+		{"- key `a`: string, optional, when k is \"x\" and", `condition "" is not`},
 	} {
 		d := ParseDoc("## #1 Rule\n\n" + c.line + "\n")
 		if len(d.BadDeclarations) != 1 || !strings.Contains(d.BadDeclarations[0].Why, c.want) {
@@ -132,8 +136,9 @@ func TestEachMalformedSetIsReportedWithItsReason(t *testing.T) {
 		{"presence on a shape", "- key `$s`: map, optional\n- key `a`: $s, optional", "`$s` is a shape and cannot be optional"},
 		{"gate on values", "- key `a`: map, optional\n- key `k`: string, optional\n- key `a.*`: string, when k is \"x\"", "`a.*` is a map's values and cannot be gated"},
 		{"gate on no sibling", "- key `a`: string, optional, when k is \"x\"", "`a` is gated on `k`, which is not a declared sibling"},
-		{"gate on a gated sibling", "- key `k`: string, optional, when j is \"y\"\n- key `j`: string, optional\n- key `a`: string, optional, when k is \"x\"", "`a` is gated on `k`, which is gated itself"},
 		{"gate on an impossible value", "- key `k`: \"x\" | \"y\", optional\n- key `a`: string, optional, when k is \"z\"", "`a` is gated on `k` being \"z\", which `k` cannot hold"},
+		{"negated impossible value", "- key `k`: \"x\" | \"y\", optional\n- key `a`: string, optional, when k is not \"z\"", "`a` is gated on `k` not being \"z\", which `k` cannot hold"},
+		{"second condition's sibling undeclared", "- key `k`: string, optional\n- key `a`: string, optional, when k is \"x\" and j is not \"y\"", "`a` is gated on `j`, which is not a declared sibling"},
 		{"gate on a non-string", "- key `k`: integer, optional\n- key `a`: string, optional, when k is \"1\"", "`a` is gated on `k`, which is integer and holds no value"},
 		{"shape undeclared", "- key `a`: $s, optional", "`a` is of shape $s, which this doc does not declare"},
 		{"shape unused", "- key `$s`: map", "declares shape `$s` and no attribute is of it"},
@@ -221,5 +226,34 @@ func TestParseDocNameTakesEveryKindsPrefix(t *testing.T) {
 	}
 	if _, _, ok := ParseDocName("widget:chain"); ok {
 		t.Error("an unknown prefix must not parse")
+	}
+}
+
+func TestAWhenReadsNegationAndConjunction(t *testing.T) {
+	d := ParseDoc("## #1 Rule\n\n- key `a`: string, optional, when generator is not \"supplied\" and draft is not \"none\" | \"x and y\"\n")
+	if len(d.Declarations) != 1 {
+		t.Fatalf("bad = %+v", d.BadDeclarations)
+	}
+	var got []string
+	for _, c := range d.Declarations[0].When {
+		got = append(got, fmt.Sprintf("%s not=%v %q", c.Sibling, c.Not, c.Values))
+	}
+	// The "and" inside the quoted value is a value, not a conjunction.
+	want := `generator not=true ["supplied"]|draft not=true ["none" "x and y"]`
+	if strings.Join(got, "|") != want {
+		t.Errorf("conditions = %s\nwant         %s", strings.Join(got, "|"), want)
+	}
+}
+
+// Two discriminators may gate each other. A condition tests a sibling's
+// value, never whether the sibling was itself allowed, so the pair is well
+// defined — and it is what Catapult's tiers need: `generator` exists while
+// `draft is not "none"`, and `draft` while `generator is not "supplied"`.
+func TestDiscriminatorsMayGateEachOther(t *testing.T) {
+	body := "## #1 Rule\n\n" +
+		"- key `generator`: string, optional, when draft is not \"none\"\n" +
+		"- key `draft`: map | \"none\", optional, when generator is not \"supplied\"\n"
+	if got := check(t, body); len(got) != 0 {
+		t.Errorf("findings = %q", got)
 	}
 }

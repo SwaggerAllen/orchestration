@@ -41,19 +41,23 @@ import (
 // by `|`: string, integer, number, boolean, map, list, any, a "quoted"
 // value, or a $shape. A named member states `required` or `optional`,
 // because a contract that defaults presence has left half of each key
-// unsaid; `when <sibling> is "a" | "b"` makes a member exist only while
-// a sibling holds one of those values.
+// unsaid. `when` makes a member exist only while its conditions hold:
+// `<sibling> is "a" | "b"` holds while the sibling holds one of those
+// values, `<sibling> is not "a" | "b"` while it holds none of them or is
+// absent, and `and` joins conditions that must all hold.
 //
-// What `when` cannot say, measured on a scratch copy of Catapult's
-// docs/dsl/chain.md declaring its loader's whole grammar: a member that
-// exists while a sibling holds anything *but* a value, or is absent. Its
-// supplied tiers are `generator: "supplied"` and its join tiers `draft:
-// "none"`, and both gate cleanly; its generating tiers are everything
-// else, most omitting `generator` and taking its default, so the keys
-// only they carry (`prompt`, `review`, `reconcile`, `executor`,
-// `context`, `produces`) are declared ungated. The inventory stays exact
-// — every key is declared, under its rule — and the schema accepts those
-// keys on the other two kinds as well.
+// The negative form and the conjunction are both there because one real
+// grammar needed them. Catapult's tiers are of three kinds: supplied,
+// `generator: "supplied"`; join, `draft: "none"`; and generating,
+// everything else — most generating tiers omit `generator` and take its
+// default. A key only generating tiers carry exists while `generator is
+// not "supplied" and draft is not "none"`. Absent has to count as "not",
+// or a defaulted discriminator can never be tested; and either condition
+// alone admits the key on one of the other kinds, since a join tier has
+// no `generator` and a supplied tier no `draft`. Measured on a scratch
+// copy of its docs/dsl/chain.md declaring the loader's whole grammar:
+// with positive conditions only, `prompt` on a supplied tier and
+// `review` on a join tier both validated.
 
 // Declaration is one `- key` line.
 type Declaration struct {
@@ -66,15 +70,22 @@ type Declaration struct {
 	Types []string
 	// Presence is "required", "optional", or "" where none is stated.
 	Presence string
-	// When is the sibling a `when` clause tests, "" for an ungated member;
-	// WhenIs the values it tests for, unquoted.
-	When   string
-	WhenIs []string
+	// When is the member's `when` conditions, all of which must hold for
+	// it to exist; empty for an ungated member.
+	When []Condition
 	// RuleID is the nearest id above the line — the rule that admits the
 	// attribute — or "" when the line sits above every id.
 	RuleID string
 	Line   int
 	Raw    string
+}
+
+// Condition is one test in a `when`: a sibling holding one of Values,
+// or with Not, holding none of them or being absent.
+type Condition struct {
+	Sibling string
+	Not     bool
+	Values  []string
 }
 
 // BadDeclaration is a line that opens like a declaration and does not
@@ -98,7 +109,8 @@ var (
 	segRe    = regexp.MustCompile(`^(\$` + segName + `|` + segName + `|\*)((?:\[\])*)$`)
 	shapeRe  = regexp.MustCompile(`^\$` + segName + `$`)
 	literal  = regexp.MustCompile(`^"[^"]*"$`)
-	whenRe   = regexp.MustCompile(`^when\s+(` + segName + `)\s+is\s+(.+)$`)
+	whenRe   = regexp.MustCompile(`^when\s+(.+)$`)
+	condRe   = regexp.MustCompile(`^(` + segName + `)\s+is\s+(not\s+)?(.+)$`)
 )
 
 // baseTypes are the type words a declaration may use, each one JSON
@@ -113,7 +125,7 @@ var baseTypes = map[string]bool{
 func parseDeclaration(line string) (d Declaration, why string) {
 	m := declLine.FindStringSubmatch(line)
 	if m == nil {
-		return d, "the form is - key `path`: type[, required|optional][, when sibling is \"value\"]"
+		return d, "the form is - key `path`: type[, required|optional][, when sibling is [not] \"value\" [and …]]"
 	}
 	segs, why := parsePath(m[1])
 	if why != "" {
@@ -145,26 +157,81 @@ func parseDeclaration(line string) (d Declaration, why string) {
 			}
 			d.Presence = c
 		case whenRe.MatchString(c):
-			if d.When != "" {
-				return d, fmt.Sprintf("`%s` has two when clauses — one discriminator per member", d.Path)
+			if len(d.When) > 0 {
+				return d, fmt.Sprintf("`%s` has two when clauses — join conditions with and, in one", d.Path)
 			}
-			wm := whenRe.FindStringSubmatch(c)
-			vals, why := splitOutsideQuotes(wm[2], '|')
+			conds, why := parseWhen(whenRe.FindStringSubmatch(c)[1])
 			if why != "" {
 				return d, why
 			}
-			for _, v := range vals {
-				if !literal.MatchString(v) {
-					return d, fmt.Sprintf("when value %s is not \"quoted\"", v)
-				}
-				d.WhenIs = append(d.WhenIs, strings.Trim(v, `"`))
-			}
-			d.When = wm[1]
+			d.When = conds
 		default:
-			return d, fmt.Sprintf("clause %q is not required, optional or when <sibling> is \"value\"", c)
+			return d, fmt.Sprintf("clause %q is not required, optional or when <sibling> is [not] \"value\"", c)
 		}
 	}
 	return d, ""
+}
+
+// parseWhen reads a when clause's conditions, joined by `and` outside
+// quoted values.
+func parseWhen(s string) ([]Condition, string) {
+	parts, why := splitWordOutsideQuotes(s, "and")
+	if why != "" {
+		return nil, why
+	}
+	var out []Condition
+	seen := map[string]bool{}
+	for _, part := range parts {
+		m := condRe.FindStringSubmatch(part)
+		if m == nil {
+			return nil, fmt.Sprintf("condition %q is not <sibling> is [not] \"value\"", part)
+		}
+		if seen[m[1]] {
+			return nil, fmt.Sprintf("when names `%s` twice — one condition per sibling", m[1])
+		}
+		seen[m[1]] = true
+		vals, why := splitOutsideQuotes(m[3], '|')
+		if why != "" {
+			return nil, why
+		}
+		c := Condition{Sibling: m[1], Not: m[2] != ""}
+		for _, v := range vals {
+			if !literal.MatchString(v) {
+				return nil, fmt.Sprintf("when value %s is not \"quoted\"", v)
+			}
+			c.Values = append(c.Values, strings.Trim(v, `"`))
+		}
+		out = append(out, c)
+	}
+	return out, ""
+}
+
+// splitWordOutsideQuotes splits on word, standing alone between spaces,
+// where it is not inside a "quoted" value: `a is "x and y" and b is "z"`
+// is two conditions, not three. The text is padded with a space each
+// side first, so a dangling `and` at either end splits off an empty part
+// and is reported as the empty condition it is, rather than being read
+// into the value beside it.
+func splitWordOutsideQuotes(s, word string) ([]string, string) {
+	s = " " + s + " "
+	var out []string
+	inQuote, start := false, 0
+	sep := " " + word + " "
+	for i := 0; i < len(s); i++ {
+		if s[i] == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && strings.HasPrefix(s[i:], sep) {
+			out = append(out, strings.TrimSpace(s[start:i]))
+			start = i + len(sep)
+			i += len(sep) - 1
+		}
+	}
+	if inQuote {
+		return nil, fmt.Sprintf("%q opens a quote it does not close", s)
+	}
+	return append(out, strings.TrimSpace(s[start:])), ""
 }
 
 // parsePath splits a path into segments, `[]` each its own.
@@ -319,30 +386,11 @@ func CheckDeclarations(ix Index) []string {
 				add(d.Line, "`%s` declares a map member, but `%s` is %s, not a map%s", d.Path, p, strings.Join(pds[0].Types, " | "), onShape(pds[0]))
 			}
 		}
-		if d.When != "" {
-			sib := d.When
-			if p := d.Parent(); p != "" {
-				sib = p + "." + d.When
-			}
-			sds, ok := byPath[sib]
-			switch {
-			case !d.IsNamed():
-				add(d.Line, "`%s` is %s and cannot be gated — only a named member exists conditionally", d.Path, what(d))
-			case !ok || !sds[0].IsNamed():
-				add(d.Line, "`%s` is gated on `%s`, which is not a declared sibling", d.Path, sib)
-			case sds[0].When != "":
-				add(d.Line, "`%s` is gated on `%s`, which is gated itself — a discriminator exists unconditionally", d.Path, sib)
-			case !has(sds[0].Types, "string"):
-				vals := literals(sds[0].Types)
-				if len(vals) == 0 {
-					add(d.Line, "`%s` is gated on `%s`, which is %s and holds no value a when can name", d.Path, sib, strings.Join(sds[0].Types, " | "))
-					break
-				}
-				for _, v := range d.WhenIs {
-					if !vals[v] {
-						add(d.Line, "`%s` is gated on `%s` being %q, which `%s` cannot hold", d.Path, sib, v, sib)
-					}
-				}
+		if len(d.When) > 0 && !d.IsNamed() {
+			add(d.Line, "`%s` is %s and cannot be gated — only a named member exists conditionally", d.Path, what(d))
+		} else {
+			for _, c := range d.When {
+				checkCondition(d, c, byPath, add)
 			}
 		}
 	}
@@ -362,7 +410,7 @@ func CheckDeclarations(ix Index) []string {
 			if c.Segs[len(c.Segs)-1] == "*" && star == nil {
 				star = &children[p][i]
 			}
-			if c.When != "" && gated == nil {
+			if len(c.When) > 0 && gated == nil {
 				gated = &children[p][i]
 			}
 		}
@@ -380,6 +428,39 @@ func CheckDeclarations(ix Index) []string {
 		out = append(out, f.msg)
 	}
 	return out
+}
+
+// checkCondition holds one condition of a gated member to its sibling:
+// declared, a named member, and able to hold every value the condition
+// names. The sibling may be gated itself — a condition tests its value,
+// never whether it was allowed, so two discriminators can gate each other. The last applies to `is not` as much as to `is`:
+// excluding a value the sibling can never hold is always true, which is a
+// gate that says nothing and, in practice, a misspelled value.
+func checkCondition(d Declaration, c Condition, byPath map[string][]Declaration, add func(int, string, ...any)) {
+	sib := c.Sibling
+	if p := d.Parent(); p != "" {
+		sib = p + "." + c.Sibling
+	}
+	being := "being"
+	if c.Not {
+		being = "not being"
+	}
+	sds, ok := byPath[sib]
+	switch {
+	case !ok || !sds[0].IsNamed():
+		add(d.Line, "`%s` is gated on `%s`, which is not a declared sibling", d.Path, sib)
+	case !has(sds[0].Types, "string"):
+		vals := literals(sds[0].Types)
+		if len(vals) == 0 {
+			add(d.Line, "`%s` is gated on `%s`, which is %s and holds no value a when can name", d.Path, sib, strings.Join(sds[0].Types, " | "))
+			return
+		}
+		for _, v := range c.Values {
+			if !vals[v] {
+				add(d.Line, "`%s` is gated on `%s` %s %q, which `%s` cannot hold", d.Path, sib, being, v, sib)
+			}
+		}
+	}
 }
 
 func what(d Declaration) string {
