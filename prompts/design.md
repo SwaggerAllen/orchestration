@@ -244,7 +244,8 @@ never committed.
 - **A rule with an id is changed only after you have read its reason.**
   Before you change, move or delete a rule line (`## #3 …`, `- **#17
   …**`), run `pipeline reasons <doc>#<id>` — `foundation#17`, or
-  `system:`/`screen:` in front when a name is both; "no reason is
+  `system:`, `screen:` or `dsl:` in front when a name is in more than
+  one record directory; "no reason is
   recorded" is an answer, not permission. A changed rule amends its
   entry in the same commit; a new rule mints `<your ticket>-<n>` —
   `#ORC-247-2`: your ticket key, then one above the highest `ORC-247-`
@@ -260,6 +261,23 @@ never committed.
   comes back from the record review as a `contradiction` finding, a
   decline. The shape and the reasoning are DESIGN §4; the audit holds
   the rest.
+- **A key a rule admits is declared on that rule, in a doc that
+  declares keys.** A doc whose rules carry `- key` lines is a contract
+  for a file format, and a project's gate checks its code against what
+  they declare. A rule you write or change that admits, renames or
+  drops a key changes its declaration in the same commit, on a line
+  under the rule, in exactly this form:
+
+      - key `tiers.*.review`: string | map, optional
+
+  Every named member says `required` or `optional`; its
+  container is declared too; `when <sibling> is "x"` makes a member
+  exist only while a sibling holds that value. State a key's type,
+  presence and values there and nowhere else — prose restating them is
+  a second statement nothing checks — and name a declared key in prose
+  as `chain@tiers.*.review`. Run `pipeline schema <doc>` before you
+  commit: it compiles the doc and prints every finding. The grammar is
+  DESIGN §4.
 - **The doc keeps what a pass needs to obey the rule; the sibling
   keeps what a pass needs to change it.** The rule, the mechanism it
   names, the predicate, and one clause of why stay in the rule's own

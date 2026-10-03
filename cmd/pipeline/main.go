@@ -70,6 +70,8 @@ func run(args []string) error {
 		return cmdNonAsks(args[1:])
 	case "reasons":
 		return cmdReasons(args[1:])
+	case "schema":
+		return cmdSchema(args[1:])
 	case "ids":
 		return cmdIDs(args[1:])
 	case "sim":
@@ -118,8 +120,13 @@ commands:
            design pass does not have yet; this asks again once it does.
            Reads one local file, talks to nothing
   reasons  the rule line and the recorded reason behind one or more rule
-           ids (foundation#17, system:foundation#17) — run before changing
+           ids (foundation#17, dsl:chain#22) — run before changing
            a rule (DESIGN 4). Reads the checkout, talks to nothing
+  schema   the JSON Schema one record doc's attribute declarations compile
+           to (chain, dsl:chain) — a project's gate checks its code against
+           it (DESIGN 4). --root reads no config. Refuses on any finding the
+           audit's declaration check reports. Reads the checkout, talks to
+           nothing
   ids      print the Linear ids a config needs: viewer, teams, projects
            (requires LINEAR_API_KEY)
   sim      run a Ring-2 scenario against in-memory fakes (no network)

@@ -97,7 +97,7 @@ func TestReasonsCommandSaysWhenTheDocIsUnknown(t *testing.T) {
 	}
 	// home exists and is unported; nothing does not exist. Both are the
 	// same answer: nothing there can be cited.
-	if strings.Count(out, "Checked, not skipped.") != 2 || !strings.Contains(out, "home#1: no ported systems/home.md or screens/home.md") {
+	if strings.Count(out, "Checked, not skipped.") != 2 || !strings.Contains(out, "home#1: no ported systems/home.md, screens/home.md or docs/dsl/home.md") {
 		t.Errorf("out = %s", out)
 	}
 }
