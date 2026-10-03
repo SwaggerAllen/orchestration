@@ -42,7 +42,7 @@ func cmdReasons(args []string) error {
 	for _, a := range fs.Args() {
 		prefix, name, id, ok := reasons.ParseCite(a)
 		if !ok {
-			return fmt.Errorf("reasons: %q is not a rule citation — the form is name#17 or name#ORC-247-2, with system: or screen: in front when a name is both", a)
+			return fmt.Errorf("reasons: %q is not a rule citation — the form is name#17 or name#ORC-247-2, with %s in front when a name is in more than one record directory", a, reasons.PrefixList())
 		}
 		queries = append(queries, query{prefix, name, id})
 	}
@@ -83,7 +83,7 @@ func cmdReasons(args []string) error {
 			unanswered = append(unanswered, fmt.Sprintf("%s %s", cite, why))
 			continue
 		case !ok:
-			fmt.Printf("%s: no ported systems/%s.md or screens/%s.md in this checkout — a doc with no rule ids and no reasons file has nothing to cite. Checked, not skipped.\n", cite, q.name, q.name)
+			fmt.Printf("%s: no ported %s in this checkout — a doc with no rule ids and no reasons file has nothing to cite. Checked, not skipped.\n", cite, candidatePaths(q.name))
 			continue
 		}
 		printReason(ix, q.id)
@@ -250,4 +250,19 @@ func touchedReasonsSection(touched []reasons.Touched, note string) string {
 		}
 	}
 	return b.String()
+}
+
+// candidatePaths names every place a doc called name could be, one per
+// record directory — "systems/x.md, screens/x.md or docs/dsl/x.md" — so a
+// miss names the grammar directory too rather than only the two kinds
+// that existed when the message was written.
+func candidatePaths(name string) string {
+	var ps []string
+	for _, k := range protocol.RecordKinds {
+		ps = append(ps, k.Dir+"/"+name+".md")
+	}
+	if len(ps) == 1 {
+		return ps[0]
+	}
+	return strings.Join(ps[:len(ps)-1], ", ") + " or " + ps[len(ps)-1]
 }

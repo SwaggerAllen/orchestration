@@ -513,6 +513,67 @@ exclusive ownership — no two docs of one kind mapping one path — was written
 sides and a grammar contract's docs map overlapping parts of one file set by construction. Two
 docs of *different* kinds mapping one path is not overlap at all: both labels are required.
 
+**A rule admits a file's attributes by declaring them, inside itself.** A record doc that is a
+contract for a file format — `docs/dsl/` is the grammar a project's declaration files are
+written in — states each key a rule admits as a line in that rule:
+
+```markdown
+- **#14 A generating tier's `review:` is `default` or a map that overrides its prompt.** …
+  - key `tiers.*.review`: string | map, optional
+  - key `tiers.*.review.prompt`: string, optional
+```
+
+The line belongs to its rule by the attribution rule above, so nothing joins the two that could
+go stale: retire the rule and its declarations go with it, and a changed declaration touches its
+rule, which hands the record review that rule's reason. A path runs from the file's root, dot
+by dot: a name, `*` for a map's values under keys the file chooses, `[]` after a segment for a
+list's items, and a leading `$name` for a shape that a type reuses. A type is alternatives joined
+by `|` — `string`, `integer`, `number`, `boolean`, `map`, `list`, `any`, a `"quoted"` value, a
+`$shape`. A named member says `required` or `optional`, because a contract that defaults presence
+has left half of every key unsaid. `when` makes a member exist only while its conditions hold:
+`<sibling> is "a" | "b"` while the sibling holds one of those values, `<sibling> is not "a" | "b"`
+while it holds none of them or is absent, and `and` joins conditions that must all hold.
+`pipeline schema <doc>` compiles a doc's declarations
+to JSON Schema, draft 2020-12, deterministically: each node carries its rule as `x-rule` and that
+rule's lead as its description, a map declaring members is closed, `*` opens it to any key, and
+a map or list declaring no children is unconstrained. The output is generated on every use and
+never stored, so a project gate that compares its code against it reads the doc as it stands.
+Prose names a declared attribute as `chain@tiers.*.review` — `dsl:chain@…` where the name is in
+more than one record directory — and the citation sweep resolves it, which is what makes a
+renamed key fail the sentences still naming it.
+
+Two cheaper designs were measured and lost. Catapult's ORC-250 scraped backticked spans out of
+its grammar's prose and diffed them against its loader. The prose quotes keys, values,
+author-chosen names and foreign syntax in identical backticks — `xs:appinfo` and `kind: chain`
+are one shape — states refusals in the form it states keys (`extends:` "is a load error"), and
+16 of that loader's 59 key names mean different things at different sites, so a flat name
+matched anywhere proves a mention and never coverage. No pattern separates those classes. And a
+schema written beside the doc, each entry citing `chain#14`, moves the drift instead of closing
+it: the citation proves #14 exists, not that #14 governs the key, and survives #14 being
+rewritten to drop it. What the declarations still cannot cover is English restating them — a
+sentence calling a key optional that its declaration calls required — so a key's type, presence
+and values are stated in its declaration alone, and the prose around it says what it is for.
+
+`when` has the shape one real grammar forced on it. Catapult's tiers are of three kinds —
+supplied (`generator: "supplied"`), join (`draft: "none"`) and generating, which is everything
+else — and on its tree every generating tier omits `generator` and takes its default. A key only
+generating tiers carry therefore exists while `generator is not "supplied" and draft is not
+"none"`: absent has to count as "not", or a defaulted discriminator can never be tested, and
+either condition alone admits the key on one of the other kinds, since a join tier has no
+`generator` and a supplied tier no `draft`. The two discriminators also gate each other —
+`generator` exists while `draft is not "none"`, `draft` while `generator is not "supplied"` — which
+is well defined because a condition tests a sibling's value, never whether the sibling was itself
+allowed. And the schema's gates test without leaving an annotation: an `if` that passes marks the
+keys its `properties` touched as evaluated, so a test written that way admits `generator` wherever
+another gate tested it and passed, on a join tier included. Each test is built from `required`
+and `not`, which make no annotations. Measured on a scratch copy of Catapult's `docs/dsl/chain.md`
+declaring its loader's whole grammar, 66 declarations: the shipped `chain.yaml` validates, and
+each of 20 kind-crossing mistakes — every generating-only key on a supplied and on a join tier,
+the generating-and-join keys on a supplied tier, `generator` on a join tier, `fields` and `source`
+on a generating one, a supplied tier without its `source` — is refused, while a generating tier
+omitting `generator` keeps its keys. With positive conditions alone, or with the annotating
+tests, the generating-only keys and the gated discriminators were accepted on the wrong kinds.
+
 **Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
 keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
 it names (the file, the function, the shape), the predicate for when it applies, and the one
@@ -1458,9 +1519,23 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   A `name#n` whose name no ported doc carries is not a citation — the same whitelist rule the
   section sweep applies, and measured for the same reason: `PR #144`, `pre-#144`, `commitment
   #2` and hex colours are what `#<digits>` means in Catapult's docs, and none of them puts a doc
-  name before the `#`. A bare name that is both a system and a screen doc is reported as
+  name before the `#`. A bare name carried by more than one record directory is reported as
   ambiguous rather than guessed, with the prefixed form to write; a prefixed citation of a doc the
-  prefix's directory does not hold is reported too.
+  prefix's directory does not hold is reported too. The prefixes are `protocol.RecordKinds`'
+  own: written as a fixed `system|screen` list, `dsl:chain#22` read as a bare `chain#22` — the
+  ambiguous form — so the advice to write `dsl:chain` could not be followed.
+- attribute declarations hold together (§4): every `- key` line parses and sits under a rule
+  id; no path is declared twice; every path's container is declared, with a type that admits it
+  — a map for a name or `*`, a list for `[]`; presence is stated by every named member and by
+  nothing else; each condition of a `when` names a declared sibling, once, and only values that
+  sibling can hold — under `is not` as under `is`, since excluding an impossible value is always
+  true and is in practice a misspelling; every
+  `$shape` a type names is declared, and every declared one is used; and no map mixes `*` with
+  gated members. A doc declaring anything is ported, so a declaration above every id is reported
+  rather than skipped. `pipeline schema` refuses on the same findings — one check, called by
+  both — and that is what reaches the branches this audit never runs on, since a project gate
+  compiles on every PR. Every `name@path` reference in the tree resolves to a declaration, under
+  the whitelist rule above: a word before an `@` in an address is not a doc name.
 
 **Design finish (blocking, in the harness — the same rule, one gate earlier):**
 - a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not

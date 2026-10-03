@@ -296,6 +296,30 @@ func cmdAudit(args []string) error {
 	for _, d := range ruleDangling {
 		violations = append(violations, d.String())
 	}
+	// Attribute declarations (DESIGN §4): each ported doc's were checked
+	// by reasons.Audit above; here the references to them, over the same
+	// files. Counted aloud either way, because "no doc declares anything"
+	// and "every declaration and reference checked" must not print the
+	// same — the first is the state of every project until one opts in.
+	keyDangling, err := reasons.SweepKeyRefs(*root, cited, docs)
+	if err != nil {
+		return err
+	}
+	for _, d := range keyDangling {
+		violations = append(violations, d.String())
+	}
+	attrs, declaring := 0, 0
+	for _, ix := range docs {
+		if n := len(ix.Doc.Declarations); n > 0 {
+			attrs += n
+			declaring++
+		}
+	}
+	if attrs == 0 {
+		fmt.Println("attribute declarations: none — no record doc declares a `- key` attribute, so there is no schema to compile and no name@key reference resolves (DESIGN §4)")
+	} else {
+		fmt.Printf("attribute declarations: %d across %d doc(s) checked, with every name@key reference in the tree\n", attrs, declaring)
+	}
 
 	// The map's own upkeep, and a proposal rather than a gate.
 	//

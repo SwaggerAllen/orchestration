@@ -16,14 +16,16 @@ import (
 // Audit holds one ported doc to the index's invariants (DESIGN §9): every
 // heading and standing decision numbered, no id twice, every live entry
 // backed by a rule line, every retired entry's rule line gone, and the
-// reasons file shaped as entries. Each is a finding in the direction the
+// reasons file shaped as entries — and, first, the doc's attribute
+// declarations held to what a schema compiles from (CheckDeclarations).
+// Each is a finding in the direction the
 // other checks cannot see — an idle half, reported the way Catapult's
 // `# catapult:allow` reports a tag covering no violation.
 //
 // An id with no entry is not a finding. Requiring one would be met with
 // a placeholder sentence, which is the line the paring pass just removed.
 func Audit(ix Index) []string {
-	var out []string
+	out := CheckDeclarations(ix)
 	for _, u := range ix.Doc.Unnumbered {
 		switch u.Kind {
 		case KindHeading:
@@ -75,10 +77,39 @@ func lines(ls []int) string {
 // doc name before the `#`. That whitelist is the § resolver's own rule
 // (DESIGN §4): a token resolves only when the project declared it, or
 // the sweep reports the corpus rather than its defects.
+//
+// The prefixes are read off protocol.RecordKinds, not spelled here. They
+// were written `(system|screen)` while those were the only two kinds, and
+// when docs/dsl/ became the third the pattern kept its list: `dsl:chain#22`
+// read as prose followed by a bare `chain#22`, which is exactly the
+// ambiguous form, so a finding that said "write dsl:chain" gave advice the
+// sweep could not follow.
 var (
-	citeRe      = regexp.MustCompile(`\b(?:(system|screen):)?([a-z0-9_-]+)#(` + idPat + `)\b`)
-	citeExactRe = regexp.MustCompile(`^(?:(system|screen):)?([a-z0-9_-]+)#(` + idPat + `)$`)
+	citePrefixes = recordCitePrefixes()
+	citeRe       = regexp.MustCompile(`\b(?:(` + citePrefixes + `):)?([a-z0-9_-]+)#(` + idPat + `)\b`)
+	citeExactRe  = regexp.MustCompile(`^(?:(` + citePrefixes + `):)?([a-z0-9_-]+)#(` + idPat + `)$`)
 )
+
+// recordCitePrefixes is every record kind's citation prefix as a regexp
+// alternation.
+func recordCitePrefixes() string {
+	var ps []string
+	for _, k := range protocol.RecordKinds {
+		ps = append(ps, regexp.QuoteMeta(k.Cite))
+	}
+	return strings.Join(ps, "|")
+}
+
+// PrefixList names every record kind's citation prefix the way a sentence
+// writes it — "system:, screen: or dsl:" — for a message telling a writer
+// which to put in front.
+func PrefixList() string {
+	var ps []string
+	for _, k := range protocol.RecordKinds {
+		ps = append(ps, k.Cite+":")
+	}
+	return joinWords(ps, "or")
+}
 
 // ParseCite reads one citation exactly, for a command argument.
 func ParseCite(s string) (prefix, name, id string, ok bool) {
@@ -212,4 +243,88 @@ func joinWords(in []string, conj string) string {
 		return in[0]
 	}
 	return strings.Join(in[:len(in)-1], ", ") + " " + conj + " " + in[len(in)-1]
+}
+
+// keyRefRe is a reference to a declared attribute: `chain@tiers.*.review`,
+// or `dsl:chain@tiers.*.review` where the name is in more than one record
+// directory. `@` rather than `#`, which names a rule, and rather than `$`,
+// which opens a shape's path. The name is word-bounded on the left and
+// must be a ported doc, the whitelist rule the rule citations apply: an
+// address like `someone@example.com` puts a word before the `@` too, and
+// no record doc is called that.
+var keyRefRe = regexp.MustCompile(`\b(?:(` + citePrefixes + `):)?([a-z0-9_-]+)@(\$?` + segName + `(?:\[\])*(?:\.(?:\*|` + segName + `)(?:\[\])*)*)`)
+
+// KeyRefProblem is a reference to an attribute its doc does not declare.
+type KeyRefProblem struct {
+	Path   string
+	Line   int
+	Prefix string
+	Name   string
+	Key    string
+	Why    string
+}
+
+func (p KeyRefProblem) String() string {
+	written := p.Name
+	if p.Prefix != "" {
+		written = p.Prefix + ":" + p.Name
+	}
+	return fmt.Sprintf("%s:%d: refers to %s@%s, which %s", p.Path, p.Line, written, p.Key, p.Why)
+}
+
+// SweepKeyRefs resolves every attribute reference in paths against the
+// docs' declarations (DESIGN §4). It is the rule-citation sweep over a
+// second grammar, and it exists for the rename: a key renamed in its
+// declaration leaves every sentence that names it stale, and a reference
+// is the form of naming that notices.
+func SweepKeyRefs(root string, paths []string, docs []Index) ([]KeyRefProblem, error) {
+	var out []KeyRefProblem
+	for _, rel := range paths {
+		f, err := os.Open(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		s := bufio.NewScanner(f)
+		s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for line := 1; s.Scan(); line++ {
+			for _, m := range keyRefRe.FindAllStringSubmatch(s.Text(), -1) {
+				prefix, name, key := m[1], m[2], m[3]
+				ix, ok, why := Resolve(prefix, name, docs)
+				switch {
+				case why != "":
+					out = append(out, KeyRefProblem{rel, line, prefix, name, key, why})
+				case !ok:
+					continue
+				case len(ix.Doc.Declarations) == 0:
+					out = append(out, KeyRefProblem{rel, line, prefix, name, key, fmt.Sprintf("is not declared: %s declares no attributes", ix.Path)})
+				case !ix.Declares(key):
+					out = append(out, KeyRefProblem{rel, line, prefix, name, key, fmt.Sprintf("is not an attribute %s declares", ix.Path)})
+				}
+			}
+		}
+		err = s.Err()
+		f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", rel, err)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Line < out[j].Line
+	})
+	return out, nil
+}
+
+// docNameRe is a doc named alone, as a command argument: chain, dsl:chain.
+var docNameRe = regexp.MustCompile(`^(?:(` + citePrefixes + `):)?([a-z0-9_-]+)$`)
+
+// ParseDocName reads a doc's name, with its kind's prefix when given.
+func ParseDocName(s string) (prefix, name string, ok bool) {
+	m := docNameRe.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
 }

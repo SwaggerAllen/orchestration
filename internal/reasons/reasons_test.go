@@ -631,3 +631,35 @@ func TestAPrefixedCitationResolvesAgainstANestedDirectory(t *testing.T) {
 		t.Errorf("unknown prefix: ok=%v why=%q", ok, why)
 	}
 }
+
+// The resolver says "write dsl:chain" for a name two kinds share, so the
+// sweep has to be able to read that spelling. Its prefix alternation was
+// written as (system|screen) before docs/dsl/ became a record directory,
+// and the dsl: in front was read as prose: the citation fell back to the
+// bare name, which is the ambiguous one, and the advice the finding gave
+// could not be followed. TestAPrefixedCitationResolvesAgainstANestedDirectory
+// calls Resolve with the prefix already split off, so it could not see this.
+func TestTheSweepReadsEveryRecordKindsPrefix(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docs/dsl/chain.md", "## #1 The file\n\n- **#22 Context.** Rule.\n")
+	write(t, root, "systems/chain.md", "## #1 Heading\n\n- **#4 Something else.** Rule.\n")
+	write(t, root, "lib/x.ex", "# see dsl:chain#22 and system:chain#4\n")
+	var docs []Index
+	for _, dir := range []string{"docs/dsl", "systems"} {
+		ixs, err := LoadDir(root, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docs = append(docs, ixs...)
+	}
+	got, err := SweepCitations(root, []string{"lib/x.ex"}, docs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("problems = %v, want none: both citations name their kind", got)
+	}
+	if prefix, name, id, ok := ParseCite("dsl:chain#22"); !ok || prefix != "dsl" || name != "chain" || id != "22" {
+		t.Errorf("ParseCite(dsl:chain#22) = %q %q %q %v", prefix, name, id, ok)
+	}
+}
