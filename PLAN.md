@@ -227,6 +227,27 @@ down anywhere.** The table in CLAUDE.md covers adding; the cutover also removes:
 | a new config **field** | this repo | `DisallowUnknownFields` rejects a key we have not declared |
 | a new **value** for an existing enum (`deploy.provider: "render"`) | this repo | a project naming a value the binary refuses fails validation, which is the field case in miniature |
 | **removing a config field** | **the project** — but see C4, it is three steps | undeclaring first makes the project's remaining key unknown, and every command fails |
+| **a new obligation on a pass** (`CHANGE.md` at design finish) | **the project**, or both together | not a validation case at all, and that is why the table missed it: both configs stay valid either way, and the failure is one ticket later |
+
+**That last row was found by asking whether this branch could merge, not
+by reasoning from the table.** `assertChangeSpec` fails a design finish
+that did not write `CHANGE.md`; §5's ownership audit fails a design pass
+that wrote outside `designOwnedPaths`. Each is correct alone, and with
+only this repo merged they are jointly unsatisfiable — the pass writes the
+file it is obliged to write and CI fails it for writing it. Measured
+against a fixture carrying Catapult's own `main` config:
+
+```
+a design pass wrote 1 file(s) outside the paths design owns (DESIGN §5): CHANGE.md
+```
+
+**The validation cases announce themselves and this one does not.** A
+config-field mistake fails at load, on every command, immediately. This
+one leaves both sides valid, both test suites green, and nothing wrong
+until a design pass runs — which is the window the two rows above are
+written to keep short, arriving through a door neither of them watches.
+The project side is three array values and a `.gitattributes`, all inert
+against the older binary, so it can go first.
 
 **Take the baseline before anything lands.** It is the only step here that cannot be done
 afterwards (`ops-free-pipeline.md` §9).

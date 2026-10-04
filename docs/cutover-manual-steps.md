@@ -52,13 +52,49 @@ admin workflows all read it.
 *Worked when:* `pipeline preflight` lists "the service's deploys" as
 checked rather than printing the `RENDER_API_KEY not set` line.
 
-### 4. `pipeline setup --apply` per project — blocks C2
+### 4. `pipeline setup --apply` per project — tidy, **not** a blocker
 
-Creates the `conflict` label. `setup` enumerates the protocol's labels, so
-it needs no edit.
+This entry said C2 was blocked on it. Checked, and it is not: the abort
+attaches the `conflict` label through `plane.ensureLabel`, which lists the
+team's labels and **creates the one it needs** if it is missing. If even
+that fails, `softLabel` degrades to a note on the ticket saying the label
+could not be attached and that the move itself is unaffected.
 
-*Worked when:* the label exists on the ORC team and `pipeline setup`
+So running setup is tidiness — it provisions the label before the first
+abort needs it, rather than letting the first abort create it. Worth doing
+and worth not treating as a gate.
+
+*Worked when:* the label exists on the ORC team and a `pipeline setup`
 re-run reports nothing to create.
+
+### 4b. Catapult's `designOwnedPaths` must land with orchestration — a real blocker
+
+**Orchestration cannot merge alone**, and this is the step that makes it
+able to. `assertChangeSpec` fails a design finish that did not write
+`CHANGE.md`, and §5's ownership audit fails a design pass that wrote
+outside `designOwnedPaths`. Catapult's `main` has `CHANGE.md` in neither,
+so the next design pass after an orchestration-only merge writes the file
+it is required to write and then fails CI for writing it.
+
+Measured against a fixture carrying `main`'s own `designOwnedPaths`:
+
+```
+a design pass wrote 1 file(s) outside the paths design owns (DESIGN §5): CHANGE.md
+```
+
+The three entries are harmless against today's binary — `CHANGE.md` and
+`tests/manual/**` are values in an array it already reads, and
+`.gitattributes` is inert until the agent job configures the `merge=ours`
+driver — so they can merge *before* orchestration as well as with it.
+They do not need Render.
+
+**Which is why these are worth splitting out of the Render PR.** That one
+cannot merge until step 2 is done, and orchestration is waiting on these
+three lines rather than on the platform.
+
+*Worked when:* catapult's `main` carries `CHANGE.md` and
+`tests/manual/**` in `designOwnedPaths` and a `.gitattributes` giving
+`CHANGE.md merge=ours`.
 
 ---
 
