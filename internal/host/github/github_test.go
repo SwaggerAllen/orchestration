@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -414,6 +415,16 @@ func logServer(t *testing.T, override func(http.ResponseWriter, *http.Request) b
 //
 // Written as a scan of every function rather than of one body, so
 // moving code between helpers cannot quietly move the call back.
+//
+// **Scoped to `github.go`, and `checkruns.go` is the exception.** Every
+// function here is on the snapshot's path; those two are not, because
+// they implement `host.CheckRuns`, which `host.Host` does not include —
+// so nothing holding the plane's port can reach them, and their one
+// caller runs inside a workflow job under its own GITHUB_TOKEN. The file
+// boundary is how that exception is stated instead of a name on an
+// allowlist, and `TestHostPortExcludesTheCheckRunsAPI` is what makes the
+// boundary mean something: the reason those methods are safe is the
+// interface they are off, not the file they are in.
 func TestNothingReachesTheChecksAPI(t *testing.T) {
 	body, err := os.ReadFile("github.go")
 	if err != nil {
@@ -835,5 +846,258 @@ func TestADetachedLiveSuiteRunIsNotCorrelated(t *testing.T) {
 	m := runNameRe.FindStringSubmatch("pipeline: live-suite ORC-217")
 	if m == nil || m[1] != "live-suite" || m[2] != "ORC-217" {
 		t.Errorf("the ticketed run name no longer correlates: %v", m)
+	}
+}
+
+// previewServer answers the two calls PreviewFor makes: the branch's
+// deployments, then the newest one's statuses. It records the query it was
+// asked, because filtering on the ref is what keeps production out of a
+// preview read and a filter nobody asserts is a filter that can go missing.
+func previewServer(t *testing.T, deployments []map[string]any, statuses map[int64][]map[string]any, gotRef *string) *httptest.Server {
+	t.Helper()
+	return fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if strings.HasSuffix(r.URL.Path, "/deployments") {
+			if gotRef != nil {
+				*gotRef = r.URL.Query().Get("ref")
+			}
+			return http.StatusOK, deployments
+		}
+		var id int64
+		if _, err := fmt.Sscanf(path.Base(path.Dir(r.URL.Path)), "%d", &id); err != nil {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		return http.StatusOK, statuses[id]
+	})
+}
+
+func dep(id int64, createdAt string) map[string]any {
+	return map[string]any{"id": id, "created_at": createdAt}
+}
+
+func depStatus(state, envURL, desc string) map[string]any {
+	return map[string]any{"state": state, "environment_url": envURL, "description": desc}
+}
+
+func TestPreviewForReady(t *testing.T) {
+	var ref string
+	srv := previewServer(t,
+		[]map[string]any{dep(1, "2026-09-17T10:00:00Z")},
+		map[int64][]map[string]any{1: {depStatus("success", "https://orc-9.example.dev", "")}},
+		&ref)
+	defer srv.Close()
+
+	p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != host.PreviewReady || p.URL != "https://orc-9.example.dev" {
+		t.Errorf("preview = %+v", p)
+	}
+	// Production deploys land on the default branch. Reading without the
+	// ref filter would return them, and the author would be sent
+	// production as this pass's preview.
+	if ref != "orc-9-thing" {
+		t.Errorf("deployments were read with ref=%q, want the ticket branch", ref)
+	}
+}
+
+func TestPreviewForStates(t *testing.T) {
+	for _, tc := range []struct {
+		state string
+		want  host.PreviewStatus
+	}{
+		{"success", host.PreviewReady},
+		{"failure", host.PreviewFailed},
+		{"error", host.PreviewFailed},
+		{"queued", host.PreviewPending},
+		{"pending", host.PreviewPending},
+		{"in_progress", host.PreviewPending},
+		// Superseded or torn down: not a failure and not something to wait
+		// for, so it reads as a project with nothing to post.
+		{"inactive", host.PreviewNone},
+		// Never seen here, so it does what no value always did.
+		{"something_new", host.PreviewNone},
+	} {
+		t.Run(tc.state, func(t *testing.T) {
+			srv := previewServer(t,
+				[]map[string]any{dep(1, "2026-09-17T10:00:00Z")},
+				map[int64][]map[string]any{1: {depStatus(tc.state, "https://orc-9.example.dev", "")}},
+				nil)
+			defer srv.Close()
+			p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.Status != tc.want {
+				t.Errorf("state %q -> %q, want %q", tc.state, p.Status, tc.want)
+			}
+		})
+	}
+}
+
+// Which deployment is read decides whether the author gets a live URL or
+// one from a push two commits ago, and GitHub documents no ordering for
+// this listing. Listed oldest-last, the newest is not deployments[0].
+func TestPreviewForReadsTheNewestDeploymentNotTheFirstListed(t *testing.T) {
+	srv := previewServer(t,
+		[]map[string]any{dep(1, "2026-09-17T10:00:00Z"), dep(2, "2026-09-17T12:00:00Z")},
+		map[int64][]map[string]any{
+			1: {depStatus("success", "https://stale.example.dev", "")},
+			2: {depStatus("success", "https://current.example.dev", "")},
+		}, nil)
+	defer srv.Close()
+
+	p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.URL != "https://current.example.dev" {
+		t.Errorf("preview = %+v, want the newest deployment's URL", p)
+	}
+}
+
+// A deployment with no status is a branch a platform has taken and not
+// finished — pending, not absent, because absent means post nothing and
+// this one is worth coming back for.
+func TestPreviewForWithNoStatusYetIsPending(t *testing.T) {
+	srv := previewServer(t,
+		[]map[string]any{dep(1, "2026-09-17T10:00:00Z")},
+		map[int64][]map[string]any{1: {}}, nil)
+	defer srv.Close()
+
+	p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != host.PreviewPending || p.URL != "" {
+		t.Errorf("preview = %+v", p)
+	}
+}
+
+// Nothing has claimed the branch: a project with no previews wired, which
+// DESIGN §4 says posts nothing rather than a dead link.
+func TestPreviewForWithNoDeploymentsIsNone(t *testing.T) {
+	srv := previewServer(t, []map[string]any{}, nil, nil)
+	defer srv.Close()
+
+	p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != host.PreviewNone {
+		t.Errorf("preview = %+v", p)
+	}
+}
+
+// A success carrying no environment_url has nowhere to send the author, so
+// it is pending rather than ready. The failure it prevents is a preview
+// marker whose url field is empty — a link on the ticket that goes nowhere,
+// which is the dead link DESIGN §4 chose silence over.
+func TestPreviewForSuccessWithNoURLIsPending(t *testing.T) {
+	srv := previewServer(t,
+		[]map[string]any{dep(1, "2026-09-17T10:00:00Z")},
+		map[int64][]map[string]any{1: {depStatus("success", "", "still wiring up")}}, nil)
+	defer srv.Close()
+
+	p, err := client(t, srv).PreviewFor(context.Background(), "orc-9-thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != host.PreviewPending || p.URL != "" {
+		t.Errorf("preview = %+v", p)
+	}
+	if p.Description != "still wiring up" {
+		t.Errorf("description = %q, want the platform's own words", p.Description)
+	}
+}
+
+func TestCheckRunsForFiltersByPrefixAndCompletion(t *testing.T) {
+	srv := fakeGitHub(t, func(r *http.Request, _ map[string]any) (int, any) {
+		if !strings.HasSuffix(r.URL.Path, "/check-runs") {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		return http.StatusOK, map[string]any{"check_runs": []map[string]any{
+			{"name": "manual/queue-drains", "conclusion": "success", "status": "completed",
+				"details_url": "https://gh/run/1", "output": map[string]any{"title": "passed", "summary": "s"}},
+			{"name": "manual/board-renders", "conclusion": "failure", "status": "completed",
+				"details_url": "https://gh/run/2", "output": map[string]any{"title": "failed", "summary": "s"}},
+			// Not a manual verdict.
+			{"name": "gates", "conclusion": "success", "status": "completed"},
+			// In flight: carries no conclusion, and reading one as a
+			// verdict would have rule 8 compare against a blank and
+			// report every running judge as a disagreement.
+			{"name": "manual/still-going", "conclusion": "", "status": "in_progress"},
+		}}
+	})
+	defer srv.Close()
+
+	got, err := client(t, srv).CheckRunsFor(context.Background(), "sha1", "manual/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d runs, want the two completed manual ones: %+v", len(got), got)
+	}
+	if got[0].Name != "manual/queue-drains" || got[0].Conclusion != host.CheckRunSuccess ||
+		got[0].DetailsURL != "https://gh/run/1" || got[0].Title != "passed" {
+		t.Errorf("run = %+v", got[0])
+	}
+	if got[1].Conclusion != host.CheckRunFailure {
+		t.Errorf("run = %+v", got[1])
+	}
+}
+
+func TestCreateCheckRunPostsTheVerdict(t *testing.T) {
+	var got map[string]any
+	srv := fakeGitHub(t, func(r *http.Request, body map[string]any) (int, any) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/check-runs") {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		got = body
+		return http.StatusCreated, map[string]any{"id": 1}
+	})
+	defer srv.Close()
+
+	err := client(t, srv).CreateCheckRun(context.Background(), host.CheckRun{
+		SHA: "sha1", Name: "manual/queue-drains", Conclusion: host.CheckRunFailure,
+		Title: "the queue did not drain", Summary: "step 3 observed 2 jobs",
+		DetailsURL: "https://gh/run/7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["head_sha"] != "sha1" || got["name"] != "manual/queue-drains" ||
+		got["conclusion"] != "failure" || got["status"] != "completed" {
+		t.Errorf("body = %+v", got)
+	}
+	// The evidence link is what makes §8.3 rule 3 checkable rather than
+	// aspirational, so it has to reach GitHub.
+	if got["details_url"] != "https://gh/run/7" {
+		t.Errorf("details_url = %v", got["details_url"])
+	}
+	out, _ := got["output"].(map[string]any)
+	if out["title"] != "the queue did not drain" {
+		t.Errorf("output = %+v", out)
+	}
+}
+
+// GitHub rejects an empty details_url rather than ignoring it, and a
+// verdict has to be recordable even when the missing evidence is the
+// reason it failed.
+func TestCreateCheckRunOmitsAnEmptyDetailsURL(t *testing.T) {
+	var got map[string]any
+	srv := fakeGitHub(t, func(_ *http.Request, body map[string]any) (int, any) {
+		got = body
+		return http.StatusCreated, map[string]any{"id": 1}
+	})
+	defer srv.Close()
+
+	if err := client(t, srv).CreateCheckRun(context.Background(), host.CheckRun{
+		SHA: "sha1", Name: "manual/x", Conclusion: host.CheckRunFailure, Title: "no evidence",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got["details_url"]; present {
+		t.Errorf("details_url sent as %v, want the key omitted", got["details_url"])
 	}
 }

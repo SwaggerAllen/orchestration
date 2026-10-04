@@ -32,6 +32,8 @@ func (w *World) step(raw json.RawMessage) error {
 		return w.stepCI(raw)
 	case "deploy":
 		return w.stepDeploy(raw)
+	case "preview":
+		return w.stepPreview(raw)
 	case "run-end":
 		return w.stepRunEnd(raw)
 	case "advance":
@@ -280,6 +282,43 @@ func (w *World) stepCI(raw json.RawMessage) error {
 		Mergeable: core.MergeState(p.Mergeable),
 		PRNumber:  1,
 	}
+	return nil
+}
+
+// stepPreview scripts what the code host reports about the ticket
+// branch's preview environment — the fact the snapshot fills for tickets
+// in Design review (DESIGN §4).
+//
+// A step rather than a field on `seed`, because the interesting scenarios
+// are the ones where it *changes* between sweeps: a preview that is still
+// building on one pass and up on the next is the ordinary case, and the
+// one that says nothing was announced twice.
+func (w *World) stepPreview(raw json.RawMessage) error {
+	var p struct {
+		Key    string `json:"key"`
+		Status string `json:"status"`
+		URL    string `json:"url"`
+		Why    string `json:"why"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	t, err := w.ticket(p.Key)
+	if err != nil {
+		return err
+	}
+	switch core.PreviewState(p.Status) {
+	case core.PreviewUnknown, core.PreviewPending, core.PreviewReady, core.PreviewFailed:
+	default:
+		return fmt.Errorf("preview %s: unknown status %q", p.Key, p.Status)
+	}
+	if core.PreviewState(p.Status) == core.PreviewReady && p.URL == "" {
+		// The host never reports ready without a URL — it downgrades that
+		// to pending — so a scenario saying otherwise is describing
+		// something that cannot happen, and would assert against it.
+		return fmt.Errorf("preview %s: ready with no url", p.Key)
+	}
+	t.Preview = core.PreviewInfo{State: core.PreviewState(p.Status), URL: p.URL, Why: p.Why}
 	return nil
 }
 

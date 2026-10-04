@@ -127,6 +127,14 @@ runs:
       shell: bash
       run: |
         git config user.name "pipeline-design-agent"
+        # CHANGE.md is replaced wholly by every ticket, so two tickets whose
+        # lifetimes overlap conflict on it every time and wholly, and the
+        # resolution is always ours — the other ticket's spec is already in
+        # history. Left to the agent it is a conflict it learns to resolve
+        # without reading, in the same merge where a real collision in a
+        # systems doc needs reading carefully. Git does not ship this
+        # driver; `true` is the whole definition: keep our version, exit 0.
+        git config merge.ours.driver true
         git config user.email "pipeline@invalid"
         BRANCH="${{ steps.claim.outputs.branch }}"
         git fetch origin

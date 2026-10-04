@@ -126,6 +126,14 @@ finding.
     what the design assumes and why it does not hold, and write it for
     the author: the ticket parks rather than looping straight back to
     the design queue, and they decide whether it is redesigned or rescoped.
+  - `conflict` — your tree carried merge conflicts and you could not
+    restate both sides of one of them in a sentence. Only reachable when
+    the prompt carried a conflict section: the ones a pass may never
+    touch — a recorded rule, a reasons entry — park before you are
+    started and never reach you at all. Name the file and what you could
+    not tell apart. The test is not difficulty, it is whether you can say
+    what each side was *for*; a resolution you cannot explain is the
+    design nobody agreed to (DESIGN §2.4).
   - `author-only` — the work is somewhere you cannot land a change.
     Two kinds, and both are facts about your run rather than judgments:
 

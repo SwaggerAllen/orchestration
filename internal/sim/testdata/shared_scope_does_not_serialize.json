@@ -1,11 +1,11 @@
 {
-  "name": "system labels are the structural half of the mutex: one rule with screens (DESIGN 4, 6)",
+  "name": "a shared system does not refuse a promotion or a dispatch; one dev agent is what serializes (DESIGN 4, 6)",
   "steps": [
     {"kind": "seed", "key": "T1", "state": "in_progress", "labels": ["system:billing"], "run": {"kind": "dev", "live": true}},
     {"kind": "seed", "key": "T2", "state": "design_review", "labels": ["system:billing"]},
     {"kind": "transition", "key": "T2", "to": "ready_for_dev", "actor": "author"},
     {"kind": "sweep"},
-    {"kind": "expect", "key": "T2", "state": "design_review", "markers": {"revert": 1}},
+    {"kind": "expect", "key": "T2", "state": "ready_for_dev", "markers": {"revert": 0}, "runLive": false},
 
     {"kind": "seed", "key": "T3", "state": "design_review", "labels": ["system:search"]},
     {"kind": "transition", "key": "T3", "to": "ready_for_dev", "actor": "author"},
@@ -15,6 +15,7 @@
     {"kind": "run-end", "key": "T1"},
     {"kind": "transition", "key": "T1", "to": "canceled", "actor": "author"},
     {"kind": "sweep"},
-    {"kind": "expect", "key": "T3", "runKind": "dev", "runLive": true}
+    {"kind": "expect", "key": "T2", "runKind": "dev", "runLive": true},
+    {"kind": "expect", "key": "T3", "state": "ready_for_dev", "runLive": false}
   ]
 }

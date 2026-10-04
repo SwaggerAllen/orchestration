@@ -49,7 +49,17 @@ type Memory struct {
 	// Reruns records RerunRun calls in order, so a test can assert the
 	// harness asked — separately from asserting the attempt moved.
 	Reruns []int64
-	nextPR int
+	// Previews scripts PreviewFor: branch -> what the host reports. A
+	// branch with no entry reports PreviewNone, which is a project with no
+	// previews wired and is the default on purpose: every scenario written
+	// before previews existed still describes a project without them.
+	Previews map[string]Preview
+	// FailPreviewFor makes the preview read error for one branch. Keyed by
+	// branch rather than a flag for the reason FailChecksFor is: the
+	// property worth testing is that one ticket's unreadable preview costs
+	// only that ticket.
+	FailPreviewFor map[string]bool
+	nextPR         int
 }
 
 // Deployment is one recorded deployment.
@@ -68,13 +78,15 @@ var _ Host = (*Memory)(nil)
 
 func NewMemory() *Memory {
 	return &Memory{
-		CheckState:    map[string]Checks{},
-		JobLogs:       map[string][]JobLog{},
-		Merged:        map[int]string{},
-		Ancestry:      map[string]bool{},
-		Files:         map[string]string{},
-		Unmergeable:   map[int]bool{},
-		FailChecksFor: map[string]bool{},
+		CheckState:     map[string]Checks{},
+		JobLogs:        map[string][]JobLog{},
+		Merged:         map[int]string{},
+		Ancestry:       map[string]bool{},
+		Files:          map[string]string{},
+		Unmergeable:    map[int]bool{},
+		FailChecksFor:  map[string]bool{},
+		Previews:       map[string]Preview{},
+		FailPreviewFor: map[string]bool{},
 	}
 }
 
@@ -240,6 +252,15 @@ func (m *Memory) IsAncestor(_ context.Context, ancestor, descendant string) (boo
 
 // RecordDeployment records what a real host would create, so a Ring-1
 // test can assert reconcile did it.
+func (m *Memory) PreviewFor(_ context.Context, branch string) (Preview, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.FailPreviewFor[branch] {
+		return Preview{}, fmt.Errorf("host: reading the preview for %s", branch)
+	}
+	return m.Previews[branch], nil
+}
+
 func (m *Memory) RecordDeployment(_ context.Context, sha, environment string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

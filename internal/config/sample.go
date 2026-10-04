@@ -37,6 +37,11 @@ func Sample() *Config {
 			protocol.Canceled:         "Canceled",
 		},
 		DesignOwnedPaths: []string{
+			// The sketch is the design pass's output, so the ownership
+			// table has to carry it or DESIGN §5 refuses the very write
+			// DESIGN §4 requires. It is also what keeps dev out of it:
+			// dev implements against the spec, it does not rewrite it.
+			"CHANGE.md",
 			"storybook/**",
 			"screens/*.md",
 			"systems/*.md",

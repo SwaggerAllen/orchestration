@@ -80,10 +80,14 @@ jobs:
       PIPELINE_STATE_TOKEN: ${{ secrets.PIPELINE_STATE_TOKEN }}
       GITHUB_TOKEN: ${{ github.token }}
       PIPELINE_KILL_SWITCH: ${{ vars.PIPELINE_KILL_SWITCH }}
-      # Deploy detection for API-polled providers (digitalocean).
-      # Optional: without it the pipeline warns and deploy detection
-      # is off, so Merged tickets ride to the timeout.
+      # Deploy detection for API-polled providers. Each is optional and
+      # only the one `deploy.provider` names is read; without it the
+      # pipeline warns and deploy detection is off, so Merged tickets ride
+      # to the timeout. Both are listed because a workflow cannot branch
+      # on a config value it has not loaded yet, and an unset secret
+      # expands to the empty string — which is the same thing as absent.
       DIGITALOCEAN_TOKEN: ${{ secrets.DIGITALOCEAN_TOKEN }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
     steps:
       - name: checkout project (for pipeline.config.json)
         uses: actions/checkout@v4

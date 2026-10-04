@@ -24,6 +24,24 @@ func markersOf(t *Ticket, kind marker.Kind) []marker.Marker {
 	return out
 }
 
+// hasPreviewURL reports whether the ticket already says where its preview
+// is — the terminal fact for the preview rule.
+//
+// The rule has to ask this itself rather than trust the snapshot to have
+// declined the read. The snapshot skipping it is an optimization, one
+// fewer host call per ticket; convergence is protocol, and a rule that
+// re-fires whenever a fact happens to be filled is one the pure core
+// cannot be tested against. Written the other way round first, and the
+// test for a second sweep on an announced ticket is what said so.
+func HasPreviewURL(t *Ticket) bool {
+	for _, m := range markersOf(t, marker.Preview) {
+		if m.Fields["url"] != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // hasMarkerField reports whether any marker of the kind carries field=value.
 func hasMarkerField(t *Ticket, kind marker.Kind, field, value string) bool {
 	for _, m := range markersOf(t, kind) {

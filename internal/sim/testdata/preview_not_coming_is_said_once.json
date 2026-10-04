@@ -1,0 +1,22 @@
+{
+  "name": "a preview that is not coming is said once, and a rebuilt one is still announced (DESIGN 4)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "designing", "run": {"kind": "design", "live": true}},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "transition", "key": "T1", "to": "design_review", "actor": "design"},
+
+    {"kind": "preview", "key": "T1", "status": "failed", "why": "build exited 1"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 1}},
+
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 1}},
+
+    {"kind": "preview", "key": "T1", "status": "ready", "url": "https://t1.example.dev"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 2}},
+
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 2}}
+  ]
+}

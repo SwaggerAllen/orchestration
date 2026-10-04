@@ -567,6 +567,31 @@ func TestTheCitationGrammarReadsATicketMintedId(t *testing.T) {
 	}
 }
 
+func TestMentionsRuleID(t *testing.T) {
+	for _, yes := range []string{
+		"## #17 One repo",
+		"- **#17 One Repo.** Stores own schemas.",
+		"the rule this contradicts is `engine#17`",
+		"## #ORC-247-2 A ticket's own id",
+		"see (#42) for the reason",
+	} {
+		if !MentionsRuleID(yes) {
+			t.Errorf("missed a rule id in %q", yes)
+		}
+	}
+	for _, no := range []string{
+		"a plain heading",
+		"issue #foo is not an id",
+		"## Standing decisions",
+		"a colour like #ff00aa",
+		"",
+	} {
+		if MentionsRuleID(no) {
+			t.Errorf("found a rule id in %q", no)
+		}
+	}
+}
+
 // A record directory may be nested, and the split that finds it has to
 // be by the kind table rather than by path shape. Under a split on the
 // first "/", docs/dsl/chain.md reads as directory "docs" — no kind — so

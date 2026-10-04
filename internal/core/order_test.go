@@ -111,31 +111,30 @@ func TestOrderCarriesBothDirections(t *testing.T) {
 	}
 }
 
-// A mutex collision is not a blocker and must not be reported as one:
-// design may run on both at once, and only promotion into Ready for dev
-// is reverted (DESIGN §6). But a ticket that reads as ready while it is
-// really queued is exactly the design most likely to be re-evaluated
-// before it lands (§7), so it is named.
-func TestOrderNamesMutexCollisionsWithoutTreatingThemAsBlockers(t *testing.T) {
+// A shared scope is not a blocker and must not be reported as one —
+// nothing refuses on it at all now (DESIGN §6). It is still named,
+// because two tickets in one system are two branches that will meet in a
+// merge, and §7's collision rule fires on exactly this overlap.
+func TestOrderNamesASharedScopeWithoutTreatingItAsABlocker(t *testing.T) {
 	held := tk("A", protocol.InProgress, func(t *Ticket) { t.Labels = []string{"system:engine"} })
 	waiting := tk("B", protocol.Todo, func(t *Ticket) { t.Labels = []string{"system:engine"} })
 
 	o := ComputeOrder(snap(held, waiting), "")
 	if got := layerOf(o, "B"); got != LayerReady {
-		t.Errorf("B is in %q, want %q — a mutex label is not a blocker", got, LayerReady)
+		t.Errorf("B is in %q, want %q — a shared scope is not a blocker", got, LayerReady)
 	}
 	ot := ticketIn(o, "B")
-	if ot == nil || len(ot.MutexHeldBy) != 1 {
+	if ot == nil || len(ot.ScopeSharedWith) != 1 {
 		t.Fatalf("B does not report the collision: %+v", ot)
 	}
-	if ot.MutexHeldBy[0].Key != "A" || ot.MutexHeldBy[0].Label != "system:engine" {
-		t.Errorf("the collision does not name the holder and the label: %+v", ot.MutexHeldBy[0])
+	if ot.ScopeSharedWith[0].Key != "A" || ot.ScopeSharedWith[0].Label != "system:engine" {
+		t.Errorf("the collision does not name the holder and the label: %+v", ot.ScopeSharedWith[0])
 	}
 	if len(ot.BlockedBy) != 0 {
 		t.Error("the collision was reported as a blocker")
 	}
 	// The in-flight ticket holds the label rather than colliding with it.
-	if a := ticketIn(o, "A"); a != nil && len(a.MutexHeldBy) != 0 {
+	if a := ticketIn(o, "A"); a != nil && len(a.ScopeSharedWith) != 0 {
 		t.Error("the ticket holding the label reports colliding with itself")
 	}
 }

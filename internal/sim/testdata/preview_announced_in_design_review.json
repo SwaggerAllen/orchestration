@@ -1,0 +1,19 @@
+{
+  "name": "the branch preview is announced in Design review, once (DESIGN 4)",
+  "steps": [
+    {"kind": "seed", "key": "T1", "state": "designing", "run": {"kind": "design", "live": true}},
+    {"kind": "run-end", "key": "T1"},
+    {"kind": "transition", "key": "T1", "to": "design_review", "actor": "design"},
+
+    {"kind": "preview", "key": "T1", "status": "pending"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "assignee": "author", "markers": {"preview": 0}},
+
+    {"kind": "preview", "key": "T1", "status": "ready", "url": "https://t1.example.dev"},
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 1}},
+
+    {"kind": "sweep"},
+    {"kind": "expect", "key": "T1", "state": "design_review", "markers": {"preview": 1}}
+  ]
+}

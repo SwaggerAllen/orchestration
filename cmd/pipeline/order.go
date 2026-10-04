@@ -131,10 +131,10 @@ func printOrder(w io.Writer, o *core.Order, milestone string) {
 				// half of the pipeline it is not held up for.
 				fmt.Fprintln(w, "    design:     every blocker has reached Merged, so a design pass can start on this — only dev waits for the deploy")
 			}
-			for _, m := range t.MutexHeldBy {
+			for _, m := range t.ScopeSharedWith {
 				// Not a blocker, and saying so matters: design can run on
 				// both at once, and only promotion collides (DESIGN §6).
-				fmt.Fprintf(w, "    mutex:      %s is in flight and holds %s — designing this now is legal, but it cannot be promoted until that lands\n",
+				fmt.Fprintf(w, "    scope:      %s is in flight on %s — both may run, and their branches will meet in a merge\n",
 					m.Key, m.Label)
 			}
 		}
@@ -190,8 +190,8 @@ func printOrderMarkdown(w io.Writer, o *core.Order, milestone string) {
 			if t.DesignCanStart {
 				fmt.Fprintln(w, "- design: every blocker has reached `Merged`, so a design pass can start on this — only dev waits for the deploy")
 			}
-			for _, m := range t.MutexHeldBy {
-				fmt.Fprintf(w, "- mutex: `%s` is in flight and holds `%s` — designing this now is legal, but it cannot be promoted until that lands\n", m.Key, m.Label)
+			for _, m := range t.ScopeSharedWith {
+				fmt.Fprintf(w, "- scope: `%s` is in flight on `%s` — both may run, and their branches will meet in a merge\n", m.Key, m.Label)
 			}
 			fmt.Fprintln(w)
 		}

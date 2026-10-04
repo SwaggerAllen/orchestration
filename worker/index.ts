@@ -349,17 +349,29 @@ export function githubTargets(projects: Project[], event: string | null, payload
     // creates a deployment except the recorder itself, which is not a
     // sweep.
     //
-    // Filtered to `success`, which is the only state the pipeline can
-    // act on: the deploy check reads the newest *successful* deployment
-    // and compares its commit against the merge commit
-    // (`internal/deploy/ghdeploy`). A failed deploy is caught by the
-    // deploy timeout (DESIGN §12) rather than by an event, so nothing
-    // is lost by ignoring the other states — and one deployment walking
+    // Filtered to the terminal states. `success` is what the deploy check
+    // reads — the newest successful deployment, compared against the
+    // merge commit (`internal/deploy/ghdeploy`). `failure` and `error`
+    // are here for previews: the platform builds a branch preview
+    // out-of-band and posts its own deployment status, and the sweep
+    // announces it on the ticket in Design review or says once that it
+    // is not coming (DESIGN §4). A preview that failed is news the
+    // author can act on, and waiting for the hourly beat to notice would
+    // hold a review open for an hour over a link that was never going to
+    // arrive.
+    //
+    // The in-flight states stay out. One deployment walking
     // queued -> in_progress -> success is three webhooks minutes apart,
     // which is three sweeps the debounce window is far too short to
-    // coalesce.
-    case "deployment_status":
-      return payload?.deployment_status?.state === "success" ? mine : [];
+    // coalesce, and the first two carry nothing the sweep would act on.
+    //
+    // No loop risk. The pipeline creates deployments in exactly one
+    // place, the recorder, and what this wakes is a sweep — which posts
+    // a comment and creates none.
+    case "deployment_status": {
+      const state = payload?.deployment_status?.state;
+      return state === "success" || state === "failure" || state === "error" ? mine : [];
+    }
     // ping is what GitHub sends when the webhook is created. Answering
     // it without dispatching is how the setup page shows a green tick.
     default:
