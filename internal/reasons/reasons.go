@@ -61,6 +61,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 )
 
 // Kind is which shape an id-bearing line has.
@@ -112,6 +114,11 @@ type Doc struct {
 	// id's line — the attribution rule applied. Lines before the first
 	// id belong to nothing.
 	Blocks map[string]string
+	// Declarations are the doc's `- key` lines, each carrying the id it
+	// belongs to by that same rule; BadDeclarations the ones that open
+	// like a declaration and do not parse (declarations.go).
+	Declarations    []Declaration
+	BadDeclarations []BadDeclaration
 }
 
 // Entry is one `## #n` entry in a reasons file.
@@ -324,6 +331,16 @@ func ParseDoc(content string) Doc {
 			d.Rules = append(d.Rules, Rule{ID: id, Kind: KindBullet, Line: n, Text: boldLead(m, i), Raw: lines[i]})
 			seen[id] = append(seen[id], n)
 			cur = id
+		// Ahead of the standing-decisions case: a declaration is a bullet,
+		// and one written at the top level under `## Standing decisions`
+		// would otherwise read as a decision missing its id.
+		case declLead.MatchString(l):
+			if dcl, why := parseDeclaration(l); why != "" {
+				d.BadDeclarations = append(d.BadDeclarations, BadDeclaration{Line: n, Raw: lines[i], Why: why})
+			} else {
+				dcl.RuleID, dcl.Line, dcl.Raw = cur, n, lines[i]
+				d.Declarations = append(d.Declarations, dcl)
+			}
 		case inStanding && strings.HasPrefix(l, "- "):
 			d.Unnumbered = append(d.Unnumbered, Unnumbered{Kind: KindBullet, Line: n, Text: boldLead(m, i)})
 		}
@@ -467,8 +484,9 @@ func dups(seen map[string][]int) []Dup {
 
 // Index is one doc and its sibling, if any.
 type Index struct {
-	// Dir is "systems" or "screens"; Name the basename — the mutex
-	// label's name half, and the name a citation writes.
+	// Dir is a record directory (protocol.RecordKinds) and may contain a
+	// slash; Name the basename — the mutex label's name half, and the
+	// name a citation writes.
 	Dir, Name string
 	// Path is repo-relative: systems/foundation.md.
 	Path string
@@ -483,9 +501,11 @@ type Index struct {
 // carries at least one id, or it has a sibling. Either signal arms them,
 // so a doc that gained ids without a sibling still has its ids checked
 // for duplicates, and a doc that gained a sibling first is held to
-// numbering everything.
+// numbering everything. A declaration arms them too: it is attributed to
+// a rule by id, so a doc declaring attributes without ids has declared
+// them under nothing, and that has to be reported rather than skipped.
 func (ix Index) Ported() bool {
-	return len(ix.Doc.Rules) > 0 || ix.File != nil
+	return len(ix.Doc.Rules) > 0 || ix.File != nil || len(ix.Doc.Declarations) > 0 || len(ix.Doc.BadDeclarations) > 0
 }
 
 // Rule finds the rule line carrying id.
@@ -674,10 +694,16 @@ func TouchedIDs(baseRoot, headRoot string, changed []string) ([]Touched, error) 
 	seen := map[key]bool{}
 	for _, p := range changed {
 		p = filepath.ToSlash(strings.TrimSpace(p))
-		dir, file, ok := strings.Cut(p, "/")
-		if !ok || (dir != "systems" && dir != "screens") || strings.Contains(file, "/") || !strings.HasSuffix(file, ".md") {
+		// Split by the record-kind table, not on the first "/": a kind's
+		// directory may be nested (protocol.RecordKindForPath), and a
+		// first-slash split reads docs/dsl/chain.md as directory "docs",
+		// which is no kind, so every grammar rule this pass touched is
+		// dropped and the record review is handed nothing.
+		kind, file, ok := protocol.RecordKindForPath(p)
+		if !ok || strings.Contains(file, "/") || !strings.HasSuffix(file, ".md") {
 			continue
 		}
+		dir := kind.Dir
 		name := strings.TrimSuffix(strings.TrimSuffix(file, ".reasons.md"), ".md")
 		k := key{dir, name}
 		if !seen[k] {

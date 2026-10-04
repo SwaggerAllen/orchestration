@@ -706,3 +706,55 @@ func TestAuditSaysItSkippedManualTestsRatherThanPassingThem(t *testing.T) {
 		t.Errorf("no skip line for a project with no manual tests:\n%s", out)
 	}
 }
+
+// "No doc declares anything" is the state of every project until one
+// opts in, and it must not read as "every declaration checked".
+func TestAuditSaysWhenNoDocDeclaresAttributes(t *testing.T) {
+	out, err := runAudit(t, portedProject(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "attribute declarations: none") {
+		t.Errorf("no declarations line: %s", out)
+	}
+}
+
+// The audit runs both halves: a doc's declarations are checked where the
+// doc is audited, and a reference anywhere in the tree is resolved
+// against them. Both a malformed declaration and a stale reference fail
+// the audit, and a sound one of each does not add a finding.
+func TestAuditChecksDeclarationsAndResolvesReferencesToThem(t *testing.T) {
+	root := portedProject(t)
+	for rel, body := range map[string]string{
+		"docs/dsl/widget.md": "## #1 The file\n\n- **#2 A widget names itself.**\n  - key `name`: string, required\n  - key `size`: integer\n",
+		"lib/app/x.ex":       "# widget@name is declared; widget@colour is not\n",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out string
+	var err error
+	errOut := captureStderr(t, func() { out, err = runAudit(t, root) })
+	if err == nil {
+		t.Fatalf("audit passed with a malformed declaration and a stale reference:\n%s", out)
+	}
+	for _, want := range []string{
+		"docs/dsl/widget.md:5: `size` is a named member and states neither required nor optional",
+		"lib/app/x.ex:1: refers to widget@colour, which is not an attribute docs/dsl/widget.md declares",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr missing %q:\n%s", want, errOut)
+		}
+	}
+	if strings.Contains(errOut, "widget@name") {
+		t.Errorf("a declared attribute's reference was reported:\n%s", errOut)
+	}
+	if !strings.Contains(out, "attribute declarations: 2 across 1 doc(s) checked") {
+		t.Errorf("no declarations count: %s", out)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 )
 
@@ -133,9 +134,49 @@ func globRe(glob string) *regexp.Regexp {
 	return regexp.MustCompile(b.String())
 }
 
+// Records is the loaded docs of every record kind (protocol.RecordKinds),
+// in the table's order. It exists so that adding a kind is a row in that
+// table rather than a new parameter threaded through every caller: the
+// two-parameter (systems, screens) shape had four call sites, and a
+// third directory would have had to be remembered at each of them.
+type Records struct {
+	Kinds []KindDocs
+}
+
+// KindDocs is one kind and the docs found in its directory.
+type KindDocs struct {
+	Kind protocol.RecordKind
+	Docs []Doc
+}
+
+// LoadRecords reads every record directory under root. A missing
+// directory is no docs, as LoadDir already has it.
+func LoadRecords(root string) (Records, error) {
+	var r Records
+	for _, k := range protocol.RecordKinds {
+		docs, err := LoadDir(filepath.Join(root, filepath.FromSlash(k.Dir)))
+		if err != nil {
+			return Records{}, fmt.Errorf("reading %s/: %w", k.Dir, err)
+		}
+		r.Kinds = append(r.Kinds, KindDocs{Kind: k, Docs: docs})
+	}
+	return r, nil
+}
+
+// Docs returns one kind's docs by directory, nil when there is no such
+// kind. Callers that want a specific directory rather than all of them.
+func (r Records) Docs(dir string) []Doc {
+	for _, kd := range r.Kinds {
+		if kd.Kind.Dir == dir {
+			return kd.Docs
+		}
+	}
+	return nil
+}
+
 // OwnerLabels returns the mutex labels the given paths require: for each
-// changed path, the label of every system or screen doc whose file map
-// claims it (DESIGN §6, §9). Sorted and deduplicated.
+// changed path, the label of every record doc whose file map claims it
+// (DESIGN §6, §9). Sorted and deduplicated.
 //
 // This is Audit's "a changed path mapped by a doc requires that doc's
 // label" rule read forwards instead of backwards, and it exists because
@@ -147,17 +188,14 @@ func globRe(glob string) *regexp.Regexp {
 // TestOwnerLabelsAgreesWithAudit holds them together — for any corpus,
 // the labels this returns are exactly the ones whose absence Audit
 // reports.
-func OwnerLabels(systems, screens []Doc, changed []string) []string {
+func OwnerLabels(r Records, changed []string) []string {
 	seen := map[string]bool{}
 	for _, path := range changed {
-		for _, d := range []struct {
-			docs   []Doc
-			prefix string
-		}{{systems, "system:"}, {screens, "screen:"}} {
-			for _, doc := range d.docs {
+		for _, kd := range r.Kinds {
+			for _, doc := range kd.Docs {
 				for _, g := range doc.Globs {
 					if Match(g, path) {
-						seen[d.prefix+doc.Name] = true
+						seen[kd.Kind.LabelPrefix+doc.Name] = true
 						break
 					}
 				}
@@ -174,13 +212,18 @@ func OwnerLabels(systems, screens []Doc, changed []string) []string {
 
 // Audit checks a diff against the maps and the labels (DESIGN §9):
 //
-//   - no path may be mapped by two system docs — overlapping ownership is
-//     an ambiguous mutex, reported even with an empty diff
-//   - a changed path mapped by a system doc requires that system's label
-//   - a changed path mapped by a screen doc requires that screen's label
+//   - within a kind that owns exclusively, no path may be mapped by two
+//     docs — overlapping ownership is an ambiguous mutex, reported even
+//     with an empty diff
+//   - a changed path mapped by any record doc requires that doc's label
+//
+// Exclusivity is the kind's (protocol.RecordKind.Exclusive) rather than
+// a rule about systems specifically: a screen and a system describe one
+// path from two sides, and a grammar contract's docs map overlapping
+// parts of one file set on purpose.
 //
 // Returned strings are violations; empty means the diff is clean.
-func Audit(systems, screens []Doc, changed, labels []string) []string {
+func Audit(r Records, changed, labels []string) []string {
 	var out []string
 	has := map[string]bool{}
 	for _, l := range labels {
@@ -191,40 +234,38 @@ func Audit(systems, screens []Doc, changed, labels []string) []string {
 	// so overlap is judged against the actual tree via the changed set
 	// plus a static exact-duplicate check — cheap, and the changed-path
 	// check below catches live overlaps on every PR that exercises them.
-	seen := map[string]string{}
-	for _, d := range systems {
-		for _, g := range d.Globs {
-			if prev, dup := seen[g]; dup && prev != d.Name {
-				out = append(out, fmt.Sprintf("glob %q mapped by both systems/%s.md and systems/%s.md — overlapping ownership is an ambiguous mutex", g, prev, d.Name))
+	for _, kd := range r.Kinds {
+		if !kd.Kind.Exclusive {
+			continue
+		}
+		seen := map[string]string{}
+		for _, d := range kd.Docs {
+			for _, g := range d.Globs {
+				if prev, dup := seen[g]; dup && prev != d.Name {
+					out = append(out, fmt.Sprintf("glob %q mapped by both %s/%s.md and %s/%s.md — overlapping ownership is an ambiguous mutex", g, kd.Kind.Dir, prev, kd.Kind.Dir, d.Name))
+				}
+				seen[g] = d.Name
 			}
-			seen[g] = d.Name
 		}
 	}
 
 	for _, path := range changed {
-		owners := []string{}
-		for _, d := range systems {
-			for _, g := range d.Globs {
-				if Match(g, path) {
+		for _, kd := range r.Kinds {
+			owners := []string{}
+			for _, d := range kd.Docs {
+				for _, g := range d.Globs {
+					if !Match(g, path) {
+						continue
+					}
 					owners = append(owners, d.Name)
-					if !has["system:"+d.Name] {
-						out = append(out, fmt.Sprintf("%s is mapped by systems/%s.md but the ticket carries no system:%s label — a mutex nobody took", path, d.Name, d.Name))
+					if !has[kd.Kind.LabelPrefix+d.Name] {
+						out = append(out, fmt.Sprintf("%s is mapped by %s/%s.md but the ticket carries no %s%s label — a mutex nobody took", path, kd.Kind.Dir, d.Name, kd.Kind.LabelPrefix, d.Name))
 					}
 					break
 				}
 			}
-		}
-		if len(owners) > 1 {
-			out = append(out, fmt.Sprintf("%s is mapped by two system docs (%s) — overlapping ownership is an ambiguous mutex", path, strings.Join(owners, ", ")))
-		}
-		for _, d := range screens {
-			for _, g := range d.Globs {
-				if Match(g, path) {
-					if !has["screen:"+d.Name] {
-						out = append(out, fmt.Sprintf("%s is mapped by screens/%s.md but the ticket carries no screen:%s label", path, d.Name, d.Name))
-					}
-					break
-				}
+			if kd.Kind.Exclusive && len(owners) > 1 {
+				out = append(out, fmt.Sprintf("%s is mapped by two docs under %s/ (%s) — overlapping ownership is an ambiguous mutex", path, kd.Kind.Dir, strings.Join(owners, ", ")))
 			}
 		}
 	}

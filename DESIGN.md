@@ -566,6 +566,88 @@ sibling is a sibling by convention, and `systems/*.md` already matches
 so neither of the two ordering rules in the pipeline repo's own guide applies and nothing
 author-owned moves ahead of this.
 
+**Three record directories, not two, and the list is protocol.** `systems/`, `screens/` and
+`docs/dsl/` hold record docs — the same shape throughout: rule ids, a `.reasons.md` sibling, a
+file map, a mutex label prefix (`system:`, `screen:`, `dsl:`). `docs/dsl/` is the grammar
+contract a project's own declaration files are written against, where the project has one; a
+project without it simply has no docs of that kind, and every loader reads a missing directory
+as no docs rather than as an error. The set is `protocol.RecordKinds` and not a config field,
+for the reason the other protocol vocabulary is not one: a directory the pipeline mints labels
+for and resolves citations against is not a project's to invent.
+
+Three things about a kind were derived from its directory name until a nested directory made
+each derivation wrong, and each failed by passing rather than by erroring. The citation prefix
+was the directory minus a trailing `s`, so `dsl:chain` looked for `dsls/chain.md` and reported
+a correct citation as dangling. The directory was assumed to be one path segment, so a changed
+path was split on its first `/` — under which `docs/dsl/chain.md` has directory `docs`, which is
+no kind, and every rule the pass touched is dropped before the record review sees it. And
+exclusive ownership — no two docs of one kind mapping one path — was written as a rule about
+*systems* and applied to whichever list was passed first; it is a property of the kind, true of
+`systems/` and false of the other two, since a screen and a system describe one path from two
+sides and a grammar contract's docs map overlapping parts of one file set by construction. Two
+docs of *different* kinds mapping one path is not overlap at all: both labels are required.
+
+**A rule admits a file's attributes by declaring them, inside itself.** A record doc that is a
+contract for a file format — `docs/dsl/` is the grammar a project's declaration files are
+written in — states each key a rule admits as a line in that rule:
+
+```markdown
+- **#14 A generating tier's `review:` is `default` or a map that overrides its prompt.** …
+  - key `tiers.*.review`: string | map, optional
+  - key `tiers.*.review.prompt`: string, optional
+```
+
+The line belongs to its rule by the attribution rule above, so nothing joins the two that could
+go stale: retire the rule and its declarations go with it, and a changed declaration touches its
+rule, which hands the record review that rule's reason. A path runs from the file's root, dot
+by dot: a name, `*` for a map's values under keys the file chooses, `[]` after a segment for a
+list's items, and a leading `$name` for a shape that a type reuses. A type is alternatives joined
+by `|` — `string`, `integer`, `number`, `boolean`, `map`, `list`, `any`, a `"quoted"` value, a
+`$shape`. A named member says `required` or `optional`, because a contract that defaults presence
+has left half of every key unsaid. `when` makes a member exist only while its conditions hold:
+`<sibling> is "a" | "b"` while the sibling holds one of those values, `<sibling> is not "a" | "b"`
+while it holds none of them or is absent, and `and` joins conditions that must all hold.
+`pipeline schema <doc>` compiles a doc's declarations
+to JSON Schema, draft 2020-12, deterministically: each node carries its rule as `x-rule` and that
+rule's lead as its description, a map declaring members is closed, `*` opens it to any key, and
+a map or list declaring no children is unconstrained. The output is generated on every use and
+never stored, so a project gate that compares its code against it reads the doc as it stands.
+Prose names a declared attribute as `chain@tiers.*.review` — `dsl:chain@…` where the name is in
+more than one record directory — and the citation sweep resolves it, which is what makes a
+renamed key fail the sentences still naming it.
+
+Two cheaper designs were measured and lost. Catapult's ORC-250 scraped backticked spans out of
+its grammar's prose and diffed them against its loader. The prose quotes keys, values,
+author-chosen names and foreign syntax in identical backticks — `xs:appinfo` and `kind: chain`
+are one shape — states refusals in the form it states keys (`extends:` "is a load error"), and
+16 of that loader's 59 key names mean different things at different sites, so a flat name
+matched anywhere proves a mention and never coverage. No pattern separates those classes. And a
+schema written beside the doc, each entry citing `chain#14`, moves the drift instead of closing
+it: the citation proves #14 exists, not that #14 governs the key, and survives #14 being
+rewritten to drop it. What the declarations still cannot cover is English restating them — a
+sentence calling a key optional that its declaration calls required — so a key's type, presence
+and values are stated in its declaration alone, and the prose around it says what it is for.
+
+`when` has the shape one real grammar forced on it. Catapult's tiers are of three kinds —
+supplied (`generator: "supplied"`), join (`draft: "none"`) and generating, which is everything
+else — and on its tree every generating tier omits `generator` and takes its default. A key only
+generating tiers carry therefore exists while `generator is not "supplied" and draft is not
+"none"`: absent has to count as "not", or a defaulted discriminator can never be tested, and
+either condition alone admits the key on one of the other kinds, since a join tier has no
+`generator` and a supplied tier no `draft`. The two discriminators also gate each other —
+`generator` exists while `draft is not "none"`, `draft` while `generator is not "supplied"` — which
+is well defined because a condition tests a sibling's value, never whether the sibling was itself
+allowed. And the schema's gates test without leaving an annotation: an `if` that passes marks the
+keys its `properties` touched as evaluated, so a test written that way admits `generator` wherever
+another gate tested it and passed, on a join tier included. Each test is built from `required`
+and `not`, which make no annotations. Measured on a scratch copy of Catapult's `docs/dsl/chain.md`
+declaring its loader's whole grammar, 66 declarations: the shipped `chain.yaml` validates, and
+each of 20 kind-crossing mistakes — every generating-only key on a supplied and on a join tier,
+the generating-and-join keys on a supplied tier, `generator` on a join tier, `fields` and `source`
+on a generating one, a supplied tier without its `source` — is refused, while a generating tier
+omitting `generator` keeps its keys. With positive conditions alone, or with the annotating
+tests, the generating-only keys and the gated discriminators were accepted on the wrong kinds.
+
 **Where the cut falls is the port's whole risk, so it is a rule and not a judgement.** The doc
 keeps what a pass needs to *obey* the rule without opening anything else: the rule, the mechanism
 it names (the file, the function, the shape), the predicate for when it applies, and the one
@@ -624,8 +706,8 @@ selected by the diff and not by the ticket: a touched rule's entry is the record
 about that rule, the removed side of the diff one file over, and it carries nothing the pass wrote
 about its ticket. Without it a rule rewritten against its own reason is invisible from the diff —
 the reason is in a file the diff did not touch, which is the whole point of the split. Which ids
-were touched is read off two trees rather than off the diff: the action exports `systems/` and
-`screens/` as they stood at the commit the pass started from, and the harness compares each id's
+were touched is read off two trees rather than off the diff: the action exports every record
+directory as it stood at the commit the pass started from, and the harness compares each id's
 block — the rule line and every line up to the next id — between that tree and the checkout. The
 pass's start commit rather than the merge-base, because the diff under review is `start..HEAD`,
 and on a second pass after a decline the first pass may already have amended an entry; diffing
@@ -725,8 +807,8 @@ document stops at `§7.12`.
 
 **A rule is cited by its id, never by its wording.** `foundation#17` names rule #17 of
 `systems/foundation.md` from anywhere in the tree — a test name, a code comment, another doc —
-`generation#ORC-247-2` names a ticket-minted one the same way, and `system:foundation#17` or
-`screen:board#2` when a name is both a system and a screen doc. `generation#ORC-247` is a
+`generation#ORC-247-2` names a ticket-minted one the same way, and `system:foundation#17`,
+`screen:board#2` or `dsl:chain#22` when one name is carried by more than one record directory. `generation#ORC-247` is a
 ticket reference, not a citation: the grammar needs the counter.
 The name is the doc's basename, the mutex label's name half, so nothing has to be declared for a
 citation to resolve. It resolves when the id is a rule line in the doc or an entry in its
@@ -859,6 +941,7 @@ non-asks don't mention it" is a conclusion the pass had no grounds for.
 | Presentational component modules | Design |
 | `screens/*.md` | Design |
 | `systems/*.md` | Design (the sketch writes them; dev amends with a note, §4) |
+| `docs/dsl/**` | Design (§4's third record directory, where a project has one) |
 | Theme tokens | Design (by proposal; see §9) |
 | LiveViews, contexts, schemas, tests, everything else | Dev |
 | `.github/workflows/**` | **Author only** — no agent can land a change there |
@@ -966,10 +1049,18 @@ touch the same rule id parks the ticket with the `conflict` label and a comment 
 claims (§12).
 
 **Nothing refuses on a shared scope.** Promotion into `Ready for dev`, the dispatcher and the
-pickup assertion all used to, and none does now. The `screen:<name>` and `system:<name>` labels
-remain as the declared-scope audit CI runs against the file maps (§5, §9) — a record of what a
-pass said it was touching, which the ownership check and the record review both read. They are
-not a lock.
+pickup assertion all used to, and none does now. The labels — one prefix per record directory,
+so `screen:<name>`, `system:<name>` and `dsl:<name>` — remain as the declared-scope audit CI
+runs against the file maps (§5, §9): a record of what a pass said it was touching, which the
+ownership check, the record review and the manual test gate's selection all read. They are not
+a lock.
+
+**Which prefixes exist is `protocol.RecordKinds`'s to say, never a list in prose or in a
+predicate.** The set was a pair for long enough that two call sites spelled it out, and the day
+`docs/dsl` became the third, each of them silently stopped covering the tree — one by not
+seeing the new docs, one by *refusing* a manual test for covering the new kind, which looked
+exactly like the typo that check exists to catch. A kind is added to the table and the readers
+follow.
 
 **Detecting beats predicting here, and the label mutex's own history is the argument.** A
 prevention scheme has to be *right* about scope before the work is done, and every way it was
@@ -980,7 +1071,7 @@ wrong cost real time:
   sign-off and a full dev run — 22 modules, 60 tests, three commits — before surfacing as 28
   audit violations on every path the ticket was about.
 - **The labels were add-only, so narrowing was impossible.** A pass drawing less than the last
-  left the first pass's label holding the mutex against every other ticket naming that system,
+  left the first pass's label holding the mutex against every other ticket naming that record,
   with no legal way for any pass to clear it. `ORC-141` sat on `system:delivery` that way; only
   a direct tracker write got it off. The fix was a release rule, which then needed its own
   exception — a label the branch's files require is never released, because the narrowing pass
@@ -1003,8 +1094,8 @@ happens *inside the dev run* rather than at reconcile, so the pass resolving it 
 holding the context — and that the conflict is on the ticket spec as well as the code, so it
 arrives with the stack of specs that produced it (§4).
 
-**The file maps are unaffected and are not the mutex.** `systems/*.md` and `screens/*.md`
-declare their paths (§4), and four things read them: the mutex audit's scope check, the design
+**The file maps are unaffected and are not the mutex.** Every record doc declares its paths in
+its own front matter (§4), and four things read them: the mutex audit's scope check, the design
 ownership audit (§5), the record review's selection of reasons entries (§4), and the manual
 test gate's per-PR selection (§9).
 
@@ -1196,7 +1287,8 @@ failures to land one scope is a sequencing problem for the author whichever half
 | `bug` | Defect: something that does not do what it says, as against `tech-debt`'s shape of the code. Runs the normal pipeline; `Urgent` is what makes it preempt. Filed by the author, or proposed by the boundary (§10). |
 | `design-inbox` | Provenance: this came from the design agent, or from a boundary proposal of kind `design` (§13). The question you'll want answered later when something looks odd. |
 | `screen:<name>` | The design half of the mutex (§6). |
-| `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths in the project config. |
+| `system:<name>` | The structural half of the mutex (§6). Declared by the sketch; mapped to paths by the doc's own file map. |
+| `dsl:<name>` | The grammar-contract half of the mutex (§6), for a project carrying `docs/dsl/` (§4). |
 | `re-evaluate` | Unresolved collision (§7). |
 | `needs-review` | Reconciliation couldn't tell — the `cannot-tell` verdict (§11, §13). Deployed, clean, awaiting the author's eye. |
 | `needs-setup` | Parked on a human doing something the automation can't — a secret, an API, an account. Written by `abort --reason needs-setup` (§12, §13). Blocked, but not broken. |
@@ -1475,9 +1567,11 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   whose those paths were. `git log --author` splits them: the two agents commit under
   `pipeline-design-agent` and `pipeline-dev-agent`. Given no such list, the audit says it
   skipped the check rather than reporting a clean run it did not make.
-- no path may appear in two system file maps — overlapping ownership is an ambiguous mutex,
-  and an ambiguous mutex is two tickets in the same files with a green build
-- `screens/*.md` and `systems/*.md` contain no state sections and no code inventory — the doc
+- no path may appear in two file maps *of one exclusively-owning kind* — overlapping ownership
+  is an ambiguous mutex, and an ambiguous mutex is two tickets in the same files with a green
+  build. `systems/` owns exclusively; `screens/` and `docs/dsl/` do not (§4), and a path mapped
+  by two kinds requires both labels rather than being a violation
+- every record doc (§4) contains no state sections and no code inventory — the doc
   lint, enforced on the docs as they stand rather than on the diff, since a doc that has held a
   banned section since before this ticket is still holding it. It catches both rules in their
   **sectioned** form: a `## States`-style heading, a `## Modules`-style one. Prose is not
@@ -1497,9 +1591,23 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
   A `name#n` whose name no ported doc carries is not a citation — the same whitelist rule the
   section sweep applies, and measured for the same reason: `PR #144`, `pre-#144`, `commitment
   #2` and hex colours are what `#<digits>` means in Catapult's docs, and none of them puts a doc
-  name before the `#`. A bare name that is both a system and a screen doc is reported as
+  name before the `#`. A bare name carried by more than one record directory is reported as
   ambiguous rather than guessed, with the prefixed form to write; a prefixed citation of a doc the
-  prefix's directory does not hold is reported too.
+  prefix's directory does not hold is reported too. The prefixes are `protocol.RecordKinds`'
+  own: written as a fixed `system|screen` list, `dsl:chain#22` read as a bare `chain#22` — the
+  ambiguous form — so the advice to write `dsl:chain` could not be followed.
+- attribute declarations hold together (§4): every `- key` line parses and sits under a rule
+  id; no path is declared twice; every path's container is declared, with a type that admits it
+  — a map for a name or `*`, a list for `[]`; presence is stated by every named member and by
+  nothing else; each condition of a `when` names a declared sibling, once, and only values that
+  sibling can hold — under `is not` as under `is`, since excluding an impossible value is always
+  true and is in practice a misspelling; every
+  `$shape` a type names is declared, and every declared one is used; and no map mixes `*` with
+  gated members. A doc declaring anything is ported, so a declaration above every id is reported
+  rather than skipped. `pipeline schema` refuses on the same findings — one check, called by
+  both — and that is what reaches the branches this audit never runs on, since a project gate
+  compiles on every PR. Every `name@path` reference in the tree resolves to a declaration, under
+  the whitelist rule above: a word before an `@` in an address is not a doc name.
 
 **Design finish (blocking, in the harness — the same rule, one gate earlier):**
 - a design pass that committed outside `designOwnedPaths` does not open a draft PR and does not
@@ -2909,6 +3017,21 @@ questions — has this, lacks that — and pre-aggregating them means materialis
 Day and week buckets are likewise computed on read, because a stored bucket is a decision about
 week boundaries that becomes a migration when it is wrong. Filter values are bound parameters;
 only a fixed allowlist of column and bucket names is ever interpolated.
+
+**The store is billed for rows read, so the write path may not scan.** Durable Object SQLite
+charges by the row a query touches rather than by the query, which makes an unqualified
+aggregate over a table that grows by design a cost with no ceiling. `putRuns` decided whether
+an `INSERT OR IGNORE` had ignored by counting the table before and after — two full scans per
+run — so one pass cost about `2 x batch x rows already stored`. It read a few hundred thousand
+rows on the first night and about nineteen million on the fourteenth, capping the account's
+whole daily allowance from roughly the fifth. The insert reports its own outcome through
+`RETURNING` instead, and the cost is now flat in the batch.
+
+The lesson is not about that one query. **A cost defect is invisible to a test that seeds three
+rows**: every assertion about this store passed throughout, because they all pass on a table
+small enough for a scan to be free. So the write paths carry a statement budget as an
+assertion, not just an answer — and it budgets statements rather than forbidding `COUNT(*)`,
+because the same cost arrives just as easily through `MAX()`, a bare `SELECT`, or a subquery.
 
 **Nothing is filtered on the way in.** The collector's own runs are marked rather than dropped,
 so runaway spend by the thing measuring spend stays visible. Collection is the irreversible

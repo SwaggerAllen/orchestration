@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/SwaggerAllen/orchestration/internal/config"
@@ -63,18 +62,17 @@ func cmdManualTests(args []string) error {
 		if err != nil {
 			return err
 		}
-		systems, err := filemap.LoadDir(filepath.Join(*root, "systems"))
-		if err != nil {
-			return err
-		}
-		screens, err := filemap.LoadDir(filepath.Join(*root, "screens"))
+		records, err := filemap.LoadRecords(*root)
 		if err != nil {
 			return err
 		}
 		// The seams the diff touches, read through the docs' own maps.
-		// Nothing here knows a glob: that is filemap's, and one place
-		// declaring what a path belongs to is the point.
-		selected = manualtest.Select(tests, filemap.OwnerLabels(systems, screens, changed))
+		// Nothing here knows a glob or a record kind: both are filemap's
+		// and protocol's, and one place declaring what a path belongs to
+		// is the point. Loading the kinds by hand was two LoadDir calls
+		// naming `systems` and `screens`, which silently stopped covering
+		// the tree the day a third record directory landed.
+		selected = manualtest.Select(tests, filemap.OwnerLabels(records, changed))
 	}
 
 	switch *format {

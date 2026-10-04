@@ -16,6 +16,7 @@ import (
 	"github.com/SwaggerAllen/orchestration/internal/filemap"
 	"github.com/SwaggerAllen/orchestration/internal/manualtest"
 	"github.com/SwaggerAllen/orchestration/internal/plane"
+	"github.com/SwaggerAllen/orchestration/internal/protocol"
 	"github.com/SwaggerAllen/orchestration/internal/reasons"
 	"github.com/SwaggerAllen/orchestration/internal/tracker/linear"
 )
@@ -116,16 +117,12 @@ func cmdAudit(args []string) error {
 		}
 	}
 
-	systems, err := filemap.LoadDir(filepath.Join(*root, "systems"))
-	if err != nil {
-		return err
-	}
-	screens, err := filemap.LoadDir(filepath.Join(*root, "screens"))
+	records, err := filemap.LoadRecords(*root)
 	if err != nil {
 		return err
 	}
 
-	violations := filemap.Audit(systems, screens, changed, labels)
+	violations := filemap.Audit(records, changed, labels)
 
 	// The manual test set's own coherence (ops-free-pipeline.md §8.3).
 	// Gated here rather than reported, because the failure it catches is
@@ -148,15 +145,15 @@ func cmdAudit(args []string) error {
 		// manual test is reachable" must not print the same line.
 		fmt.Printf("manual tests: skipped — no tests under %s (ops-free-pipeline.md §8)\n", manualtest.Dir)
 	default:
-		violations = append(violations, manualtest.Problems(manualTests, systems, screens)...)
+		violations = append(violations, manualtest.Problems(manualTests, records)...)
 		fmt.Printf("manual tests: %d checked for reachability\n", len(manualTests))
 	}
 
 	// The doc lint reads the docs as they stand rather than the diff:
 	// the rule is about what a doc contains, and a doc that has held a
 	// banned section since before this ticket is still holding it.
-	for _, dir := range []string{"systems", "screens"} {
-		found, err := filemap.LintDir(filepath.Join(*root, dir))
+	for _, k := range protocol.RecordKinds {
+		found, err := filemap.LintDir(filepath.Join(*root, filepath.FromSlash(k.Dir)))
 		if err != nil {
 			return err
 		}
@@ -174,8 +171,8 @@ func cmdAudit(args []string) error {
 	var docs []reasons.Index
 	var unported []string
 	ported := 0
-	for _, dir := range []string{"systems", "screens"} {
-		ixs, err := reasons.LoadDir(*root, dir)
+	for _, k := range protocol.RecordKinds {
+		ixs, err := reasons.LoadDir(*root, k.Dir)
 		if err != nil {
 			return err
 		}
@@ -325,6 +322,30 @@ func cmdAudit(args []string) error {
 	for _, d := range ruleDangling {
 		violations = append(violations, d.String())
 	}
+	// Attribute declarations (DESIGN §4): each ported doc's were checked
+	// by reasons.Audit above; here the references to them, over the same
+	// files. Counted aloud either way, because "no doc declares anything"
+	// and "every declaration and reference checked" must not print the
+	// same — the first is the state of every project until one opts in.
+	keyDangling, err := reasons.SweepKeyRefs(*root, cited, docs)
+	if err != nil {
+		return err
+	}
+	for _, d := range keyDangling {
+		violations = append(violations, d.String())
+	}
+	attrs, declaring := 0, 0
+	for _, ix := range docs {
+		if n := len(ix.Doc.Declarations); n > 0 {
+			attrs += n
+			declaring++
+		}
+	}
+	if attrs == 0 {
+		fmt.Println("attribute declarations: none — no record doc declares a `- key` attribute, so there is no schema to compile and no name@key reference resolves (DESIGN §4)")
+	} else {
+		fmt.Printf("attribute declarations: %d across %d doc(s) checked, with every name@key reference in the tree\n", attrs, declaring)
+	}
 
 	// The map's own upkeep, and a proposal rather than a gate.
 	//
@@ -371,8 +392,12 @@ func cmdAudit(args []string) error {
 	}
 
 	if len(violations) == 0 {
-		fmt.Printf("audit clean: %d changed paths against %d system and %d screen maps; %d files swept for section citations\n",
-			len(changed), len(systems), len(screens), len(cited))
+		var mapped []string
+		for _, kd := range records.Kinds {
+			mapped = append(mapped, fmt.Sprintf("%d %s", len(kd.Docs), kd.Kind.Dir))
+		}
+		fmt.Printf("audit clean: %d changed paths against %s maps; %d files swept for section citations\n",
+			len(changed), strings.Join(mapped, ", "), len(cited))
 		return nil
 	}
 	for _, v := range violations {

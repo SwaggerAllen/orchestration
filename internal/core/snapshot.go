@@ -364,12 +364,17 @@ func (t *Ticket) InFlightOnScope() bool {
 	return t.InFlight() && t.State != protocol.Merged
 }
 
-// ScopeLabels returns the ticket's declared-scope labels — screen: and
-// system: alike, one rule for both kinds (DESIGN §6).
+// ScopeLabels returns the ticket's declared-scope labels — every record
+// kind's alike, one rule spanning all of them (DESIGN §6).
+//
+// Asks protocol rather than testing two prefixes it knows about. The
+// prefixes were a pair until `docs/dsl` became a third record kind, and
+// a predicate listing them by hand is the enumeration that goes stale
+// without failing a test — it would simply stop seeing the new kind.
 func (t *Ticket) ScopeLabels() []string {
 	var out []string
 	for _, l := range t.Labels {
-		if hasPrefix(l, protocol.ScreenLabelPrefix) || hasPrefix(l, protocol.SystemLabelPrefix) {
+		if protocol.IsMutexLabel(l) {
 			out = append(out, l)
 		}
 	}

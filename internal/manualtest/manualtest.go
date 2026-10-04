@@ -12,13 +12,22 @@
 //	---
 //
 // **Seams by doc name, never by path glob.** The globs already live in
-// the system and screen docs' own front matter, and `filemap` already
-// reads a diff through them. A test restating them would be a second
-// implementation of one rule, which is how the two drift — the hazard
-// `OwnerLabels` and `Audit` carry a test to hold them together for. So
-// selection is two hops: `filemap.OwnerLabels` turns changed paths into
-// the seams they touch, and this turns seams into the tests that claim
-// them. One place declares what a path belongs to.
+// each record doc's own front matter, and `filemap` already reads a diff
+// through them. A test restating them would be a second implementation
+// of one rule, which is how the two drift — the hazard `OwnerLabels` and
+// `Audit` carry a test to hold them together for. So selection is two
+// hops: `filemap.OwnerLabels` turns changed paths into the seams they
+// touch, and this turns seams into the tests that claim them. One place
+// declares what a path belongs to.
+//
+// **And the kinds come from `protocol.RecordKinds`, never from a pair
+// this package names.** Written against `system:` and `screen:` as two
+// constants, which was right for exactly as long as there were two: the
+// moment `docs/dsl` became a third record kind, a test covering `dsl:`
+// would have been reported as covering a seam no doc declares — refused
+// for naming the new thing. That is the enumeration-of-a-real-system
+// failure, and it fails by rejecting valid input rather than by
+// accepting invalid, which is the louder half but still wrong.
 package manualtest
 
 import (
@@ -174,13 +183,12 @@ func Select(tests []Test, seams []string) []Test {
 //
 // A test claiming nothing is the same defect stated more plainly, and is
 // reported for the same reason.
-func Problems(tests []Test, systems, screens []filemap.Doc) []string {
+func Problems(tests []Test, records filemap.Records) []string {
 	known := map[string]bool{}
-	for _, d := range systems {
-		known["system:"+d.Name] = true
-	}
-	for _, d := range screens {
-		known["screen:"+d.Name] = true
+	for _, kd := range records.Kinds {
+		for _, d := range kd.Docs {
+			known[kd.Kind.LabelPrefix+d.Name] = true
+		}
 	}
 	var out []string
 	for _, t := range tests {
