@@ -86,3 +86,8 @@ run unconditionally; branch protection makes "only reconciliation
 merges" a guarantee rather than a convention; and the kill switch — the
 `PIPELINE_KILL_SWITCH` Actions variable on the project repo — halts all
 planning and dispatch without touching credentials.
+
+## License
+
+orchestration is licensed under the [GNU Affero General Public
+License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
