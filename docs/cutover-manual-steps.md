@@ -19,25 +19,67 @@ step somebody will report done on the strength of having tried it.
 
 ---
 
+## The order
+
+Entry numbers below are identities, not sequence. This is the sequence,
+and it is shaped by one decision: **Catapult's side is one PR**
+(`catapult#163`), so nothing it carries can land ahead of the rest.
+
+1. **Park Catapult** — `PIPELINE_KILL_SWITCH=true` as a repo *variable*.
+   From here until step 5 the three merges are mutually dependent (4b),
+   and a design pass in the gap is the thing that fails.
+2. **Provision Render from the PR branch** (1). `render.yaml` exists
+   only there until the PR merges, and the Blueprint reads it from the
+   branch it is pointed at.
+3. **Fill the placeholders and secrets** (2, 3), and confirm the Worker's
+   GitHub webhook on Catapult carries **Deployment statuses** — Render's
+   previews arrive through it.
+4. **Merge `orchestration#115`, `orchestration-dummy#31`, `catapult#163`,
+   back to back, in that order** (4b). Then point the Blueprint at `main`.
+5. **`pipeline setup`, preflight, unpark** (4).
+6. Rehearsals (5–9b), then measurements (10–14), then cleanup (15–17, 9c).
+
 ## Blocking a merge
 
 ### 1. Provision the Render service from `render.yaml` — blocks `catapult#163`
 
-Create the Blueprint, then set the four `sync: false` secrets in the
-dashboard: `DELIVERY_GITHUB_TOKEN`, `DELIVERY_PROVISIONING_TOKEN`,
+Install Render's GitHub app on Catapult, then create the Blueprint
+**against `claude/catapult-ops-free-pipeline-mbzuur`**, not `main`:
+`render.yaml` is not on `main` until the PR merges. After the merge,
+point it at `main`. Nobody has done that switch yet, so check where
+Render puts it (the Blueprint's settings, or each service's
+Build & Deploy branch) before relying on it; the fallback is deleting
+the Blueprint and re-creating it from `main`, which loses nothing while
+the database is still empty.
+
+Set the four `sync: false` secrets when it asks:
+`DELIVERY_GITHUB_TOKEN`, `DELIVERY_PROVISIONING_TOKEN`,
 `FOUNDATION_ENDPOINT_SECRET_KEY_BASE`, `FOUNDATION_OPERATOR_TOKEN`.
+**`FOUNDATION_OPERATOR_TOKEN` must equal Catapult's repo secret of the
+same name** — workflows send it and the plane compares it — so if the
+old value cannot be read back off App Platform, mint one and set it in
+both places. The same goes for the two `DELIVERY_*` tokens, which also
+exist as repo secrets.
+
+**The database starts empty.** Nothing in the cutover carries App
+Platform's data across; if any of it matters, dump and restore it here,
+before anything writes to the new one.
 
 *Worked when:* the service is live and `/health` answers with
-`foundation: true` and main's real SHA.
+`foundation: true` and the branch head's SHA — then main's, once the
+Blueprint follows `main`.
 
 ### 2. Replace the two `REPLACE-AT-PROVISION` values — blocks `catapult#163`
 
 - `pipeline.config.json`'s `deploy.endpoint` — the `srv-…` service id.
-- The public URL, in `config/test.exs`'s `:live_base_url` and the three
-  workflows reading `CATAPULT_BASE_URL`. `grep -rn REPLACE-AT-PROVISION`
-  finds every site.
+- The public URL, at five sites: `config/test.exs`'s `:live_base_url`;
+  `CATAPULT_BASE_URL` in `catapult-failures.yml`,
+  `catapult-test-project.yml` and `pipeline-live-suite.yml`; and the test
+  fixture `test/catapult/generation/fixtures/catapult-dispatch.yml`,
+  which an earlier version of this entry left out.
 
-*Worked when:* `grep -rn REPLACE-AT-PROVISION` is empty, and `pipeline
+*Worked when:* `grep -rn REPLACE-AT-PROVISION` finds only the two prose
+mentions (`render.yaml`'s header and `SETUP.md` §2), and `pipeline
 setup` prints `deploy check: … answered` rather than failing or skipping.
 
 Merging before this leaves the sweep unable to see deploys and every
@@ -67,7 +109,7 @@ and worth not treating as a gate.
 *Worked when:* the label exists on the ORC team and a `pipeline setup`
 re-run reports nothing to create.
 
-### 4b. Catapult's `designOwnedPaths` must land with orchestration — a real blocker
+### 4b. The three PRs merge back to back — a real blocker
 
 **Orchestration cannot merge alone**, and this is the step that makes it
 able to. `assertChangeSpec` fails a design finish that did not write
@@ -82,19 +124,23 @@ Measured against a fixture carrying `main`'s own `designOwnedPaths`:
 a design pass wrote 1 file(s) outside the paths design owns (DESIGN §5): CHANGE.md
 ```
 
-The three entries are harmless against today's binary — `CHANGE.md` and
-`tests/manual/**` are values in an array it already reads, and
-`.gitattributes` is inert until the agent job configures the `merge=ours`
-driver — so they can merge *before* orchestration as well as with it.
-They do not need Render.
+`orchestration-dummy`'s `main` has the same gap and `orchestration-dummy#31`
+is its fix.
 
-**Which is why these are worth splitting out of the Render PR.** That one
-cannot merge until step 2 is done, and orchestration is waiting on these
-three lines rather than on the platform.
+Those lines could land ahead of orchestration on their own, but Catapult's
+side is kept as one PR, and that PR cannot merge before orchestration
+either: its `select` check runs `pipeline manual-tests`, which today's
+binary does not have (`pipeline: unknown or missing command`, measured on
+the PR). So the order is `orchestration#115`, then `orchestration-dummy#31`
+and `catapult#163` straight after, with Catapult parked so no design pass
+runs in between. The `deploy` side has no such constraint: Catapult's
+current `main` config still loads under the new binary, since
+`digitalocean` stays a provider and the `preview` block stays a declared
+field until 17.
 
-*Worked when:* catapult's `main` carries `CHANGE.md` and
-`tests/manual/**` in `designOwnedPaths` and a `.gitattributes` giving
-`CHANGE.md merge=ours`.
+*Worked when:* all three are merged, and Catapult's `main` carries
+`CHANGE.md` and `tests/manual/**` in `designOwnedPaths` and a
+`.gitattributes` giving `CHANGE.md merge=ours`.
 
 ---
 
@@ -280,11 +326,3 @@ App Platform app is the rollback.
 The third of the three merges. Only once Catapult's `preview` block is
 gone from `main`, since `DisallowUnknownFields` makes the field's removal
 and the block's presence mutually invalid.
-
-### 18. Close or re-scope DESIGN §14's staging item
-
-`ops-free-pipeline.md` §8.1 requires it "in the same change". §14 records
-the intended shape as staging with a manual test gate between
-`Reconciling` and `Merged`; the gate now sits in `Checks`, because a
-per-PR preview removed the one-environment constraint that forced the
-later placement.
