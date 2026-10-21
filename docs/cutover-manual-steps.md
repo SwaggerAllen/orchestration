@@ -70,6 +70,12 @@ before anything writes to the new one.
 `foundation: true` and the branch head's SHA — then main's, once the
 Blueprint follows `main`.
 
+**Half done.** `srv-dbcgeet9fdbs73cp4he0` at `catapult-2uja.onrender.com`
+answered 200 with all five components ready, and `"sha":"dev"`: Render's
+build context has no `.git`. `catapult#163`'s Dockerfile now takes the
+commit from `RENDER_GIT_COMMIT` when the stamp is `dev`; the SHA half
+is done when a deploy carrying that reports a real commit.
+
 ### 2. The service id, and the public URL — blocks `catapult#163`
 
 - `pipeline.config.json`'s `deploy.endpoint` — the `srv-…` service id,
@@ -87,10 +93,10 @@ Blueprint follows `main`.
   fails its first call back, and the evidence is in `catapult-test`'s run
   log, not in the suite's failure.
 
-*Worked when:* `grep -rn REPLACE-AT-PROVISION` finds only the two prose
-mentions (`render.yaml`'s header and `SETUP.md` §2); the variable is
-set; and `pipeline setup` prints `deploy check: … answered` rather than
-failing or skipping.
+*Worked when:* `grep -rn REPLACE-AT-PROVISION` finds nothing; the
+variable is set; and `pipeline setup` prints `deploy check: … answered`
+rather than failing or skipping. The first is done on `catapult#163`;
+the other two are yours.
 
 Merging before this leaves the sweep unable to see deploys and every
 `Merged` ticket rides to the deploy timeout — a symptom naming neither the
