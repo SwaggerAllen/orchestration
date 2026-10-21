@@ -31,7 +31,8 @@ and it is shaped by one decision: **Catapult's side is one PR**
 2. **Provision Render from the PR branch** (1). `render.yaml` exists
    only there until the PR merges, and the Blueprint reads it from the
    branch it is pointed at.
-3. **Fill the placeholders and secrets** (2, 3), and confirm the Worker's
+3. **Set the URL variable, fill the two literals, add the secret** (2, 3),
+   and confirm the Worker's
    GitHub webhook on Catapult carries **Deployment statuses** — Render's
    previews arrive through it.
 4. **Merge `orchestration#115`, `orchestration-dummy#31`, `catapult#163`,
@@ -69,18 +70,27 @@ before anything writes to the new one.
 `foundation: true` and the branch head's SHA — then main's, once the
 Blueprint follows `main`.
 
-### 2. Replace the two `REPLACE-AT-PROVISION` values — blocks `catapult#163`
+### 2. The service id, and the public URL — blocks `catapult#163`
 
-- `pipeline.config.json`'s `deploy.endpoint` — the `srv-…` service id.
-- The public URL, at five sites: `config/test.exs`'s `:live_base_url`;
-  `CATAPULT_BASE_URL` in `catapult-failures.yml`,
-  `catapult-test-project.yml` and `pipeline-live-suite.yml`; and the test
-  fixture `test/catapult/generation/fixtures/catapult-dispatch.yml`,
-  which an earlier version of this entry left out.
+- `pipeline.config.json`'s `deploy.endpoint` — the `srv-…` service id,
+  committed. It is not a secret and the binary reads config, not the
+  environment.
+- The public URL is the **`CATAPULT_BASE_URL` repo variable** on
+  Catapult (Settings → Secrets and variables → Actions → Variables), no
+  trailing slash. The three workflows that call the instance read it and
+  refuse by name when it is unset; the live suite hands it to
+  `config/test.exs`, which has no default.
+- One literal copy remains: the fixture
+  `test/catapult/generation/fixtures/catapult-dispatch.yml`, which runs
+  in `catapult-test` and cannot read Catapult's variables. **It is the
+  quiet one** — left unreplaced, the `:live` chain test's dispatched run
+  fails its first call back, and the evidence is in `catapult-test`'s run
+  log, not in the suite's failure.
 
 *Worked when:* `grep -rn REPLACE-AT-PROVISION` finds only the two prose
-mentions (`render.yaml`'s header and `SETUP.md` §2), and `pipeline
-setup` prints `deploy check: … answered` rather than failing or skipping.
+mentions (`render.yaml`'s header and `SETUP.md` §2); the variable is
+set; and `pipeline setup` prints `deploy check: … answered` rather than
+failing or skipping.
 
 Merging before this leaves the sweep unable to see deploys and every
 `Merged` ticket rides to the deploy timeout — a symptom naming neither the
