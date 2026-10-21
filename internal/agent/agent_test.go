@@ -1284,3 +1284,40 @@ func TestAGreenVerdictIsNotRerun(t *testing.T) {
 		t.Errorf("a green verdict was re-run for nothing: %v", h.Reruns)
 	}
 }
+
+// The conflict park (DESIGN §2.4 at merge time). Its message is the whole
+// value: the author is choosing whether to re-decide the design, and a
+// fixed string naming no file is `staleClaimFor`'s defect in a new place.
+func TestAbortConflictParksAndInsistsOnADiagnosis(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	i := seed(t, tr, cfg, "Retry policy", "d", protocol.ReadyForDev)
+	res, err := Claim(ctx, p, i.Key, "r", "u", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Abort(ctx, p, res, "conflict", "", ""); err == nil {
+		t.Error("a conflict naming no files was accepted — the reader cannot see the tree")
+	}
+	msg := "systems/engine.md conflicts: this branch makes retries the caller's, `engine#17` on main makes them the engine's."
+	if err := Abort(ctx, p, res, "conflict", msg, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := issueState(t, tr, cfg, i.ID); got != protocol.Blocked {
+		t.Errorf("state = %q, want blocked", got)
+	}
+	issue := findIssue(t, tr, cfg, i.ID)
+	var labelled bool
+	for _, l := range issue.Labels {
+		if l == core.LabelConflict {
+			labelled = true
+		}
+	}
+	if !labelled {
+		t.Errorf("labels = %v, want conflict — without it this reads as a crash in the Blocked column", issue.Labels)
+	}
+	// The origin is what lets the author send it to the right queue.
+	if got := blockedFrom(t, tr, cfg, i.ID); got != string(protocol.InProgress) {
+		t.Errorf("blocked marker from = %q, want %q", got, protocol.InProgress)
+	}
+}

@@ -882,6 +882,87 @@ func (c *Client) IsAncestor(ctx context.Context, ancestor, descendant string) (b
 // create a deployment until every status check on the commit has
 // passed, which for a merge commit on main is a race the caller would
 // have to poll around.
+// deploymentStatusStates, mapped from GitHub's own list. `inactive` is
+// deliberately not here: it means the deployment was superseded or torn
+// down, which is not a failure and is not something to wait for — it is
+// the same "nothing to post" as a project with no previews, and DESIGN §4
+// calls that silence rather than a dead link.
+//
+// The unmapped remainder behaves as PreviewNone for the same reason the
+// host-to-core outcome mapping leaves GitHub's unmeasured conclusions at
+// OutcomeUnknown: a value nobody here has seen should do what no value
+// always did, not something invented for it.
+var previewStates = map[string]host.PreviewStatus{
+	"success":     host.PreviewReady,
+	"failure":     host.PreviewFailed,
+	"error":       host.PreviewFailed,
+	"queued":      host.PreviewPending,
+	"pending":     host.PreviewPending,
+	"in_progress": host.PreviewPending,
+}
+
+// PreviewFor reads the branch's newest deployment and the newest status on
+// it. Two calls rather than one because environment_url lives on the
+// status, not on the deployment — the deployment only says a platform took
+// the branch.
+func (c *Client) PreviewFor(ctx context.Context, branch string) (host.Preview, error) {
+	var deployments []struct {
+		ID        int64  `json:"id"`
+		CreatedAt string `json:"created_at"`
+	}
+	path := fmt.Sprintf("/repos/%s/%s/deployments?ref=%s&per_page=20", c.owner, c.repo, url.QueryEscape(branch))
+	if err := c.rest(ctx, http.MethodGet, path, nil, &deployments); err != nil {
+		return host.Preview{}, fmt.Errorf("reading deployments for %s: %w", branch, err)
+	}
+	if len(deployments) == 0 {
+		return host.Preview{}, nil
+	}
+
+	// Newest by created_at rather than by position. GitHub documents no
+	// ordering for this listing, and which deployment is read decides
+	// whether the author is sent a live URL or one from a push two commits
+	// ago — so it is taken rather than assumed, the same call the Render
+	// adapter makes about its own list.
+	newest, newestAt := deployments[0].ID, time.Time{}
+	for _, d := range deployments {
+		at, err := time.Parse(time.RFC3339, d.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if at.After(newestAt) {
+			newest, newestAt = d.ID, at
+		}
+	}
+
+	var statuses []struct {
+		State          string `json:"state"`
+		EnvironmentURL string `json:"environment_url"`
+		Description    string `json:"description"`
+	}
+	sp := fmt.Sprintf("/repos/%s/%s/deployments/%d/statuses?per_page=1", c.owner, c.repo, newest)
+	if err := c.rest(ctx, http.MethodGet, sp, nil, &statuses); err != nil {
+		return host.Preview{}, fmt.Errorf("reading deployment %d's statuses: %w", newest, err)
+	}
+	if len(statuses) == 0 {
+		// Created and nothing reported yet: taken, not finished. The same
+		// reading ghdeploy gives a statusless deployment.
+		return host.Preview{Status: host.PreviewPending}, nil
+	}
+	st := statuses[0]
+	out := host.Preview{Status: previewStates[st.State], Description: st.Description}
+	if out.Status == host.PreviewReady {
+		// A success with no environment_url is not something to send the
+		// author. It is pending as far as anybody reading the ticket is
+		// concerned — there is nowhere to go — and saying so beats posting
+		// a marker whose url field is empty.
+		if st.EnvironmentURL == "" {
+			return host.Preview{Status: host.PreviewPending, Description: st.Description}, nil
+		}
+		out.URL = st.EnvironmentURL
+	}
+	return out, nil
+}
+
 func (c *Client) RecordDeployment(ctx context.Context, sha, environment string) error {
 	var dep struct {
 		ID int `json:"id"`

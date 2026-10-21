@@ -166,6 +166,7 @@ var Labels = []string{
 	"author-only",
 	"resync",
 	"prerequisite",
+	"conflict",
 	"harness",
 	"milestone-boundary",
 }

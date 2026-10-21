@@ -1,0 +1,761 @@
+{
+  "takenAt": "2026-09-16T21:08:14Z",
+  "project": "catapult",
+  "store": "https://pipeline-metronome.allen-strut.workers.dev",
+  "capturedFrom": "5c29ab9fdd6c1fc5d7e49794785008d1e59c34b4",
+  "runURL": "https://github.com/SwaggerAllen/catapult/actions/runs/35150647404",
+  "queries": [
+    {
+      "op": "/watermark",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/watermark",
+      "response": [
+        {
+          "source": "runs:SwaggerAllen/catapult",
+          "oldest_complete": 1787712776000,
+          "newest_seen": 1789549270000,
+          "at": 1789551192364
+        },
+        {
+          "source": "runs:swaggerallen/orchestration",
+          "oldest_complete": 1786333501000,
+          "newest_seen": 1789096054000,
+          "at": 1789551204261
+        }
+      ]
+    },
+    {
+      "op": "/milestones",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/milestones",
+      "response": [
+        {
+          "name": "Hookup",
+          "kind": "feature",
+          "window_start": 1786560804855,
+          "window_end": 1786738040615,
+          "boundary_ticket": "ORC-28",
+          "boundary_open_start": 1786723407976,
+          "boundary_open_end": 1786738040615
+        },
+        {
+          "name": "Tech debt \u00b7 before the engine",
+          "kind": "debt",
+          "window_start": 1786738040615,
+          "window_end": 1787087142083,
+          "boundary_ticket": "ORC-45",
+          "boundary_open_start": 1786898166208,
+          "boundary_open_end": 1787087142083
+        },
+        {
+          "name": "The engine",
+          "kind": "feature",
+          "window_start": 1787087142083,
+          "window_end": 1787355753239,
+          "boundary_ticket": "ORC-90",
+          "boundary_open_start": 1787271396590,
+          "boundary_open_end": 1787355753239
+        },
+        {
+          "name": "Tech debt \u00b7 before the authoring loop",
+          "kind": "debt",
+          "window_start": 1787355753239,
+          "window_end": 1787499202419,
+          "boundary_ticket": "ORC-99",
+          "boundary_open_start": 1787362169623,
+          "boundary_open_end": 1787499202419
+        },
+        {
+          "name": "The authoring loop",
+          "kind": "feature",
+          "window_start": 1787499202419,
+          "window_end": 1787770092169,
+          "boundary_ticket": "ORC-118",
+          "boundary_open_start": 1787720468032,
+          "boundary_open_end": 1787770092169
+        },
+        {
+          "name": "Tech debt \u00b7 before the product tier",
+          "kind": "debt",
+          "window_start": 1787770092169,
+          "window_end": 1788228371063,
+          "boundary_ticket": "ORC-156",
+          "boundary_open_start": 1788108489100,
+          "boundary_open_end": 1788228371063
+        },
+        {
+          "name": "Product tier and intake",
+          "kind": "feature",
+          "window_start": 1788228371063,
+          "window_end": null,
+          "boundary_ticket": "ORC-217",
+          "boundary_open_start": 1788396074830,
+          "boundary_open_end": null
+        }
+      ]
+    },
+    {
+      "op": "/states?on=completed",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/states?on=completed",
+      "response": {
+        "states": [
+          {
+            "bucket": "all",
+            "state": "blocked",
+            "instances": 70,
+            "tickets": 40,
+            "total_ms": 414095900
+          },
+          {
+            "bucket": "all",
+            "state": "checks",
+            "instances": 139,
+            "tickets": 88,
+            "total_ms": 44195130
+          },
+          {
+            "bucket": "all",
+            "state": "design_review",
+            "instances": 217,
+            "tickets": 83,
+            "total_ms": 1885419696
+          },
+          {
+            "bucket": "all",
+            "state": "designing",
+            "instances": 253,
+            "tickets": 92,
+            "total_ms": 156408963
+          },
+          {
+            "bucket": "all",
+            "state": "in_progress",
+            "instances": 101,
+            "tickets": 90,
+            "total_ms": 115162520
+          },
+          {
+            "bucket": "all",
+            "state": "merged",
+            "instances": 90,
+            "tickets": 87,
+            "total_ms": 141381465
+          },
+          {
+            "bucket": "all",
+            "state": "ready_for_design",
+            "instances": 208,
+            "tickets": 75,
+            "total_ms": 120805779
+          },
+          {
+            "bucket": "all",
+            "state": "ready_for_dev",
+            "instances": 101,
+            "tickets": 90,
+            "total_ms": 33503923
+          },
+          {
+            "bucket": "all",
+            "state": "ready_for_rework",
+            "instances": 59,
+            "tickets": 36,
+            "total_ms": 20619909
+          },
+          {
+            "bucket": "all",
+            "state": "reconciling",
+            "instances": 111,
+            "tickets": 86,
+            "total_ms": 47578260
+          },
+          {
+            "bucket": "all",
+            "state": "reworking",
+            "instances": 58,
+            "tickets": 37,
+            "total_ms": 28114177
+          },
+          {
+            "bucket": "all",
+            "state": "triage",
+            "instances": 58,
+            "tickets": 58,
+            "total_ms": 762540478
+          }
+        ],
+        "agentTotal": [
+          {
+            "bucket": "all",
+            "tickets": 92,
+            "total_ms": 2248764569
+          }
+        ],
+        "agentStates": [
+          "designing",
+          "design_review",
+          "in_progress",
+          "reconciling",
+          "checks"
+        ],
+        "excluded": {
+          "terminalCategories": [
+            "completed",
+            "canceled",
+            "duplicate"
+          ],
+          "queueStates": [
+            "backlog",
+            "todo"
+          ],
+          "notStates": [],
+          "onlyStates": []
+        }
+      }
+    },
+    {
+      "op": "/states?on=completed&bucket=month",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/states?on=completed&bucket=month",
+      "response": {
+        "states": [
+          {
+            "bucket": "2026-08",
+            "state": "blocked",
+            "instances": 52,
+            "tickets": 29,
+            "total_ms": 302235667
+          },
+          {
+            "bucket": "2026-08",
+            "state": "checks",
+            "instances": 100,
+            "tickets": 65,
+            "total_ms": 27628842
+          },
+          {
+            "bucket": "2026-08",
+            "state": "design_review",
+            "instances": 140,
+            "tickets": 60,
+            "total_ms": 1261329772
+          },
+          {
+            "bucket": "2026-08",
+            "state": "designing",
+            "instances": 174,
+            "tickets": 68,
+            "total_ms": 105663813
+          },
+          {
+            "bucket": "2026-08",
+            "state": "in_progress",
+            "instances": 76,
+            "tickets": 67,
+            "total_ms": 79566235
+          },
+          {
+            "bucket": "2026-08",
+            "state": "merged",
+            "instances": 66,
+            "tickets": 63,
+            "total_ms": 108555342
+          },
+          {
+            "bucket": "2026-08",
+            "state": "ready_for_design",
+            "instances": 135,
+            "tickets": 51,
+            "total_ms": 100682107
+          },
+          {
+            "bucket": "2026-08",
+            "state": "ready_for_dev",
+            "instances": 76,
+            "tickets": 67,
+            "total_ms": 29417074
+          },
+          {
+            "bucket": "2026-08",
+            "state": "ready_for_rework",
+            "instances": 38,
+            "tickets": 25,
+            "total_ms": 18014826
+          },
+          {
+            "bucket": "2026-08",
+            "state": "reconciling",
+            "instances": 82,
+            "tickets": 63,
+            "total_ms": 35044045
+          },
+          {
+            "bucket": "2026-08",
+            "state": "reworking",
+            "instances": 38,
+            "tickets": 26,
+            "total_ms": 16747348
+          },
+          {
+            "bucket": "2026-08",
+            "state": "triage",
+            "instances": 52,
+            "tickets": 52,
+            "total_ms": 747974222
+          },
+          {
+            "bucket": "2026-09",
+            "state": "blocked",
+            "instances": 18,
+            "tickets": 11,
+            "total_ms": 111860233
+          },
+          {
+            "bucket": "2026-09",
+            "state": "checks",
+            "instances": 39,
+            "tickets": 23,
+            "total_ms": 16566288
+          },
+          {
+            "bucket": "2026-09",
+            "state": "design_review",
+            "instances": 77,
+            "tickets": 23,
+            "total_ms": 624089924
+          },
+          {
+            "bucket": "2026-09",
+            "state": "designing",
+            "instances": 79,
+            "tickets": 24,
+            "total_ms": 50745150
+          },
+          {
+            "bucket": "2026-09",
+            "state": "in_progress",
+            "instances": 25,
+            "tickets": 23,
+            "total_ms": 35596285
+          },
+          {
+            "bucket": "2026-09",
+            "state": "merged",
+            "instances": 24,
+            "tickets": 24,
+            "total_ms": 32826123
+          },
+          {
+            "bucket": "2026-09",
+            "state": "ready_for_design",
+            "instances": 73,
+            "tickets": 24,
+            "total_ms": 20123672
+          },
+          {
+            "bucket": "2026-09",
+            "state": "ready_for_dev",
+            "instances": 25,
+            "tickets": 23,
+            "total_ms": 4086849
+          },
+          {
+            "bucket": "2026-09",
+            "state": "ready_for_rework",
+            "instances": 21,
+            "tickets": 11,
+            "total_ms": 2605083
+          },
+          {
+            "bucket": "2026-09",
+            "state": "reconciling",
+            "instances": 29,
+            "tickets": 23,
+            "total_ms": 12534215
+          },
+          {
+            "bucket": "2026-09",
+            "state": "reworking",
+            "instances": 20,
+            "tickets": 11,
+            "total_ms": 11366829
+          },
+          {
+            "bucket": "2026-09",
+            "state": "triage",
+            "instances": 6,
+            "tickets": 6,
+            "total_ms": 14566256
+          }
+        ],
+        "agentTotal": [
+          {
+            "bucket": "2026-08",
+            "tickets": 68,
+            "total_ms": 1509232707
+          },
+          {
+            "bucket": "2026-09",
+            "tickets": 24,
+            "total_ms": 739531862
+          }
+        ],
+        "agentStates": [
+          "designing",
+          "design_review",
+          "in_progress",
+          "reconciling",
+          "checks"
+        ],
+        "excluded": {
+          "terminalCategories": [
+            "completed",
+            "canceled",
+            "duplicate"
+          ],
+          "queueStates": [
+            "backlog",
+            "todo"
+          ],
+          "notStates": [],
+          "onlyStates": []
+        }
+      }
+    },
+    {
+      "op": "/minutes?by=workflow",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/minutes?by=workflow",
+      "response": {
+        "minutes": [
+          {
+            "bucket": "all",
+            "series": "catapult-failures.yml",
+            "runs": 4,
+            "billable_ms": 240000,
+            "duration_ms": 12000,
+            "rounding_ms": 228000
+          },
+          {
+            "bucket": "all",
+            "series": "catapult-test-project.yml",
+            "runs": 1,
+            "billable_ms": 60000,
+            "duration_ms": 4000,
+            "rounding_ms": 56000
+          },
+          {
+            "bucket": "all",
+            "series": "ci.yml",
+            "runs": 652,
+            "billable_ms": 89640000,
+            "duration_ms": 74791000,
+            "rounding_ms": 14849000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-agent-boundary.yml",
+            "runs": 5,
+            "billable_ms": 3240000,
+            "duration_ms": 3113000,
+            "rounding_ms": 127000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-agent-design.yml",
+            "runs": 187,
+            "billable_ms": 127560000,
+            "duration_ms": 122132000,
+            "rounding_ms": 5428000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-agent-dev.yml",
+            "runs": 97,
+            "billable_ms": 93480000,
+            "duration_ms": 90554000,
+            "rounding_ms": 2926000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-agent-reconcile.yml",
+            "runs": 63,
+            "billable_ms": 25740000,
+            "duration_ms": 23834000,
+            "rounding_ms": 1906000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-live-suite.yml",
+            "runs": 22,
+            "billable_ms": 7260000,
+            "duration_ms": 6471000,
+            "rounding_ms": 789000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-order.yml",
+            "runs": 1,
+            "billable_ms": 60000,
+            "duration_ms": 11000,
+            "rounding_ms": 49000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-preview-cleanup.yml",
+            "runs": 87,
+            "billable_ms": 10440000,
+            "duration_ms": 857000,
+            "rounding_ms": 9583000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-review-replay.yml",
+            "runs": 2,
+            "billable_ms": 5040000,
+            "duration_ms": 4110000,
+            "rounding_ms": 930000
+          },
+          {
+            "bucket": "all",
+            "series": "pipeline-sweep.yml",
+            "runs": 2753,
+            "billable_ms": 159960000,
+            "duration_ms": 57969000,
+            "rounding_ms": 101991000
+          },
+          {
+            "bucket": "all",
+            "series": "rehearse.yml",
+            "runs": 14,
+            "billable_ms": 1020000,
+            "duration_ms": 723000,
+            "rounding_ms": 297000
+          },
+          {
+            "bucket": "all",
+            "series": "verify-live.yml",
+            "runs": 5,
+            "billable_ms": 300000,
+            "duration_ms": 193000,
+            "rounding_ms": 107000
+          },
+          {
+            "bucket": "all",
+            "series": "worker-deploy.yml",
+            "runs": 17,
+            "billable_ms": 1020000,
+            "duration_ms": 426000,
+            "rounding_ms": 594000
+          }
+        ],
+        "groupedBy": "workflow"
+      }
+    },
+    {
+      "op": "/minutes?by=workflow&bucket=month",
+      "url": "https://pipeline-metronome.allen-strut.workers.dev/stats/catapult/minutes?by=workflow&bucket=month",
+      "response": {
+        "minutes": [
+          {
+            "bucket": "2026-08",
+            "series": "ci.yml",
+            "runs": 405,
+            "billable_ms": 44460000,
+            "duration_ms": 36973000,
+            "rounding_ms": 7487000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-agent-boundary.yml",
+            "runs": 4,
+            "billable_ms": 2820000,
+            "duration_ms": 2743000,
+            "rounding_ms": 77000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-agent-design.yml",
+            "runs": 89,
+            "billable_ms": 58560000,
+            "duration_ms": 55829000,
+            "rounding_ms": 2731000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-agent-dev.yml",
+            "runs": 53,
+            "billable_ms": 43500000,
+            "duration_ms": 41966000,
+            "rounding_ms": 1534000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-agent-reconcile.yml",
+            "runs": 34,
+            "billable_ms": 12360000,
+            "duration_ms": 11447000,
+            "rounding_ms": 913000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-live-suite.yml",
+            "runs": 2,
+            "billable_ms": 420000,
+            "duration_ms": 355000,
+            "rounding_ms": 65000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-order.yml",
+            "runs": 1,
+            "billable_ms": 60000,
+            "duration_ms": 11000,
+            "rounding_ms": 49000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-preview-cleanup.yml",
+            "runs": 43,
+            "billable_ms": 5160000,
+            "duration_ms": 413000,
+            "rounding_ms": 4747000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "pipeline-sweep.yml",
+            "runs": 1291,
+            "billable_ms": 72420000,
+            "duration_ms": 24454000,
+            "rounding_ms": 47966000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "rehearse.yml",
+            "runs": 10,
+            "billable_ms": 780000,
+            "duration_ms": 538000,
+            "rounding_ms": 242000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "verify-live.yml",
+            "runs": 5,
+            "billable_ms": 300000,
+            "duration_ms": 193000,
+            "rounding_ms": 107000
+          },
+          {
+            "bucket": "2026-08",
+            "series": "worker-deploy.yml",
+            "runs": 14,
+            "billable_ms": 840000,
+            "duration_ms": 344000,
+            "rounding_ms": 496000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "catapult-failures.yml",
+            "runs": 4,
+            "billable_ms": 240000,
+            "duration_ms": 12000,
+            "rounding_ms": 228000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "catapult-test-project.yml",
+            "runs": 1,
+            "billable_ms": 60000,
+            "duration_ms": 4000,
+            "rounding_ms": 56000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "ci.yml",
+            "runs": 247,
+            "billable_ms": 45180000,
+            "duration_ms": 37818000,
+            "rounding_ms": 7362000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-agent-boundary.yml",
+            "runs": 1,
+            "billable_ms": 420000,
+            "duration_ms": 370000,
+            "rounding_ms": 50000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-agent-design.yml",
+            "runs": 98,
+            "billable_ms": 69000000,
+            "duration_ms": 66303000,
+            "rounding_ms": 2697000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-agent-dev.yml",
+            "runs": 44,
+            "billable_ms": 49980000,
+            "duration_ms": 48588000,
+            "rounding_ms": 1392000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-agent-reconcile.yml",
+            "runs": 29,
+            "billable_ms": 13380000,
+            "duration_ms": 12387000,
+            "rounding_ms": 993000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-live-suite.yml",
+            "runs": 20,
+            "billable_ms": 6840000,
+            "duration_ms": 6116000,
+            "rounding_ms": 724000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-preview-cleanup.yml",
+            "runs": 44,
+            "billable_ms": 5280000,
+            "duration_ms": 444000,
+            "rounding_ms": 4836000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-review-replay.yml",
+            "runs": 2,
+            "billable_ms": 5040000,
+            "duration_ms": 4110000,
+            "rounding_ms": 930000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "pipeline-sweep.yml",
+            "runs": 1462,
+            "billable_ms": 87540000,
+            "duration_ms": 33515000,
+            "rounding_ms": 54025000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "rehearse.yml",
+            "runs": 4,
+            "billable_ms": 240000,
+            "duration_ms": 185000,
+            "rounding_ms": 55000
+          },
+          {
+            "bucket": "2026-09",
+            "series": "worker-deploy.yml",
+            "runs": 3,
+            "billable_ms": 180000,
+            "duration_ms": 82000,
+            "rounding_ms": 98000
+          }
+        ],
+        "groupedBy": "workflow"
+      }
+    }
+  ]
+}

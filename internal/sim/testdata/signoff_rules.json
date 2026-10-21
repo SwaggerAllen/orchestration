@@ -1,15 +1,6 @@
 {
-  "name": "screen mutex reverts a colliding promotion; sign-off rules hold (DESIGN 3, 6, 9)",
+  "name": "design cannot sign its own pass off, and a decisionless pass may (DESIGN 3, 9)",
   "steps": [
-    {"kind": "seed", "key": "T1", "state": "in_progress", "labels": ["screen:home"], "run": {"kind": "dev", "live": true}},
-    {"kind": "seed", "key": "T2", "state": "design_review", "labels": ["screen:home"]},
-    {"kind": "transition", "key": "T2", "to": "ready_for_dev", "actor": "author"},
-    {"kind": "sweep"},
-    {"kind": "expect", "key": "T2", "state": "design_review", "markers": {"revert": 1}},
-
-    {"kind": "run-end", "key": "T1"},
-    {"kind": "transition", "key": "T1", "to": "canceled", "actor": "author"},
-
     {"kind": "seed", "key": "T3", "state": "designing"},
     {"kind": "transition", "key": "T3", "to": "ready_for_dev", "actor": "design"},
     {"kind": "sweep"},

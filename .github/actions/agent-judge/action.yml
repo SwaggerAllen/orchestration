@@ -1,0 +1,204 @@
+# Manual test judge run (ops-free-pipeline.md §8). One test, one preview,
+# one verdict recorded as a check run.
+#
+# A composite action rather than a reusable workflow, for the reason the
+# other agent actions are: the calling job needs its own steps first — it
+# has to know the preview URL and the selected tests, and both are
+# project-specific.
+#
+# **The caller must NOT check the project out before calling this.** Every
+# other agent action takes the caller's checkout; this one refuses it and
+# makes its own, because what the judge may see is the whole point.
+name: pipeline manual test judge
+description: Judge one manual test against a running preview and record the verdict
+
+inputs:
+  test_path:
+    description: Repo-relative path of the manual test, e.g. tests/manual/queue-drains.md
+    required: true
+  test_id:
+    description: The test's id — its filename without .md. Names the check run.
+    required: true
+  sha:
+    description: The commit under judgement. The check run attaches to it.
+    required: true
+  preview_url:
+    description: The running preview the judge reads.
+    required: true
+  github_token:
+    # Described in prose rather than as an expression: an action's
+    # metadata is templated and the github context does not exist there,
+    # so an expression fails the file to load before any step runs.
+    description: >-
+      Pass the caller's github.token, and grant the job `checks: write`.
+      It must be the workflow's OWN token: no fine-grained token can be
+      granted the check-runs API at all, so an AGENT_GITHUB_TOKEN here
+      answers 403 for a reason no setting fixes.
+    required: true
+  linear_api_key:
+    description: >-
+      Optional. Present, a rule 8 disagreement is filed to Triage as a
+      `harness` finding; absent, it is recorded as a neutral check run and
+      the step says it was not filed. A skip that says so, never silence.
+    required: false
+    default: ""
+  claude_code_oauth_token:
+    description: Model credential (the subscription token)
+    required: false
+    default: ""
+  anthropic_api_key:
+    description: Model credential (fallback)
+    required: false
+    default: ""
+  pipeline_repo_token:
+    description: Read token for the pipeline repo, for the prompt and the binary
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # **The isolation, and it is mechanical rather than instructed.**
+    # §8.3 rule 4 says the judge never sees the diff, and a prompt saying
+    # so is not a guarantee — a model with the repository in front of it
+    # can read the implementation whatever it was told, and the failure
+    # mode is silent: the pass that wrote the code writing the assertion
+    # that agrees with it, which is `awaitingDispatchOf` rebuilt at a
+    # different layer.
+    #
+    # A sparse checkout of `tests/manual/**` is the guarantee. There is
+    # no implementation on disk to read, so the rule holds whether or not
+    # the model would have obeyed it.
+    #
+    # `sparse-checkout-cone-mode: false` because cone mode takes
+    # directories and would pull the whole tree above them; this needs a
+    # pattern. And the ref is the judged SHA rather than the branch, so a
+    # push landing mid-run cannot change the test under the judge.
+    - name: check out the tests, and nothing else
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.sha }}
+        sparse-checkout: |
+          tests/manual
+          pipeline.config.json
+        sparse-checkout-cone-mode: false
+
+    # **The guard on the guard, and it is a script so a test can run
+    # it.** A sparse-checkout pattern that stops matching — a renamed
+    # directory, a checkout action that changes its defaults — degrades
+    # to a full checkout, which is the one failure this action exists to
+    # prevent and the one that looks like nothing at all.
+    #
+    # Inline, the check could only be asserted by grepping this file for
+    # its own error messages, and three probes showed what that is worth:
+    # hardcoding the file count to zero disabled the entire guarantee and
+    # every assertion still passed. The script is exercised against real
+    # git trees by TestTheIsolationGuardRunsAgainstRealTrees.
+    - name: prove the checkout carries no implementation
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/assert-isolated-checkout.sh"
+
+    - name: set up the pipeline
+      uses: SwaggerAllen/orchestration/.github/actions/setup-pipeline@main
+      with:
+        pipeline_repo_token: ${{ inputs.pipeline_repo_token }}
+
+    - name: build the prompt
+      shell: bash
+      env:
+        TEST_PATH: ${{ inputs.test_path }}
+        PREVIEW_URL: ${{ inputs.preview_url }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/pipeline" "$RUNNER_TEMP/evidence"
+        {
+          cat "$GITHUB_WORKSPACE/.pipeline/prompts/judge.md"
+          echo
+          echo "## The preview"
+          echo
+          echo "The running instance is at $PREVIEW_URL. It is the change under"
+          echo "review, deployed. Nothing else about the change is available to you."
+          echo
+          echo "## Where to write"
+          echo
+          echo "- evidence: \$EVIDENCE_DIR = $RUNNER_TEMP/evidence"
+          echo "- verdict: \$VERDICT_FILE = $RUNNER_TEMP/pipeline/verdict.txt"
+          echo
+          echo "## The test"
+          echo
+          cat "$GITHUB_WORKSPACE/$TEST_PATH"
+        } > "$RUNNER_TEMP/pipeline/prompt.md"
+
+    - name: run the judge
+      uses: SwaggerAllen/orchestration/.github/actions/run-agent-model@main
+      with:
+        prompt_path: ${{ runner.temp }}/pipeline/prompt.md
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+
+    - name: upload the evidence
+      id: evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: manual-${{ inputs.test_id }}-${{ inputs.sha }}
+        path: ${{ runner.temp }}/evidence
+        # Uploaded even when empty, and the verdict step is what turns an
+        # empty upload into a failure (§8.3 rule 3). `warn` rather than
+        # `error` here on purpose: failing the upload would fail the job
+        # before the verdict is recorded, and then nothing says why.
+        if-no-files-found: warn
+
+    # Always, because a judge that died is a verdict too. Without this the
+    # run fails with no check run, and the next pass over the same commit
+    # sees no prior verdict and cannot detect a disagreement — rule 8
+    # blinded by the absence of the thing it compares against.
+    - name: record the verdict
+      if: always()
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        LINEAR_API_KEY: ${{ inputs.linear_api_key }}
+        EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+      run: |
+        set -uo pipefail
+        V="$RUNNER_TEMP/pipeline/verdict.txt"
+        # A missing verdict file is a failure with a reason, never a skip.
+        # The judge died, timed out, or wrote nowhere; all three are the
+        # same fact to a reader and none of them is a pass.
+        if [ ! -s "$V" ]; then
+          printf 'the judge wrote no verdict\n\nThe run produced no %s. It died, timed out, or wrote elsewhere.\n' "$V" \
+            > "$RUNNER_TEMP/pipeline/summary.txt"
+          VERDICT=fail
+          TITLE="the judge wrote no verdict"
+        else
+          VERDICT="$(head -n1 "$V" | tr -d '[:space:]')"
+          tail -n +2 "$V" > "$RUNNER_TEMP/pipeline/summary.txt"
+          TITLE="$(sed -n '3p' "$V" | cut -c1-120)"
+          case "$VERDICT" in
+            pass|fail) ;;
+            *)
+              # A first line that is neither word is not a verdict to
+              # guess at. Reported as a failure naming what was there,
+              # because "the judge said something unparseable" is a
+              # finding and defaulting either way would bury it.
+              printf 'the judge wrote an unreadable verdict: %q\n\n' "$VERDICT" \
+                > "$RUNNER_TEMP/pipeline/summary.txt"
+              cat "$V" >> "$RUNNER_TEMP/pipeline/summary.txt"
+              VERDICT=fail
+              TITLE="unreadable verdict from the judge"
+              ;;
+          esac
+        fi
+        [ -n "$TITLE" ] || TITLE="$VERDICT"
+        # Empty when the upload found nothing, which is what rule 3 reads
+        # as "no evidence" — so it is passed through rather than
+        # defaulted to the run's own URL.
+        pipeline manual-verdict \
+          --config "$GITHUB_WORKSPACE/pipeline.config.json" \
+          --sha "${{ inputs.sha }}" \
+          --test "${{ inputs.test_id }}" \
+          --verdict "$VERDICT" \
+          --title "$TITLE" \
+          --summary-file "$RUNNER_TEMP/pipeline/summary.txt" \
+          --evidence-url "$EVIDENCE_URL"

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -201,12 +202,20 @@ type Tracker struct {
 
 // Deploy configures post-merge deploy detection (DESIGN §13).
 type Deploy struct {
-	// Provider selects the adapter: "digitalocean" (App Platform) or
-	// "github" (GitHub Deployments — the dummy project's stand-in, which
-	// exercises the same ancestry logic; PLAN M4).
+	// Provider selects the adapter: "render" (Render's deploys API),
+	// "digitalocean" (App Platform) or "github" (GitHub Deployments — the
+	// dummy project's stand-in, which exercises the same ancestry logic;
+	// PLAN M4).
 	Provider string `json:"provider"`
-	// Endpoint is provider-specific: the full deployments API URL for
-	// digitalocean; the environment name (e.g. "production") for github.
+	// Endpoint is provider-specific: the full deploys API URL for render,
+	// the full deployments API URL for digitalocean, the environment name
+	// (e.g. "production") for github.
+	//
+	// Render pages its deploy list and defaults to 20 per page, which is
+	// only enough while the live deploy is within the last 20 attempts.
+	// Put `?limit=` on the URL for a project that redeploys faster than
+	// it merges; the adapter passes the endpoint through verbatim and
+	// does not paginate.
 	Endpoint string `json:"endpoint"`
 	// Timeout is how long a ticket may sit in Merged before the sweep
 	// moves it to Blocked (DESIGN §12).
@@ -214,10 +223,18 @@ type Deploy struct {
 }
 
 // DeployProviders are the legal Deploy.Provider values.
-var DeployProviders = []string{"digitalocean", "github"}
+var DeployProviders = []string{"render", "digitalocean", "github"}
 
 // Preview configures the static storybook export (DESIGN §4): what builds
 // it and where Cloudflare Pages serves it.
+//
+// The whole block is optional, and a project that omits it has no preview
+// — which DESIGN §4 already calls silence rather than a dead link. It is
+// being retired (PLAN §6.2, C4): design review reads the storybook from
+// the running preview instead, so nothing here is built or published by
+// the agent job. Comparison against the zero value is what makes "omitted"
+// a state, so a field added here would quietly make an empty block
+// non-empty — which is why nothing should be added to it.
 type Preview struct {
 	PagesProject string `json:"pagesProject"`
 	// BuildCommand produces the static export; OutputDir is what gets
@@ -343,12 +360,15 @@ func (c *Config) Validate() error {
 	if len(c.QualityGates) == 0 {
 		add("qualityGates: missing")
 	}
-	switch c.Deploy.Provider {
-	case "":
-		add("deploy.provider: missing (one of digitalocean, github)")
-	case "digitalocean", "github":
-	default:
-		add("deploy.provider: %q is not a provider (one of digitalocean, github)", c.Deploy.Provider)
+	// Both messages name DeployProviders rather than spelling the set out,
+	// because the two used to be three copies of one list and a value
+	// added to the var alone would have validated while the error text
+	// went on denying it existed.
+	switch {
+	case c.Deploy.Provider == "":
+		add("deploy.provider: missing (one of %s)", strings.Join(DeployProviders, ", "))
+	case !slices.Contains(DeployProviders, c.Deploy.Provider):
+		add("deploy.provider: %q is not a provider (one of %s)", c.Deploy.Provider, strings.Join(DeployProviders, ", "))
 	}
 	if c.Deploy.Endpoint == "" {
 		add("deploy.endpoint: missing")
@@ -372,14 +392,28 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Preview.PagesProject == "" {
-		add("preview.pagesProject: missing")
-	}
-	if c.Preview.BuildCommand == "" {
-		add("preview.buildCommand: missing")
-	}
-	if c.Preview.OutputDir == "" {
-		add("preview.outputDir: missing")
+	// Optional as a block, required as a whole: a project either wires the
+	// Cloudflare Pages export or it does not, and half of it publishes
+	// nowhere while looking configured.
+	//
+	// Optional is the first of the three merges that retire this block
+	// (PLAN §6.2, C4). Required unconditionally, it deadlocked: removing
+	// the block from a project fails validation here, and removing the
+	// field here makes the project's block an unknown key —
+	// DisallowUnknownFields — so each side alone is invalid. That is the
+	// protocol-state shape, and the ninety minutes it cost is recorded in
+	// CLAUDE.md. Loosening first is what gives the project a side to go
+	// first from.
+	if c.Preview != (Preview{}) {
+		if c.Preview.PagesProject == "" {
+			add("preview.pagesProject: missing")
+		}
+		if c.Preview.BuildCommand == "" {
+			add("preview.buildCommand: missing")
+		}
+		if c.Preview.OutputDir == "" {
+			add("preview.outputDir: missing")
+		}
 	}
 	if len(c.Actors) == 0 {
 		add("actors: missing")
