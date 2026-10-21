@@ -70,11 +70,13 @@ before anything writes to the new one.
 `foundation: true` and the branch head's SHA — then main's, once the
 Blueprint follows `main`.
 
-**Half done.** `srv-dbcgeet9fdbs73cp4he0` at `catapult-2uja.onrender.com`
-answered 200 with all five components ready, and `"sha":"dev"`: Render's
-build context has no `.git`. `catapult#163`'s Dockerfile now takes the
-commit from `RENDER_GIT_COMMIT` when the stamp is `dev`; the SHA half
-is done when a deploy carrying that reports a real commit.
+**Done on the branch.** `srv-dbcgeet9fdbs73cp4he0` at
+`catapult-2uja.onrender.com` answers 200 with all five components ready
+and the branch head's SHA. The first deploy said `"sha":"dev"` — Render's
+build context has no `.git` — so `catapult#163`'s Dockerfile takes the
+commit from `RENDER_GIT_COMMIT`, which the next deploy reported as
+`a40b874…` in full. What remains is main's SHA, after the merge and the
+Blueprint's switch to `main`.
 
 ### 2. The service id, and the public URL — blocks `catapult#163`
 
