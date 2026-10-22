@@ -248,19 +248,20 @@ func cmdLiveSuiteReport(args []string) error {
 	fs := flag.NewFlagSet("agent live-suite-report", flag.ContinueOnError)
 	cfgPath := fs.String("config", "pipeline.config.json", "path to the project config")
 	ticket := fs.String("ticket", "", "boundary ticket key")
-	result := fs.String("result", "", "pass or fail")
+	result := fs.String("result", "", "pass, fail or no-tests")
+	command := fs.String("command", "", "the command that ran — recorded in the marker and the comment")
 	runURL := fs.String("run-url", "", "workflow run URL")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *ticket == "" || *result == "" {
-		return fmt.Errorf("agent live-suite-report: --ticket and --result are required")
+	if *ticket == "" || *result == "" || *command == "" {
+		return fmt.Errorf("agent live-suite-report: --ticket, --result and --command are required")
 	}
 	p, _, err := agentDeps(*cfgPath)
 	if err != nil {
 		return err
 	}
-	if err := agent.LiveSuiteReport(context.Background(), p, *ticket, *result, *runURL, time.Now()); err != nil {
+	if err := agent.LiveSuiteReport(context.Background(), p, *ticket, *result, *command, *runURL, time.Now()); err != nil {
 		return err
 	}
 	fmt.Printf("live suite %s: %s\n", *ticket, *result)
