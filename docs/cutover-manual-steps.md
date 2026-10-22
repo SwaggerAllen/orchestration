@@ -208,6 +208,26 @@ a Render URL that serves the storybook; and, separately, a deliberately
 broken preview build produces the `state=failed` comment rather than
 silence.
 
+**Done, on catapult ORC-269 (PR #179), 2026-10-22, both halves unplanned:**
+
+- The preview's first two deploys failed: the dashboard-only secrets had not
+  reached the preview environment, and the app refuses to boot without them.
+  The sweep posted `[pipeline:v1:preview] state=failed` at 18:38 and nothing
+  after the second failure, so it was said once.
+- After the secrets were set, the deploy succeeded at 19:01:11, and the
+  `url=https://catapult-pr-179.onrender.com` marker landed at 19:01:19.
+  The deployment-status webhook woke the sweep within seconds, the C4 Worker
+  change working live. `/health` reported the PR head `1c48c00`, and
+  `/storybook` redirected to `/storybook/screens/board/component`, which
+  answered 200.
+
+**Still open: whether the next PR's preview gets the secrets.** Where they
+were set decides it. On the preview service alone, every new PR's preview
+fails the same way. On something previews inherit, it is fixed for good.
+Which Render mechanisms previews inherit has not been checked. The Blueprint
+schema offers only a per-variable `previewValue`, which cannot carry a secret
+that is never committed. The next design PR's preview answers it.
+
 ---
 
 ### 9b. C6: two overlapping tickets land without a label between them
