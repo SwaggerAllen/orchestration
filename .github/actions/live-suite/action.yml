@@ -138,11 +138,16 @@ runs:
       env:
         LINEAR_API_KEY: ${{ inputs.linear_api_key }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        # Through the environment, never interpolated into the script:
+        # the command is the caller's string, and an expression pasted
+        # into shell is the caller's string run as shell.
+        LIVE_COMMAND: ${{ inputs.command }}
       run: |
         pipeline agent live-suite-report \
           --config "$GITHUB_WORKSPACE/pipeline.config.json" \
           --ticket "${{ inputs.ticket }}" \
           --result "${{ steps.verdict.outputs.result }}" \
+          --command "$LIVE_COMMAND" \
           --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
     # The job's own status mirrors the suite so the run is red in the

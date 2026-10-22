@@ -17,10 +17,21 @@ import (
 // verdict — programmatic comments come from the harness, never composed
 // by a model (§9) — and the marker is what stops the sweep dispatching
 // the suite again this milestone.
-func LiveSuiteReport(ctx context.Context, p *plane.Plane, ticketKey, result, runURL string, now time.Time) error {
+//
+// The command that ran is part of the report, required, and in both the
+// marker and the prose. A project's live-suite workflow can run more
+// than one suite — Catapult's runs the boundary suite or its Phase 5
+// proof from one dispatch form — and the verdict alone cannot say which:
+// a proof run fired against the boundary ticket posted `result=pass`
+// indistinguishable from the boundary suite's own, and only the run's
+// job summary recorded what had actually executed.
+func LiveSuiteReport(ctx context.Context, p *plane.Plane, ticketKey, result, command, runURL string, now time.Time) error {
 	if !protocol.Known(protocol.LiveSuiteResults, result) {
 		return fmt.Errorf("live-suite report: result must be one of %s, got %q",
 			strings.Join(protocol.LiveSuiteResults, ", "), result)
+	}
+	if strings.TrimSpace(command) == "" {
+		return fmt.Errorf("live-suite report: the command that ran is required — a verdict that cannot say what produced it is the ambiguity this field exists to end")
 	}
 	snap, err := p.Build(ctx, now, false)
 	if err != nil {
@@ -39,13 +50,15 @@ func LiveSuiteReport(ctx context.Context, p *plane.Plane, ticketKey, result, run
 		return fmt.Errorf("live-suite report: %s is not a boundary ticket — the live suite reports only there (DESIGN §10)", ticketKey)
 	}
 	m := marker.Marker{Kind: marker.LiveSuite, Fields: map[string]string{
-		"result": result,
-		"run":    runURL,
+		"result":  result,
+		"command": command,
+		"run":     runURL,
 	}}
-	prose := "Live suite passed. The once-per-milestone end-to-end check is green."
+	ran := fmt.Sprintf("Ran `%s`.", command)
+	prose := "Live suite passed. The once-per-milestone end-to-end check is green. " + ran
 	switch result {
 	case "fail":
-		prose = "Live suite FAILED. Read the linked run; anything real becomes a blocker filed against this milestone and marked blocking this ticket (DESIGN §10)."
+		prose = "Live suite FAILED. " + ran + " Read the linked run; anything real becomes a blocker filed against this milestone and marked blocking this ticket (DESIGN §10)."
 	case "no-tests":
 		// Neither verdict, and saying so is the whole point. A project
 		// with no live tests exits the runner non-zero — an `--only`
@@ -58,7 +71,7 @@ func LiveSuiteReport(ctx context.Context, p *plane.Plane, ticketKey, result, run
 		// was checked, and "a live check that never runs is how merged
 		// and green quietly diverges from works against the world"
 		// (DESIGN §10) is the reason this gate exists at all.
-		prose = "Live suite ran NO tests — this project has none tagged for it yet, so nothing was checked against the real world.\n\nNot a failure and not a pass: no live coverage existed to run. The author's pass decides whether this milestone can close without it (DESIGN §10). Writing the first one is ordinary ticket work."
+		prose = "Live suite ran NO tests — this project has none tagged for it yet, so nothing was checked against the real world. " + ran + "\n\nNot a failure and not a pass: no live coverage existed to run. The author's pass decides whether this milestone can close without it (DESIGN §10). Writing the first one is ordinary ticket work."
 	}
 	return p.CommentTicket(ctx, t.ID, m.Comment(prose))
 }

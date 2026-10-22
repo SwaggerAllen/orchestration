@@ -48,16 +48,22 @@ exercised against the real primitive.
 ## Deploy
 
 The `worker-deploy` workflow, on any push to `main` touching this
-directory or on demand from the Actions tab. It uploads
-`DISPATCH_TOKEN` from the repo secret as part of the deploy, so there
-is one value to change rather than two that can disagree.
+directory or on demand from the Actions tab. **It uploads no secrets.**
+This Worker has Worker Versions enabled, under which a deploy's secret
+upload is refused (Cloudflare error 10215), so `DISPATCH_TOKEN`,
+`LINEAR_WEBHOOK_SECRET` and `WEBHOOK_SECRET` are set in the Cloudflare
+dashboard (`pipeline-metronome` → Settings → Variables and Secrets) and
+carry forward to every version. The repo secrets of the same names are
+reference copies the deploy lints; re-running it changes nothing on the
+Worker. A rotated token that went into the repo secret alone leaves the
+metronome dispatching with the old one — every beat 401s, and the only
+record is a `console.error` in the Worker's logs.
 
 By hand, when you have a laptop and wrangler auth:
 
 ```sh
 cd worker
-npx wrangler deploy
-npx wrangler secret put DISPATCH_TOKEN   # only needed on this path
+npx wrangler deploy                      # secrets stay the dashboard's
 ```
 
 ## One Worker, several projects

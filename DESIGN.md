@@ -1732,6 +1732,13 @@ signal that was missing.
    non-deterministic check, once per milestone. The run posts a result marker on the ticket;
    the author's pass reads it, and a failure becomes a blocker like any finding of the pass.
 
+   **The marker names the command that ran**, as a `command` field and in the comment's prose,
+   and a report without one is refused. One workflow can run more than one suite — Catapult's
+   dispatch form picks its boundary suite or its Phase 5 proof — and a bare `result=pass`
+   cannot say which: a proof run fired against the boundary ticket read exactly as the
+   boundary suite's own pass, with only the run's job summary recording what had executed.
+   The gate does not read the field; the author does.
+
    **The same workflow runs detached, with no ticket, and then is not part of this protocol.**
    The ticket input is optional: given one, everything above holds; given none, the suite runs,
    the job's status carries `pass`/`fail` as usual, the verdict goes to the run's job summary,

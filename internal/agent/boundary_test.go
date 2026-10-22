@@ -402,10 +402,10 @@ func TestLiveSuiteReportsNoTestsAsItsOwnOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := LiveSuiteReport(ctx, p, boundary.Key, "no-tests", "https://gh/run/1", now); err != nil {
+	if err := LiveSuiteReport(ctx, p, boundary.Key, "no-tests", "mix test --only live", "https://gh/run/1", now); err != nil {
 		t.Fatalf("no-tests is a legal outcome and was refused: %v", err)
 	}
-	if err := LiveSuiteReport(ctx, p, boundary.Key, "inconclusive", "https://gh/run/1", now); err == nil {
+	if err := LiveSuiteReport(ctx, p, boundary.Key, "inconclusive", "mix test --only live", "https://gh/run/1", now); err == nil {
 		t.Error("an unknown result was accepted; the marker's vocabulary is its contract")
 	}
 
@@ -439,6 +439,73 @@ func TestLiveSuiteReportsNoTestsAsItsOwnOutcome(t *testing.T) {
 	}
 	if strings.Contains(body, "FAILED") {
 		t.Errorf("no-tests reads as a failure, which is the thing that trains the signal into noise:\n%s", body)
+	}
+}
+
+// The command that ran is in every verdict, marker and prose both.
+//
+// One workflow can run more than one suite — Catapult's dispatch form
+// picks the boundary suite or its Phase 5 proof — and before this the
+// verdict could not say which: a proof run fired against a boundary
+// ticket posted `result=pass` exactly as the boundary suite would have.
+// So the field is asserted for every result, not only the one a reader
+// happens to check, and an empty command is refused rather than posted.
+func TestLiveSuiteReportSaysWhichCommandRan(t *testing.T) {
+	ctx := context.Background()
+	tr, _, cfg, p := world(t)
+	now := time.Now()
+
+	boundary, err := tr.CreateIssue(ctx, tracker.NewIssue{
+		TeamID: cfg.Tracker.TeamID, ProjectID: cfg.Tracker.ProjectID,
+		Title: "Milestone boundary — M: alpha", Description: "machinery",
+		StateID: stateID(t, tr, cfg, protocol.InProgress),
+		Labels:  []string{"milestone-boundary"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, blank := range []string{"", "   "} {
+		if err := LiveSuiteReport(ctx, p, boundary.Key, "pass", blank, "https://gh/run/0", now); err == nil {
+			t.Errorf("a report with command %q was accepted; a verdict that cannot name what produced it is the ambiguity this exists to end", blank)
+		}
+	}
+
+	const cmd = "mix test --only live_todo_app_proof"
+	results := []string{"pass", "fail", "no-tests"}
+	for _, r := range results {
+		if err := LiveSuiteReport(ctx, p, boundary.Key, r, cmd, "https://gh/run/1", now); err != nil {
+			t.Fatalf("%s: %v", r, err)
+		}
+	}
+
+	issues, err := tr.ListIssues(ctx, cfg.Tracker.TeamID, cfg.Tracker.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	for _, i := range issues {
+		if i.ID != boundary.ID {
+			continue
+		}
+		for _, c := range i.Comments {
+			m, ok, err := marker.Parse(c.Body)
+			if err != nil || !ok || m.Kind != marker.LiveSuite {
+				continue
+			}
+			seen = append(seen, m.Fields["result"])
+			if got := m.Fields["command"]; got != cmd {
+				t.Errorf("%s: marker command = %q, want %q", m.Fields["result"], got, cmd)
+			}
+			if !strings.Contains(c.Body, "`"+cmd+"`") {
+				t.Errorf("%s: the comment does not name the command a reader would need to tell one suite's verdict from another's:\n%s", m.Fields["result"], c.Body)
+			}
+		}
+	}
+	// Positive half: three reports went in, three markers came out, so
+	// the checks above ran against something rather than nothing.
+	if strings.Join(seen, ",") != strings.Join(results, ",") {
+		t.Fatalf("live-suite markers on the ticket = %v, want %v (the blank-command reports must have posted nothing)", seen, results)
 	}
 }
 

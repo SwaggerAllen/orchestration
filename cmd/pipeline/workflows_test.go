@@ -605,6 +605,39 @@ func TestTheStubsDetachedRunNameCannotCorrelate(t *testing.T) {
 	}
 }
 
+// The live suite's report names the command that ran, and gets it
+// through the environment.
+//
+// The binary refuses a report without it, so a step that stopped
+// passing it would fail every boundary's report — loudly, but only at a
+// milestone boundary, which is the one moment nobody wants to debug the
+// harness. And through the environment because the command is the
+// caller's string: pasted into the script as an expression it would be
+// run as shell.
+func TestTheLiveSuiteActionReportsTheCommandThroughTheEnvironment(t *testing.T) {
+	body := stripComments(repoFile(t, filepath.Join(".github", "actions", "live-suite", "action.yml")))
+	i := strings.Index(body, "- name: report\n")
+	if i < 0 {
+		t.Fatal("no `- name: report` step in the live-suite action — renamed, or this test is reading the wrong file")
+	}
+	step := body[i+len("- name: report\n"):]
+	if j := strings.Index(step, "\n    - name:"); j >= 0 {
+		step = step[:j]
+	}
+	if !strings.Contains(step, "pipeline agent live-suite-report") {
+		t.Fatal("the report step no longer calls live-suite-report, so this test checks nothing")
+	}
+	if !strings.Contains(step, "LIVE_COMMAND: ${{ inputs.command }}") {
+		t.Error("the report step does not put inputs.command in its environment as LIVE_COMMAND")
+	}
+	if !strings.Contains(step, `--command "$LIVE_COMMAND"`) {
+		t.Error("the report step does not pass --command \"$LIVE_COMMAND\"; the binary refuses a report without it")
+	}
+	if strings.Contains(step, "--command \"${{") {
+		t.Error("the report step interpolates the command into the script; it must go through the environment")
+	}
+}
+
 // The record review runs as a second model pass inside the design job
 // (DESIGN §4), and the shape of that step is what keeps it a proposal
 // rather than a gate: through the shared runner, continue-on-error, and
