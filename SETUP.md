@@ -443,16 +443,24 @@ One Worker serves every project: `PROJECTS` in `worker/wrangler.toml`
 is a JSON array of `{repository, workflow, ref}`, one entry per project
 repo, and one cron fires them all.
 
-**Deployed from this repo, not from a laptop.** Three secrets here
-(Settings → Secrets and variables → Actions), then Actions →
-**worker-deploy** → Run workflow:
+**Deployed from this repo, not from a laptop.** The secrets below go
+here (Settings → Secrets and variables → Actions), then Actions →
+**worker-deploy** → Run workflow. **The deploy uploads none of them.**
+The Worker has Worker Versions enabled, under which a deploy's secret
+upload is refused (Cloudflare error 10215), so the Worker's own copies
+of `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET` and `WEBHOOK_SECRET` are
+set once in the Cloudflare dashboard (Workers → `pipeline-metronome` →
+Settings → Variables and Secrets) and carry forward to every version.
+The copies here are reference values the deploy lints for blankness
+and stray whitespace, so changing a secret means changing it in both
+places — re-running the deploy changes nothing on the Worker.
 
 | Secret | What |
 | --- | --- |
 | `CLOUDFLARE_WORKERS_TOKEN` | A **second** Cloudflare token, from the *Edit Cloudflare Workers* template. Deliberately not the project repos' `CLOUDFLARE_API_TOKEN`, which edits Pages and nothing else — so no project repo can redeploy the control plane's metronome. |
 | `CLOUDFLARE_ACCOUNT_ID` | Same account id as everywhere else. |
-| `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The deploy uploads it as the Worker's secret, so it is never typed into a `wrangler secret put` prompt and cannot drift from the value here. |
-| `LINEAR_WEBHOOK_SECRET` | Linear's signing secret, from the webhook you create below. Set a placeholder for the first deploy — you need the Worker's URL before Linear will give you the real one — then update it and re-run. |
+| `DISPATCH_TOKEN` | The step-2 GitHub token with Actions read+write on every repo in `PROJECTS`. The Worker's copy is the dashboard's; this one is the reference the deploy lints. |
+| `LINEAR_WEBHOOK_SECRET` | Linear's signing secret, from the webhook you create below. Set a placeholder for the first deploy — you need the Worker's URL before Linear will give you the real one — then put the real value here and on the Worker in the dashboard. |
 | `WEBHOOK_SECRET` | The secret you set on the GitHub webhooks below. You choose this one rather than being given it, so it can go in before the first deploy. Not `GITHUB_WEBHOOK_SECRET`: Actions reserves the `GITHUB_` prefix for secret names and refuses to create one, the same reason `DISPATCH_TOKEN` is unprefixed. |
 
 After that it is automatic: any push to `main` touching `worker/`
@@ -461,9 +469,8 @@ deploy but a forgotten one. Adding a project to `PROJECTS` without
 redeploying leaves that repo with no beat, and nothing reports it; the
 sweep simply never runs.
 
-From a laptop, `cd worker && npx wrangler deploy` does the same thing —
-but then `DISPATCH_TOKEN` has to be set separately with
-`npx wrangler secret put DISPATCH_TOKEN`.
+From a laptop, `cd worker && npx wrangler deploy` does the same thing,
+and like the workflow it sets no secrets: they are the dashboard's.
 
 **Then create the Linear webhook**, which is what makes the pipeline
 respond in seconds rather than on the hour:
@@ -982,9 +989,9 @@ audience is what keeps a token minted elsewhere in the account out.
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
 | project repo Actions secrets | the dummy repo's set, plus `PIPELINE_STATE_TOKEN` and — with step 9 wired — `STATS_GITHUB_TOKEN` |
 | pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
-| Cloudflare Worker secret | `DISPATCH_TOKEN` — uploaded by the deploy, not set by hand |
+| Cloudflare Worker secrets | `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `STATE_TOKEN` — all four set on the Worker by hand (the first three in the dashboard, step 7; `STATE_TOKEN` per the move record, below). Every deploy carries them forward; none uploads them |
 
 The two Cloudflare tokens are separate on purpose: project repos can
 edit Pages and nothing else, and only this repo can deploy the
-metronome. `DISPATCH_TOKEN` sits here as a repo secret because the
-deploy pushes it into the Worker.
+metronome. `DISPATCH_TOKEN` sits here as a repo secret only as the
+reference copy the deploy lints; the Worker reads the dashboard's.
