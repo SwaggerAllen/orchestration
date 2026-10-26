@@ -20,7 +20,17 @@ import (
 // nothing else about the language.
 //
 // "Named in the issue" is a case-insensitive search of the ticket's
-// description and comments for the file's base name. That is a weak
+// description and comments for the file's component name: the base name
+// up to its first dot, the directory's name for an `index` file, and
+// nothing at all for a story, test, spec or style file, which arrive
+// beside a component rather than being one (componentName). The first
+// version searched for the base name with its last extension stripped,
+// which is the same thing for Phoenix's `footer.ex` and was measured
+// wrong the day a React project declared `client/src/components/**`:
+// `Swatch.stories.tsx` became "Swatch.stories", `Swatch.test.tsx`
+// "Swatch.test", a design system's `Button/index.tsx` "index", and
+// every one was reported as an unannounced component the ticket could
+// only have satisfied by naming file suffixes. That is a weak
 // check by construction and is meant to be: it cannot tell an argument
 // from a mention, and it is not trying to. It closes the specific hole
 // §9 describes — a component arriving with nobody having said it would
@@ -48,7 +58,7 @@ func ClassAudit(componentGlobs, added []string, ticketText string) []string {
 		if !matchesAny(componentGlobs, path) {
 			continue
 		}
-		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		name := componentName(path)
 		if name == "" || strings.Contains(haystack, strings.ToLower(name)) {
 			continue
 		}
@@ -57,6 +67,45 @@ func ClassAudit(componentGlobs, added []string, ticketText string) []string {
 			path, name))
 	}
 	return out
+}
+
+// componentName is the name a ticket has to carry for `path` to count
+// as announced, or "" when the file is not a component arriving.
+//
+// Up to the first dot rather than minus the last extension, because a
+// client file carries qualifiers as dots (`Footer.stories.tsx`,
+// `Footer.module.css`) and the component they belong to is the first
+// word. `index` names its directory, which is how a design system lays a
+// component out (`Button/index.tsx`). A qualifier in the set below marks
+// a file that arrives beside a component, in either naming convention
+// (`Footer.test.tsx`, `footer_test.exs`); the component itself is still
+// on the list, so the announcement is checked once, on the one file that
+// is the decision.
+func componentName(path string) string {
+	base := filepath.Base(path)
+	parts := strings.Split(base, ".")
+	name := parts[0]
+	for _, q := range parts[1:] {
+		if companion[strings.ToLower(q)] {
+			return ""
+		}
+	}
+	for _, suffix := range []string{"_test", "_spec", "_story"} {
+		if strings.HasSuffix(strings.ToLower(name), suffix) {
+			return ""
+		}
+	}
+	if strings.ToLower(name) == "index" {
+		name = filepath.Base(filepath.Dir(path))
+	}
+	return name
+}
+
+// companion marks the dot-qualifiers of files that arrive beside a
+// component and are not one: its stories, its tests, its stylesheet.
+var companion = map[string]bool{
+	"stories": true, "story": true, "test": true, "spec": true, "module": true,
+	"css": true, "scss": true, "less": true,
 }
 
 func matchesAny(globs []string, path string) bool {
