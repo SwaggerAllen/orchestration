@@ -84,8 +84,12 @@ never committed.
 - **A new component module or theme token is a decision, not a port**
   (DESIGN §2.8). If the design needs one the issue didn't name, say so
   in as many words in your summary. CI enforces this for components: a
-  file added under the project's component paths whose name appears
-  nowhere in the ticket or its comments fails the build. Theme tokens
+  file added under the project's component paths whose component name
+  (its base name up to the first dot; an `index` file is named by its
+  directory; stories, tests and styles beside a component are not one)
+  appears nowhere in the ticket or its comments fails the build. Name
+  the component, not the file: "a new Footer component" announces
+  `Footer.tsx` and `footer.ex` alike. Theme tokens
   are on your word alone — no project defines a theme file the audit
   could read yet — so an unannounced one costs the author the review
   that would have caught it.

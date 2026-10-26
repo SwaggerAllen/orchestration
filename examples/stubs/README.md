@@ -31,7 +31,10 @@ database CI provides, and a live suite could not start because nothing
 had installed dependencies. The second is the sharper one — a suite that
 aborts before loading a test reports a red `fail`, not the honest
 `no-tests`, so a project's first `:live` test appears to have broken the
-build it was written to fix.
+build it was written to fix. The environment is every language the
+gates run, not the one the core is written in: a project with a client
+installs Node beside the BEAM (the stubs carry the step, commented), or
+the client's gate lines fail at the first `npm`.
 
 A project also needs:
 

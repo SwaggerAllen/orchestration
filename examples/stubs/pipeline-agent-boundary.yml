@@ -79,6 +79,14 @@ jobs:
         with:
           elixir-version: "1.16"
           otp-version: "26"
+      # A project with a client beside the BEAM installs Node here too,
+      # from the same pin file its ci.yml reads, or the client's gate
+      # lines fail at the first `npm` with the toolchain otherwise
+      # correct — the same "toolchain only" misreading as the two runs
+      # above, one language over.
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version-file: .tool-versions
       - run: mix deps.get
       # ------------------------------------------------------------------
 

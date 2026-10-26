@@ -63,3 +63,63 @@ func TestClassAuditMatchesNameCaseInsensitively(t *testing.T) {
 		t.Errorf("case-different mention treated as unannounced: %v", got)
 	}
 }
+
+// The React layout, measured on Oneiroi's `client/src/components/**`
+// and its design system: the component is the first word of the base
+// name, `index` names its directory, and the files beside a component
+// are not components. Before componentName every file here but the
+// first two was reported, each as a name no ticket could reasonably
+// carry ("button.stories", "index", "button.module").
+func TestClassAuditReadsReactComponentNames(t *testing.T) {
+	globs := []string{"client/src/components/**"}
+	announced := "Decisions named rather than ported: a new Button component, so the approval bar has a primary action."
+	added := []string{
+		"client/src/components/Button.tsx",
+		"client/src/components/Button/index.tsx",
+		"client/src/components/Button/Button.stories.tsx",
+		"client/src/components/Button/Button.test.tsx",
+		"client/src/components/Button/Button.module.css",
+		"client/src/components/Button/button.css",
+	}
+	if got := ClassAudit(globs, added, announced); len(got) != 0 {
+		t.Errorf("announced React component flagged: %v", got)
+	}
+	unannounced := ClassAudit(globs, added, "nothing named here")
+	if len(unannounced) != 2 {
+		t.Fatalf("violations = %v, want the two component files and none of their companions", unannounced)
+	}
+	for _, v := range unannounced {
+		if !strings.Contains(v, "\"Button\"") {
+			t.Errorf("violation %q does not name the component Button", v)
+		}
+	}
+}
+
+// The Phoenix layout keeps working under the same rule: a test or a
+// story beside a component is a companion in either naming convention.
+func TestClassAuditTreatsElixirCompanionsAsNotComponents(t *testing.T) {
+	added := []string{
+		"lib/app_web/components/footer_test.exs",
+		"lib/app_web/components/footer.story.exs",
+	}
+	if got := ClassAudit(componentGlobs, added, "nothing named here"); len(got) != 0 {
+		t.Errorf("companions flagged as components: %v", got)
+	}
+}
+
+func TestComponentName(t *testing.T) {
+	cases := map[string]string{
+		"lib/app_web/components/footer.ex":                "footer",
+		"client/src/components/Footer.tsx":                "Footer",
+		"client/src/components/Footer/index.tsx":          "Footer",
+		"client/src/components/Footer/Footer.stories.tsx": "",
+		"client/src/components/Footer/Footer.test.tsx":    "",
+		"client/src/components/Footer/Footer.module.css":  "",
+		"lib/app_web/components/footer_test.exs":          "",
+	}
+	for path, want := range cases {
+		if got := componentName(path); got != want {
+			t.Errorf("componentName(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

@@ -21,10 +21,13 @@ and iterate at different speeds, so they are separate agents. Everything hard ab
 follows from the handover: what passes between them, who is allowed to write what, and how
 two pieces of in-flight work avoid overwriting each other.
 
-**Assumed stack.** Phoenix / LiveView with daisyUI; `phoenix_storybook` for component
-variations; Linear as the tracker; GitHub for code and automation; Cloudflare for the
-scheduler and branch previews (§13, §4); a deploy platform with a deployments API and
-auto-deploy on push to main. One environment — main is production.
+**Assumed stack.** A component form with a storybook beside it: Phoenix / LiveView with
+daisyUI and `phoenix_storybook`, or React with Storybook and CSF stories — the two forms §4's
+artifact list names, and the only things the protocol asks of a client stack are that a
+component can be rendered stateless and that a state is one named story variation; Linear as
+the tracker; GitHub for code and automation; Cloudflare for the scheduler and branch previews
+(§13, §4); a deploy platform with a deployments API and auto-deploy on push to main. One
+environment — main is production.
 
 The deploy platform is named by `deploy.provider` rather than assumed, because the only
 thing §13's detection needs of it is a list of deployments carrying a commit and a status.
@@ -305,13 +308,18 @@ looks like housekeeping.
 Per screen, in the project repo:
 
 <!-- pipeline:list id=design-artifacts -->
-- **A stateless function component** — presentational, hardcoded assigns, daisyUI classes. No
-  socket, no live data.
-- **A `.story.exs`** with one variation per state, each carrying its description. A state name
-  IS a storybook variation name — name it as one (`cap_reached`, not "the cap-reached state").
+- **A stateless component, in the project's component form** — presentational, with its data
+  hardcoded: a Phoenix function component with fixed assigns and daisyUI classes, or a React
+  function component with fixed props on the project's design-system components. No socket,
+  no live data, no fetch. The form is whatever the project's `componentPaths` already hold;
+  a pass does not introduce the other one.
+- **A story file with one variation per state**, each carrying its description: a
+  `.story.exs` for `phoenix_storybook`, or a CSF `.stories.tsx` for Storybook. A state name IS
+  a storybook variation name — name it as one (`cap_reached`, not "the cap-reached state"),
+  and in CSF that is the exported story's name.
 - **A narrative doc** (`screens/<name>.md`) for rules, standing decisions and the argument,
   with **no state sections at all**, and a front-matter **file map** naming the screen's
-  component module and story file — the map is what lets CI audit per screen rather than per
+  component and story files — the map is what lets CI audit per screen rather than per
   "some design path" (§9). The state list lives in exactly one place, the stories, so nothing
   can drift.
 <!-- /pipeline:list -->
@@ -325,13 +333,16 @@ pinning test is needed to hold two files in agreement.
 **A state name is a storybook variation name.** Name it as one (`cap_reached`, not "the
 cap-reached state"), because renaming it after implementation is two files and a test.
 
-**Design iterates in a scratch HTML artifact** (Tailwind + daisyUI via CDN) for speed, then
-transcribes to `.heex` once signed off. The class strings are identical, so transcription is
+**Design iterates in a scratch HTML artifact** (Tailwind + daisyUI via CDN, or the design
+system's tokens inlined) for speed, then transcribes to the component form once signed off —
+`.heex` or `.tsx`. The class strings and the tokens are identical, so transcription is
 mechanical. The HTML is never committed.
 
-**Review is a static storybook export.** CI boots the app, crawls the story routes, and
-publishes HTML plus assets per branch. This works only because design artifacts are stateless
-— no socket required. The interactive playground is lost; the visual review is not.
+**Review is a static storybook export.** The project's storybook build (`mix storybook.export`
+for `phoenix_storybook`; `storybook build` for Storybook) is published per branch, or served
+by the branch's preview environment where the platform builds one. This works only because
+design artifacts are stateless — no socket, no fetch. The interactive playground is lost; the
+visual review is not.
 
 ### Architecture in the repo, and the sketch
 
@@ -1547,8 +1558,13 @@ all, so each rule is deliberately assigned: enforced, verified on pickup, or lef
 - **a new component module or theme token not named in the issue fails the build** — the class
   audit, promoted from convention to enforcement, so a proposed component cannot arrive
   unannounced inside an artifact. Components are enforced: a file added under the project's
-  `componentPaths` whose base name appears nowhere in the ticket's title, description or
-  comments fails. **Theme tokens are not**, deliberately — a token is a key in a theme
+  `componentPaths` whose component name appears nowhere in the ticket's title, description or
+  comments fails. The component name is the file's base name up to its first dot
+  (`footer.ex`, `Footer.tsx`, `Footer.module.css` all name `footer`), an `index` file is named
+  by its directory (`Footer/index.tsx`), and a story, test or spec file arriving beside a
+  component (`Footer.stories.tsx`, `footer_test.exs`) is not a component arriving — the
+  component is, and it is the one thing the ticket has to name. **Theme tokens are not**,
+  deliberately — a token is a key in a theme
   configuration, no project the pipeline drives has one, and a grammar invented against no real
   file is a check that asserts its author's guess. That half stays convention until there is a
   theme file to read, and the audit prints which halves it did not run rather than reporting a
