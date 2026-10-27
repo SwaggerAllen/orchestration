@@ -387,3 +387,64 @@ func TestAShorthandRejectsBothPathAndUnchecked(t *testing.T) {
 		t.Errorf("want a contradiction complaint, got %v", err)
 	}
 }
+
+// A `${NAME}` in the file is the environment variable's value by the time
+// the config is decoded: the state URL and the tracker ids are the values a
+// public repository keeps out of its tree.
+func TestLoadExpandsEnvironmentReferences(t *testing.T) {
+	t.Setenv("PIPELINE_STATE_URL", "https://pipeline-metronome.example.workers.dev")
+	t.Setenv("LINEAR_PROJECT_ID", "project_from_env")
+	m := sampleAsMap(t)
+	m["state"] = map[string]any{"url": "${PIPELINE_STATE_URL}", "project": "sample"}
+	m["tracker"] = map[string]any{"teamId": "team_sample", "projectId": "${LINEAR_PROJECT_ID}"}
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State.URL != "https://pipeline-metronome.example.workers.dev" {
+		t.Errorf("state.url = %q", c.State.URL)
+	}
+	if c.Tracker.ProjectID != "project_from_env" {
+		t.Errorf("tracker.projectId = %q", c.Tracker.ProjectID)
+	}
+}
+
+// Unset and empty are the same failure, and both name the variable: a
+// workflow hands an uncreated repository variable over as "", and a config
+// that loaded it would fail later, at the tracker, about a project that
+// does not exist.
+func TestLoadRefusesAnUnsetOrEmptyEnvironmentReference(t *testing.T) {
+	t.Setenv("LINEAR_PROJECT_ID", "")
+	os.Unsetenv("PIPELINE_STATE_URL_FOR_THIS_TEST")
+	m := sampleAsMap(t)
+	m["state"] = map[string]any{"url": "${PIPELINE_STATE_URL_FOR_THIS_TEST}", "project": "sample"}
+	m["tracker"] = map[string]any{"teamId": "team_sample", "projectId": "${LINEAR_PROJECT_ID}"}
+	_, err := Load(writeConfig(t, m))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, name := range []string{"LINEAR_PROJECT_ID", "PIPELINE_STATE_URL_FOR_THIS_TEST"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error does not name %s: %v", name, err)
+		}
+	}
+}
+
+// A value with a quote in it stays inside its string literal, and a bare
+// `$NAME` is not a reference.
+func TestEnvironmentReferencesAreEscapedAndBracesOnly(t *testing.T) {
+	t.Setenv("QUOTED", `a "quoted" value`)
+	m := sampleAsMap(t)
+	m["state"] = map[string]any{"url": "https://example.invalid", "project": "${QUOTED}"}
+	m["citationShorthands"] = map[string]any{"v5": map[string]any{"unchecked": "costs $NAME and $UNSET_FOR_THIS_TEST"}}
+	c, err := Load(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State.Project != `a "quoted" value` {
+		t.Errorf("state.project = %q", c.State.Project)
+	}
+	if got := c.CitationShorthands["v5"].Unchecked; got != "costs $NAME and $UNSET_FOR_THIS_TEST" {
+		t.Errorf("unchecked = %q", got)
+	}
+}

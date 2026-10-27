@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -275,6 +276,10 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	raw, err = expandEnvReferences(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var c Config
@@ -478,6 +483,51 @@ func (c *Config) StateName(s protocol.State) string {
 		panic(fmt.Sprintf("config: no mapping for protocol state %q", s))
 	}
 	return name
+}
+
+// envReference is the one form a config value may take from the
+// environment: `${NAME}`, braces required. A bare `$NAME` is left alone,
+// so a literal dollar in a gate command or a shorthand's prose is not a
+// reference by accident.
+var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnvReferences replaces every `${NAME}` in the config's text with
+// the value of that environment variable, JSON-escaped, before the file
+// is decoded. It exists so a public project repository can commit its
+// config without the values that identify the author's accounts in it:
+// the metronome Worker's origin carries the Cloudflare account's
+// subdomain, and the tracker's team, project and actor ids are the
+// author's Linear workspace. Those move to the project's Actions
+// variables and the config names them.
+//
+// A reference to a variable that is unset, or set to "", is an error
+// naming it, never an empty string: a workflow reads `${{ vars.X }}` as
+// "" when the variable was never created, and a config that decoded that
+// into tracker.projectId would pass the non-empty validation on the
+// literal `${LINEAR_PROJECT_ID}` of an older binary, or fail at the first
+// tracker call with a message about a project that does not exist. Both
+// are a quieter failure than refusing to load.
+func expandEnvReferences(raw []byte) ([]byte, error) {
+	var missing []string
+	out := envReference.ReplaceAllFunc(raw, func(ref []byte) []byte {
+		name := string(envReference.FindSubmatch(ref)[1])
+		value, ok := os.LookupEnv(name)
+		if !ok || value == "" {
+			missing = append(missing, name)
+			return ref
+		}
+		// Marshal as a JSON string and drop the quotes: the reference
+		// sits inside a string literal, and a value with a quote or a
+		// backslash in it must not end the literal early.
+		quoted, _ := json.Marshal(value)
+		return quoted[1 : len(quoted)-1]
+	})
+	if len(missing) > 0 {
+		slices.Sort(missing)
+		missing = slices.Compact(missing)
+		return nil, fmt.Errorf("environment variables referenced by the config are not set: %s", strings.Join(missing, ", "))
+	}
+	return out, nil
 }
 
 // StateStore addresses the ProjectState Durable Object in the metronome
