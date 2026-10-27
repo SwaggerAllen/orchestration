@@ -46,7 +46,7 @@ func cmdReasons(args []string) error {
 		}
 		queries = append(queries, query{prefix, name, id})
 	}
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.LoadUnresolved(*cfgPath)
 	if err != nil {
 		return err
 	}

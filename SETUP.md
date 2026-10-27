@@ -638,10 +638,18 @@ to each `pipeline.config.json`:
 
 ```json
 "state": {
-  "url": "https://pipeline-metronome.<your-subdomain>.workers.dev",
+  "url": "${PIPELINE_STATE_URL}",
   "project": "<a stable name for this project>"
 }
 ```
+
+with `PIPELINE_STATE_URL` set to
+`https://pipeline-metronome.<your-subdomain>.workers.dev` as an Actions
+variable on the project repo (Settings → Secrets and variables →
+Actions → Variables). A `${NAME}` in the config is read from the
+environment when it loads (DESIGN §5), which keeps the subdomain out of
+a public repository's tree; the stubs hand the variables over, and a
+reference to a variable that is unset fails the load naming it.
 
 Two projects sharing that name share a row per ticket id, so pick it
 deliberately — the repository name is the obvious choice.
@@ -752,7 +760,9 @@ step 5 already covered them.
    ordered however suits the project.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
-   `teamId`), its own `designOwnedPaths`, `componentPaths`, gates,
+   `teamId`) — as `${LINEAR_PROJECT_ID}` and `${LINEAR_TEAM_ID}` read
+   from the repo's Actions variables when the repo is public, with the
+   `actors` ids the same way — its own `designOwnedPaths`, `componentPaths`, gates,
    deploy provider (`render` for a Render service, `digitalocean` for a
    real DO app) and preview
    project.

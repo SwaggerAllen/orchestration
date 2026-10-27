@@ -43,7 +43,7 @@ func cmdSchema(args []string) error {
 		return fmt.Errorf("schema: %q is not a doc name — the form is chain, or dsl:chain", fs.Arg(0))
 	}
 	if *root == "" {
-		cfg, err := config.Load(*cfgPath)
+		cfg, err := config.LoadUnresolved(*cfgPath)
 		if err != nil {
 			return err
 		}

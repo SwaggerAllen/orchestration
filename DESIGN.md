@@ -999,6 +999,21 @@ it on the PR.
 for the config: `pipeline.config.json` is author-only by the rows above, so the repair that
 looks obvious from inside the run is the one that takes the run down with it.
 
+**A value in the config may be a `${NAME}` reference to the project's environment**, and the
+ids that identify the author's accounts are kept that way in a public project repository: the
+state store's URL carries the Cloudflare account's subdomain, and the tracker's team, project
+and actor ids are the author's Linear workspace. Neither is a secret, so they are Actions
+variables, which only the repository's collaborators can read, and every stub and the project's
+`ci.yml` hand them over in one environment block. The form is braces-only, so a dollar in a gate
+command is not a reference by accident, and a reference to a variable that is unset or empty
+fails the load, naming the variable, rather than decoding to "": a workflow passes an uncreated
+variable as the empty string, and a config that accepted it would fail later at the tracker,
+about a project that does not exist, which is the quieter failure. Validation runs before every
+command, so a stub missing the block fails at its first `pipeline` call and says why. The
+three commands that read the checkout and talk to nothing (`reasons`, `schema`, `non-asks`)
+keep an unset reference as written instead, so an author's laptop, which holds none of the
+ids, can still ask what a rule's reason is.
+
 **The branch name carries the issue key** (Linear's suggested branch name format works as-is),
 and the PR URL is recorded on the issue when the draft opens. Linear's auto-linking makes this
 feel free, but it is a requirement rather than a habit: every trigger that maps a PR event to a

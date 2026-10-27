@@ -57,6 +57,15 @@ concurrency:
   group: pipeline-control-plane
   cancel-in-progress: false
 
+# The config's `${NAME}` references (DESIGN §5): the ids that identify the
+# author's accounts are Actions variables, not lines in a public tree. A
+# reference to a variable left unset fails the first `pipeline` call by name.
+env:
+  PIPELINE_STATE_URL: ${{ vars.PIPELINE_STATE_URL }}
+  LINEAR_TEAM_ID: ${{ vars.LINEAR_TEAM_ID }}
+  LINEAR_PROJECT_ID: ${{ vars.LINEAR_PROJECT_ID }}
+  LINEAR_AUTHOR_ID: ${{ vars.LINEAR_AUTHOR_ID }}
+
 jobs:
   sweep:
     # The kill switch stops the job, not just the work inside it.

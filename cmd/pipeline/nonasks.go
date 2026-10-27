@@ -52,7 +52,7 @@ func cmdNonAsks(args []string) error {
 	if *forScope == "" && !*all {
 		return fmt.Errorf("non-asks: --for <scope> or --all (a query with neither is the whole file, which the prompt already gave you a slice of)")
 	}
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.LoadUnresolved(*cfgPath)
 	if err != nil {
 		return err
 	}
