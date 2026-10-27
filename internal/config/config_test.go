@@ -448,3 +448,22 @@ func TestEnvironmentReferencesAreEscapedAndBracesOnly(t *testing.T) {
 		t.Errorf("unchecked = %q", got)
 	}
 }
+
+// The read-only commands keep an unset reference as written rather than
+// refusing: an author's laptop holds none of the tracker ids a workflow
+// does, and `pipeline reasons` needs the checkout alone.
+func TestLoadUnresolvedKeepsAnUnsetReference(t *testing.T) {
+	os.Unsetenv("LINEAR_PROJECT_ID_FOR_THIS_TEST")
+	m := sampleAsMap(t)
+	m["tracker"] = map[string]any{"teamId": "team_sample", "projectId": "${LINEAR_PROJECT_ID_FOR_THIS_TEST}"}
+	c, err := LoadUnresolved(writeConfig(t, m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Tracker.ProjectID != "${LINEAR_PROJECT_ID_FOR_THIS_TEST}" {
+		t.Errorf("tracker.projectId = %q", c.Tracker.ProjectID)
+	}
+	if _, err := Load(writeConfig(t, m)); err == nil {
+		t.Error("Load accepted the same unset reference")
+	}
+}

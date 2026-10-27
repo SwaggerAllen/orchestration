@@ -1009,7 +1009,10 @@ command is not a reference by accident, and a reference to a variable that is un
 fails the load, naming the variable, rather than decoding to "": a workflow passes an uncreated
 variable as the empty string, and a config that accepted it would fail later at the tracker,
 about a project that does not exist, which is the quieter failure. Validation runs before every
-command, so a stub missing the block fails at its first `pipeline` call and says why.
+command, so a stub missing the block fails at its first `pipeline` call and says why. The
+three commands that read the checkout and talk to nothing (`reasons`, `schema`, `non-asks`)
+keep an unset reference as written instead, so an author's laptop, which holds none of the
+ids, can still ask what a rule's reason is.
 
 **The branch name carries the issue key** (Linear's suggested branch name format works as-is),
 and the PR URL is recorded on the issue when the draft opens. Linear's auto-linking makes this

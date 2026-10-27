@@ -271,12 +271,22 @@ func (d Duration) Duration() time.Duration { return time.Duration(d) }
 // Load reads and validates a config file. Unknown fields are rejected —
 // a typo that silently deserializes to a zero value is exactly the quiet
 // failure this file must not have.
-func Load(path string) (*Config, error) {
+func Load(path string) (*Config, error) { return load(path, true) }
+
+// LoadUnresolved is Load for a command that reads the checkout and talks
+// to nothing: `reasons`, `schema`, `non-asks`. A `${NAME}` whose variable
+// is unset stays as written instead of refusing the load, so an author
+// running `pipeline reasons delivery#17` from a laptop is not asked for
+// the tracker ids a workflow holds. Every command that would use a value
+// loads with Load, where the refusal is.
+func LoadUnresolved(path string) (*Config, error) { return load(path, false) }
+
+func load(path string, strict bool) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	raw, err = expandEnvReferences(raw)
+	raw, err = expandEnvReferences(raw, strict)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -506,8 +516,9 @@ var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 // into tracker.projectId would pass the non-empty validation on the
 // literal `${LINEAR_PROJECT_ID}` of an older binary, or fail at the first
 // tracker call with a message about a project that does not exist. Both
-// are a quieter failure than refusing to load.
-func expandEnvReferences(raw []byte) ([]byte, error) {
+// are a quieter failure than refusing to load. With strict false an
+// unset reference is left as written (LoadUnresolved).
+func expandEnvReferences(raw []byte, strict bool) ([]byte, error) {
 	var missing []string
 	out := envReference.ReplaceAllFunc(raw, func(ref []byte) []byte {
 		name := string(envReference.FindSubmatch(ref)[1])
@@ -522,7 +533,7 @@ func expandEnvReferences(raw []byte) ([]byte, error) {
 		quoted, _ := json.Marshal(value)
 		return quoted[1 : len(quoted)-1]
 	})
-	if len(missing) > 0 {
+	if len(missing) > 0 && strict {
 		slices.Sort(missing)
 		missing = slices.Compact(missing)
 		return nil, fmt.Errorf("environment variables referenced by the config are not set: %s", strings.Join(missing, ", "))
