@@ -864,6 +864,20 @@ step 5 already covered them.
    repo to its access list), Cloudflare pair,
    `DIGITALOCEAN_TOKEN` if DO-deployed or `RENDER_API_KEY` if
    Render-deployed. Same two settings toggles.
+
+   **And the five the config reads through `${NAME}`** (DESIGN §5),
+   as secrets rather than variables because a public repository's run
+   logs print each step's environment and mask only secrets:
+   `PIPELINE_STATE_URL` (the Worker's origin, step 7's URL),
+   `LINEAR_TEAM_ID` and `LINEAR_PROJECT_ID` (the team and this
+   project's id, off Linear's project settings), `LINEAR_AUTHOR_ID`
+   (your Linear user id, the config's `author` and `controlplane`
+   actor) and, for a Render project, `RENDER_SERVICE_ID` (the `srv-…`
+   id the config's `deploy.endpoint` names). The stubs hand them over
+   in one top-level `env:` block, and the first `pipeline` command run
+   with one missing fails at config load naming it, which is how a
+   forgotten one shows up: as a red `select` check on the project's
+   next PR, not as a wrong tracker call.
 5. Pages project: Actions → **pipeline-pages-provision** → Run
    workflow, once. It creates the project named in that repo's config.
 
@@ -1000,7 +1014,7 @@ audience is what keeps a token minted elsewhere in the account out.
 | Where | Name |
 |---|---|
 | dummy repo Actions secrets | `LINEAR_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and/or `ANTHROPIC_API_KEY`, `PIPELINE_REPO_TOKEN`, `CLOUDFLARE_API_TOKEN` (Pages only), `CLOUDFLARE_ACCOUNT_ID` |
-| project repo Actions secrets | the dummy repo's set, plus `PIPELINE_STATE_TOKEN` and — with step 9 wired — `STATS_GITHUB_TOKEN` |
+| project repo Actions secrets | the dummy repo's set, plus `PIPELINE_STATE_TOKEN`, the five the config reads through `${NAME}` (`PIPELINE_STATE_URL`, `LINEAR_TEAM_ID`, `LINEAR_PROJECT_ID`, `LINEAR_AUTHOR_ID`, `RENDER_SERVICE_ID` where Render-deployed) and — with step 9 wired — `STATS_GITHUB_TOKEN` |
 | pipeline repo Actions secrets | `LINEAR_API_KEY`, `CLOUDFLARE_WORKERS_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `REHEARSAL_REPO_TOKEN` |
 | Cloudflare Worker secrets | `DISPATCH_TOKEN`, `LINEAR_WEBHOOK_SECRET`, `WEBHOOK_SECRET`, `STATE_TOKEN` — all four set on the Worker by hand (the first three in the dashboard, step 7; `STATE_TOKEN` per the move record, below). Every deploy carries them forward; none uploads them |
 
