@@ -43,12 +43,15 @@ A project also needs:
   architecture doc into `systems/*.md` with file maps and stub the
   `screens/*.md` docs (DESIGN §4)
 - `pipeline.config.json` at the repo root (see `examples/pipeline.config.json`)
-- Actions variables `PIPELINE_STATE_URL`, `LINEAR_TEAM_ID`,
-  `LINEAR_PROJECT_ID` and `LINEAR_AUTHOR_ID`, which the config names as
-  `${NAME}` references (DESIGN §5) so that a public repository's tree
-  carries neither the Worker subdomain nor the author's Linear ids. Every
-  stub that runs `pipeline` hands them over in one top-level `env:`
-  block, and your `ci.yml`'s pipeline-audit step needs the same block
+- Actions secrets `PIPELINE_STATE_URL`, `LINEAR_TEAM_ID`,
+  `LINEAR_PROJECT_ID`, `LINEAR_AUTHOR_ID` and, for a Render project,
+  `RENDER_SERVICE_ID`, which the config names as `${NAME}` references
+  (DESIGN §5) so that a public repository's tree carries neither the
+  Worker subdomain nor the author's ids; secrets rather than variables
+  because a public repository's run logs print each step's environment
+  and mask only secrets. Every stub that runs `pipeline` hands them over
+  in one top-level `env:` block, and your `ci.yml`'s pipeline-audit step
+  needs the same block
 - Actions secret `PIPELINE_STATE_TOKEN`, matching the metronome
   Worker's `STATE_TOKEN`, plus a `state` block in `pipeline.config.json`
   naming the Worker's URL and this project's object. This is the

@@ -645,11 +645,13 @@ to each `pipeline.config.json`:
 
 with `PIPELINE_STATE_URL` set to
 `https://pipeline-metronome.<your-subdomain>.workers.dev` as an Actions
-variable on the project repo (Settings → Secrets and variables →
-Actions → Variables). A `${NAME}` in the config is read from the
-environment when it loads (DESIGN §5), which keeps the subdomain out of
-a public repository's tree; the stubs hand the variables over, and a
-reference to a variable that is unset fails the load naming it.
+secret on the project repo (Settings → Secrets and variables →
+Actions → Secrets; a secret rather than a variable because a public
+repository's run logs print each step's environment and mask only
+secrets). A `${NAME}` in the config is read from the environment when
+it loads (DESIGN §5), which keeps the subdomain out of a public
+repository's tree; the stubs hand the secrets over, and a reference to
+one that is unset fails the load naming it.
 
 Two projects sharing that name share a row per ticket id, so pick it
 deliberately — the repository name is the obvious choice.
@@ -761,8 +763,9 @@ step 5 already covered them.
 2. Project repo: copy the stubs from `examples/stubs/`, add a
    `pipeline.config.json` with that project's `projectId` (same
    `teamId`) — as `${LINEAR_PROJECT_ID}` and `${LINEAR_TEAM_ID}` read
-   from the repo's Actions variables when the repo is public, with the
-   `actors` ids the same way — its own `designOwnedPaths`, `componentPaths`, gates,
+   from the repo's Actions secrets when the repo is public, with the
+   `actors` ids and a Render service id the same way — its own
+   `designOwnedPaths`, `componentPaths`, gates,
    deploy provider (`render` for a Render service, `digitalocean` for a
    real DO app) and preview
    project.
