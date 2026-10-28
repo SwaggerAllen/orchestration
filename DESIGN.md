@@ -1002,12 +1002,14 @@ looks obvious from inside the run is the one that takes the run down with it.
 **A value in the config may be a `${NAME}` reference to the project's environment**, and the
 ids that identify the author's accounts are kept that way in a public project repository: the
 state store's URL carries the Cloudflare account's subdomain, and the tracker's team, project
-and actor ids are the author's Linear workspace. Neither is a secret, so they are Actions
-variables, which only the repository's collaborators can read, and every stub and the project's
-`ci.yml` hand them over in one environment block. The form is braces-only, so a dollar in a gate
+and actor ids are the author's Linear workspace, and a Render project's service id is the
+same kind of thing. They are held as Actions secrets rather than variables, not because they
+are secret but because a public repository's run logs print each step's environment and mask
+only secrets, so a variable would put the ids straight back in the open; every stub and the
+project's `ci.yml` hand them over in one environment block. The form is braces-only, so a dollar in a gate
 command is not a reference by accident, and a reference to a variable that is unset or empty
 fails the load, naming the variable, rather than decoding to "": a workflow passes an uncreated
-variable as the empty string, and a config that accepted it would fail later at the tracker,
+secret as the empty string, and a config that accepted it would fail later at the tracker,
 about a project that does not exist, which is the quieter failure. Validation runs before every
 command, so a stub missing the block fails at its first `pipeline` call and says why. The
 three commands that read the checkout and talk to nothing (`reasons`, `schema`, `non-asks`)
