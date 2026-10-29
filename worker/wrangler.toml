@@ -51,6 +51,12 @@ PROJECTS = '''[
     "workflow": "pipeline-sweep.yml",
     "ref": "main",
     "trackerProject": "2bdba291-161c-4cf4-bbe2-6eab216a2985"
+  },
+  {
+    "repository": "swaggerallen/oneiroi",
+    "workflow": "pipeline-sweep.yml",
+    "ref": "main",
+    "trackerProject": "52912951-94a7-4803-b430-67b10da55523"
   }
 ]'''
 
